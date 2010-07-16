@@ -1,4 +1,4 @@
-CXXFLAGS=-O3 -DNDEBUG
+CXXFLAGS=-O3 -DNDEBUG -fopenmp
 #CXXFLAGS=-g
 
 canupo: canupo.cpp Makefile
