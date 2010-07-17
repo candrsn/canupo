@@ -27,6 +27,8 @@ typedef float FloatType;
 
 typedef array<FloatType, 3> Point;
 
+const int svgSize=800;
+
 inline FloatType point_dist(const Point& a, const Point& b) {
     return sqrt(
         (a[0]-b[0])*(a[0]-b[0])
@@ -59,18 +61,16 @@ string hueToRGBstring(FloatType hue) {
     }
     else if (hue < 5.0f) {
         b=255; g=0;
-cout << "ha!" << endl;
         r = (int)(255.99f * (hue-4.0f));
-cout << r << endl;
     }
     else {
         r=255; g=0;
         b = (int)(255.99f * (6.0f-hue));
     }
     char ret[8];
-cout << hue << " " << r << " " << g << " " << b << " ";
+//cout << hue << " " << r << " " << g << " " << b << " ";
     snprintf(ret,8,"#%02X%02X%02X",r,g,b);
-cout << ret << endl;
+//cout << ret << endl;
     return ret;
 /*    stringstream ss;
     ss << "#" << hex << r << g << b;
@@ -79,6 +79,8 @@ cout << ret << endl;
 
 string scaleColorMap(int density, int mind, int maxd) {
     FloatType d = (density - mind) / FloatType(maxd - mind);
+    // log transform ?
+    d = sqrt(sqrt(d));
     // low value = blue(hue=4/6), high = red(hue=0)
     return hueToRGBstring(FloatType(4)/FloatType(6)*(1-d));
 }
@@ -254,21 +256,24 @@ int main(int argc, char** argv) {
         if (*it>maxDensity) maxDensity = *it;
     }
     ofstream densityfile("dimdensity.svg");
-    densityfile << "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\""<< ndensitycells << "\" height=\""<< ndensitycells*sqrt(3)/2 <<"\" >" << endl;
+    densityfile << "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\""<< svgSize << "\" height=\""<< svgSize*sqrt(3)/2 <<"\" >" << endl;
 
+    FloatType scaleFactor = svgSize / FloatType(ndensitycells);
+    FloatType top = svgSize*sqrt(3)/2;
+    
     for (int x=0; x<ndensitycells; ++x) for (int y=0; y<=x; ++y) {
         // lower cell coordinates
         densityfile << "<polygon points=\"";
-        densityfile << " " << (x - 0.5*y) << "," << (0.866025403784439 * y);
-        densityfile << " " << (x+1 - 0.5*y) << "," << (0.866025403784439 * y);
-        densityfile << " " << (x+1 - 0.5*(y+1)) << "," << (0.866025403784439 * (y+1));
+        densityfile << " " << (x - 0.5*y)*scaleFactor << "," << top-(0.866025403784439 * y)*scaleFactor;
+        densityfile << " " << (x+1 - 0.5*y)*scaleFactor << "," << top-(0.866025403784439 * y)*scaleFactor;
+        densityfile << " " << (x+1 - 0.5*(y+1))*scaleFactor << "," << top-(0.866025403784439 * (y+1))*scaleFactor;
         string color = scaleColorMap(density[(x*(x+1)/2+ y)*2],minDensity,maxDensity);
         densityfile << "\" style=\"fill:" << color << "; stroke:none;\"/>" << endl;
         if (y<x) { // upper cell
             densityfile << "<polygon points=\"";
-            densityfile << " " << (x - 0.5*y) << "," << (0.866025403784439 * y);
-            densityfile << " " << (x+1 - 0.5*(y+1)) << "," << (0.866025403784439 * (y+1));
-            densityfile << " " << (x - 0.5*(y+1)) << "," << (0.866025403784439 * (y+1));
+            densityfile << " " << (x - 0.5*y)*scaleFactor << "," << top-(0.866025403784439 * y)*scaleFactor;
+            densityfile << " " << (x+1 - 0.5*(y+1))*scaleFactor << "," << top-(0.866025403784439 * (y+1))*scaleFactor;
+            densityfile << " " << (x - 0.5*(y+1))*scaleFactor << "," << top-(0.866025403784439 * (y+1))*scaleFactor;
             color = scaleColorMap(density[(x*(x+1)/2+ y)*2+1],minDensity,maxDensity);
             densityfile << "\" style=\"fill:" << color << "; stroke:none;\"/>" << endl;
         }
