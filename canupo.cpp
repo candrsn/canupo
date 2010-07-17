@@ -27,8 +27,6 @@ typedef float FloatType;
 
 typedef array<FloatType, 3> Point;
 
-const int svgSize=800;
-
 inline FloatType point_dist(const Point& a, const Point& b) {
     return sqrt(
         (a[0]-b[0])*(a[0]-b[0])
@@ -39,51 +37,6 @@ inline FloatType point_dist(const Point& a, const Point& b) {
 
 CNearTree<Point, FloatType, &point_dist> data;
 typedef CNearTree<Point, FloatType, &point_dist>::Sequence Sequence;
-
-string hueToRGBstring(FloatType hue) {
-    hue = 6.0f * (hue - floorf(hue)); // 0 <= hue < 1
-    int r,g,b;
-    if (hue < 1.0f) {
-        r=255; b=0;
-        g = (int)(255.99f * hue);
-    }
-    else if (hue < 2.0f) {
-        g=255; b=0;
-        r = (int)(255.99f * (2.0f-hue));
-    }
-    else if (hue < 3.0f) {
-        g=255; r=0;
-        b = (int)(255.99f * (hue-2.0f));
-    }
-    else if (hue < 4.0f) {
-        b=255; r=0;
-        g = (int)(255.99f * (4.0f-hue));
-    }
-    else if (hue < 5.0f) {
-        b=255; g=0;
-        r = (int)(255.99f * (hue-4.0f));
-    }
-    else {
-        r=255; g=0;
-        b = (int)(255.99f * (6.0f-hue));
-    }
-    char ret[8];
-//cout << hue << " " << r << " " << g << " " << b << " ";
-    snprintf(ret,8,"#%02X%02X%02X",r,g,b);
-//cout << ret << endl;
-    return ret;
-/*    stringstream ss;
-    ss << "#" << hex << r << g << b;
-    return ss.str();*/
-}
-
-string scaleColorMap(int density, int mind, int maxd) {
-    FloatType d = (density - mind) / FloatType(maxd - mind);
-    // log transform ?
-    d = sqrt(sqrt(d));
-    // low value = blue(hue=4/6), high = red(hue=0)
-    return hueToRGBstring(FloatType(4)/FloatType(6)*(1-d));
-}
 
 int main(int argc, char** argv) {
 
@@ -115,13 +68,6 @@ int main(int argc, char** argv) {
     }
     datafile.close();
 
-    // in case of totally uniform distribution, plan for 10 points per cell on average
-    // ncells = ndensitycells*ndensitycells and npts = 10 * ncells;
-    int ndensitycells = sqrt(npts/10);
-    if (ndensitycells<2) ndensitycells = 2; // at least 1 subdivision
-    if (ndensitycells>100) ndensitycells = 100; // too much isn't visible, better build better stats with more points per cell
-    vector<int> density(ndensitycells*(ndensitycells+1), 0);
-    
     FloatType radius = 0;
 
     if (argc>2) radius = atof(argv[2]);
@@ -154,7 +100,7 @@ int main(int argc, char** argv) {
         }
 #if defined(_OPENMP)
         }}
-#endif        
+#endif
         cout << "Using a radius of " << radius << endl;
     }
 
@@ -222,86 +168,17 @@ int main(int argc, char** argv) {
 
         //abfile << svalues[0] << " " << svalues[1] << endl;
         abfile << a << " " << b << endl;
-        
-        // Density plot of (a,b) points: discretize the triangle and count how many points are in each cell
-        // Transform (a,b) such that equilateral triangle goes to triangle with right angle (0,0) (1,0) (0,1)
-        FloatType c = ndensitycells * (a + 0.577350269189626 * b); // sqrt(3)/3
-        FloatType d = ndensitycells * (1.154700538379252 * b);     // sqrt(3)*2/3
-        int cellx = (int)floor(c);
-        int celly = (int)floor(d);
-        int lower = (c - cellx) > (d - celly);
-        if (cellx>=ndensitycells) {cellx=ndensitycells-1; lower = 1;}
-        if (cellx<0) {cellx=0; lower = 1;}
-        if (celly>=ndensitycells) {celly=ndensitycells-1; lower = 1;} // upper triangle cell = lower one
-        if (celly<0) {celly=0; lower = 1;}
-        if (celly>cellx) {celly=cellx; lower = 1;}
-        //int idx = ((cellx * (cellx+1) / 2) + celly) * 2 + lower;
-        ++density[((cellx * (cellx+1) / 2) + celly) * 2 + lower];
-        
+
         FloatType R = 255 - int(floor(sqrt( a*a + b*b)*255.9999));
         FloatType G = 255 - int(floor(sqrt( (a-1)*(a-1) + b*b)*255.9999));
         FloatType B = 255 - int(floor(sqrt( (a-0.5)*(a-0.5) + (b-0.866025403784439)*(b-0.866025403784439))*255.9999));
         annotatedfile << (*p)[0] << " " << (*p)[1] << " " << (*p)[2] << " " << R << " " << G << " " << B << endl;
 #if defined(_OPENMP)
     }
-#endif        
+#endif
     }
     abfile.close();
-    annotatedfile.close();    
+    annotatedfile.close();
 
-    
-    int minDensity = npts, maxDensity = 0;
-    for (vector<int>::iterator it = density.begin(); it != density.end(); ++it) {
-        if (*it<minDensity) minDensity = *it;
-        if (*it>maxDensity) maxDensity = *it;
-    }
-    ofstream densityfile("dimdensity.svg");
-    densityfile << "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\""<< svgSize << "\" height=\""<< svgSize*sqrt(3)/2 <<"\" >" << endl;
-
-    FloatType scaleFactor = svgSize / FloatType(ndensitycells);
-    FloatType top = svgSize*sqrt(3)/2;
-    
-    for (int x=0; x<ndensitycells; ++x) for (int y=0; y<=x; ++y) {
-        // lower cell coordinates
-        densityfile << "<polygon points=\"";
-        densityfile << " " << (x - 0.5*y)*scaleFactor << "," << top-(0.866025403784439 * y)*scaleFactor;
-        densityfile << " " << (x+1 - 0.5*y)*scaleFactor << "," << top-(0.866025403784439 * y)*scaleFactor;
-        densityfile << " " << (x+1 - 0.5*(y+1))*scaleFactor << "," << top-(0.866025403784439 * (y+1))*scaleFactor;
-        string color = scaleColorMap(density[(x*(x+1)/2+ y)*2],minDensity,maxDensity);
-        densityfile << "\" style=\"fill:" << color << "; stroke:none;\"/>" << endl;
-        if (y<x) { // upper cell
-            densityfile << "<polygon points=\"";
-            densityfile << " " << (x - 0.5*y)*scaleFactor << "," << top-(0.866025403784439 * y)*scaleFactor;
-            densityfile << " " << (x+1 - 0.5*(y+1))*scaleFactor << "," << top-(0.866025403784439 * (y+1))*scaleFactor;
-            densityfile << " " << (x - 0.5*(y+1))*scaleFactor << "," << top-(0.866025403784439 * (y+1))*scaleFactor;
-            color = scaleColorMap(density[(x*(x+1)/2+ y)*2+1],minDensity,maxDensity);
-            densityfile << "\" style=\"fill:" << color << "; stroke:none;\"/>" << endl;
-        }
-    }
-    densityfile << "</svg>" << endl;
-    densityfile.close();
-    
-    
-    //5.0f * (2.0f - scaledDComp) / 6.0f
-    
-/*  // Triangular mesh: difficult to plot the density with typical software
-    ofstream densityfile("dimdensity.txt");
-    for (int x=0; x<ndensitycells; ++x) for (int y=0; y<=x; ++y) {
-        // lower cell
-        FloatType c = (x + 0.666666666666667)/FloatType(ndensitycells);
-        FloatType d = (y + 0.333333333333333)/FloatType(ndensitycells);
-        FloatType a = c - 0.5 * d;
-        FloatType b = 0.866025403784439 * d;
-        densityfile << a << " " << b << " " << density[(x*(x+1)/2+ y)*2] << endl;
-        if (y<x) { // upper cell
-            c = (x + 0.333333333333333)/FloatType(ndensitycells);
-            d = (y + 0.666666666666667)/FloatType(ndensitycells);
-            a = c - 0.5 * d;
-            b = 0.866025403784439 * d;
-            densityfile << a << " " << b << " " << density[(x*(x+1)/2+ y)*2 + 1] << endl;
-        }
-    }
-    densityfile.close();
-*/
     return 0;
 }
