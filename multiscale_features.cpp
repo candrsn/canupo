@@ -1,8 +1,5 @@
 #include <iostream>
 #include <fstream>
-#include <sstream>
-#include <cmath>
-#include <cstdio>
 
 #include "points.hpp"
 #include "svd.hpp"
@@ -19,7 +16,7 @@ CNearTree<Point, FloatType, &point_dist> data;
 int main(int argc, char** argv) {
 
     if (argc<4) {
-        cout << "Argument required: bintree_data_file feature_output_file radius1 [radius2...]" << endl;
+        cout << "Argument required: bintree_data_file binary_feature_output_file radius1 [radius2...]" << endl;
         return 0;
     }
 
@@ -34,13 +31,17 @@ int main(int argc, char** argv) {
     data.load(bintreefile);
     bintreefile.close();
     
-    ofstream featuresfile(argv[2]);
-    featuresfile.precision(10);
-
+    ofstream featuresfile(argv[2], ofstream::binary);
+    
     int npts = 0;
     Sequence seq = data.sequence();
     while (seq.hasNext()) {++npts; seq.next();}
-    
+
+    // some informative file header
+    featuresfile.write(reinterpret_cast<char*>(&npts), sizeof(int));
+    int fdim = nrad * 2; // only a and b now, possibly more later
+    featuresfile.write(reinterpret_cast<char*>(&nrad), sizeof(int));
+
     // compute PCA on the neighbors at this radius
     int ptidx = -1;
     
@@ -51,7 +52,10 @@ int main(int argc, char** argv) {
         Point* p = seq.next();
         ++ptidx;
 
-//        featuresfile << (*p)[0] << " " << (*p)[1] << " " << (*p)[2];
+        // this is so we can recover the data set even with the tree ordering
+        featuresfile.write(reinterpret_cast<char*>(&(*p)[0]), sizeof(FloatType));
+        featuresfile.write(reinterpret_cast<char*>(&(*p)[1]), sizeof(FloatType));
+        featuresfile.write(reinterpret_cast<char*>(&(*p)[2]), sizeof(FloatType));
         
         for (int radi = 0; radi<nrad; ++radi) {
             FloatType radius = radiusvec[radi];
@@ -92,10 +96,10 @@ int main(int argc, char** argv) {
             featavg[radi*2] += a;
             featavg[radi*2+1] += b;
             
-            featuresfile << " " << a << " " << b;
-            featuresfile << endl;
-            //featmat(radi*2,ptidx) = a;
-            //featmat(radi*2+1,ptidx) = b;
+            featuresfile.write(reinterpret_cast<char*>(&a), sizeof(FloatType));
+            featuresfile.write(reinterpret_cast<char*>(&b), sizeof(FloatType));
+            //featuresfile << " " << a << " " << b;
+            //featuresfile << endl;
         }
         
     }
