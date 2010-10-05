@@ -79,7 +79,8 @@ int main(int argc, char** argv) {
         // ncells = nsubdiv*nsubdiv and npts = 10 * ncells;
         nsubdiv = sqrt(npts/10);
         if (nsubdiv<2) nsubdiv = 2; // at least 1 subdivision
-        if (nsubdiv>100) nsubdiv = 100; // too much isn't visible, better build better stats with more points per cell
+        if (nsubdiv>150) nsubdiv = 150; // too much isn't visible, better build better stats with more points per cell
+        cout << "Using " << nsubdiv << " subdivisions" << endl;
     }
     vector<int> density(nsubdiv*(nsubdiv+1), 0);
 

@@ -4,14 +4,12 @@
 #include <cmath>
 #include <cstdio>
 
-#include <boost/array.hpp>
-//#include <boost/numeric/ublas/vector.hpp>
 #include <boost/numeric/ublas/matrix.hpp>
 #include <boost/numeric/bindings/lapack/gesvd.hpp>
 #include <boost/numeric/bindings/traits/ublas_matrix.hpp>
 #include <boost/numeric/bindings/traits/std_vector.hpp>
 
-#include "TNear.hpp"
+#include "points.hpp"
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -23,50 +21,18 @@ namespace lapack = boost::numeric::bindings::lapack;
 using namespace std;
 using namespace boost;
 
-typedef float FloatType;
-
-typedef array<FloatType, 3> Point;
-
-inline FloatType point_dist(const Point& a, const Point& b) {
-    return sqrt(
-        (a[0]-b[0])*(a[0]-b[0])
-      + (a[1]-b[1])*(a[1]-b[1])
-      + (a[2]-b[2])*(a[2]-b[2])
-    );
-}
-
 CNearTree<Point, FloatType, &point_dist> data;
-typedef CNearTree<Point, FloatType, &point_dist>::Sequence Sequence;
 
 int main(int argc, char** argv) {
 
     if (argc<2) {
-        cout << "Argument required: data_file [radius]" << endl;
+        cout << "Argument required: bintree_data_file [radius]" << endl;
         return 0;
     }
 
-    ifstream datafile(argv[1]);
-    string line;
-    int npts = 0;
-    while (datafile && !datafile.eof()) {
-        getline(datafile, line);
-        if (line.empty()) continue;
-        stringstream linereader(line);
-        Point point;
-        FloatType value;
-        int i = 0;
-        while (linereader >> value) {
-            point[i] = value;
-            if (++i==3) break;
-        }
-        if (i!=3) {
-            cout << "invalid data file" << endl;
-            return 1;
-        }
-        data.Insert(point);
-        ++npts;
-    }
-    datafile.close();
+    ifstream bintreefile(argv[1], ifstream::binary);
+    data.load(bintreefile);
+    bintreefile.close();
 
     FloatType radius = 0;
 
@@ -172,7 +138,7 @@ int main(int argc, char** argv) {
         FloatType R = 255 - int(floor(sqrt( a*a + b*b)*255.9999));
         FloatType G = 255 - int(floor(sqrt( (a-1)*(a-1) + b*b)*255.9999));
         FloatType B = 255 - int(floor(sqrt( (a-0.5)*(a-0.5) + (b-0.866025403784439)*(b-0.866025403784439))*255.9999));
-        annotatedfile << (*p)[0] << " " << (*p)[1] << " " << (*p)[2] << " " << R << " " << G << " " << B << endl;
+        annotatedfile << (*p)[0] << " " << (*p)[1] << " " << (*p)[2] << " " << R << " " << G << " " << B << " " << sqrt(svalues[2]) << endl;
 #if defined(_OPENMP)
     }
 #endif

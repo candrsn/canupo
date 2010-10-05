@@ -143,6 +143,7 @@
 
 #include <limits>
 #include <cmath>
+#include <iostream>
 #include <vector>
 
 // Some template meta-programming to compute the distance between two elements
@@ -779,6 +780,52 @@ public:
 
     Sequence sequence() {
         return Sequence(this);
+    }
+
+    // save/restore the tree in a binary file.
+    // - faster than building the tree again and again
+    // - faster than ascii loads
+    // WARNING: the object type T is written in raw binary, caution required when there are pointers, etc.
+    // stream shall be opened in binary mode
+    void save(std::ofstream& s) {
+        // TODO: check/assert if binary mode is really there
+        s.write(reinterpret_cast<char*>(&m_dMaxLeft),sizeof(NumericType));
+        s.write(reinterpret_cast<char*>(&m_dMaxRight),sizeof(NumericType));
+        char flags = (m_ptLeft!=0) | ((m_ptRight!=0) << 1) | ((m_pLeftBranch!=0) << 2) | ((m_pRightBranch!=0) << 3);
+        s.write(&flags,sizeof(char));
+        if (m_ptLeft!=0) s.write(reinterpret_cast<char*>(m_ptLeft),sizeof(T));
+        if (m_ptRight!=0) s.write(reinterpret_cast<char*>(m_ptRight),sizeof(T));        
+        if (m_pLeftBranch) m_pLeftBranch->save(s);
+        if (m_pRightBranch) m_pRightBranch->save(s);
+    }
+    void load(std::ifstream& s) {
+        if (m_pLeftBranch) {delete m_pLeftBranch;  m_pLeftBranch=0;}
+        if (m_pRightBranch) {delete m_pRightBranch; m_pRightBranch=0;}
+        if (m_ptLeft) {delete m_ptLeft; m_ptLeft=0;}
+        if (m_ptRight) {delete m_ptRight; m_ptRight=0;}
+        // TODO: check/assert if binary mode is really there
+        s.read(reinterpret_cast<char*>(&m_dMaxLeft),sizeof(NumericType));
+        s.read(reinterpret_cast<char*>(&m_dMaxRight),sizeof(NumericType));
+        char flags;
+        s.read(&flags,sizeof(char));
+        if (flags&1) {
+            char buffer[sizeof(T)];
+            s.read(buffer,sizeof(T));
+            m_ptLeft = new T(*reinterpret_cast<T*>(buffer));            
+        }
+        if (flags&2) {
+            char buffer[sizeof(T)];
+            s.read(buffer,sizeof(T));
+            m_ptRight = new T(*reinterpret_cast<T*>(buffer));            
+        }
+        if (flags&4) {
+            m_pLeftBranch = new CNearTree();
+            m_pLeftBranch->load(s);
+        }
+        if (flags&8) {
+            m_pRightBranch = new CNearTree();
+            m_pRightBranch->load(s);
+        }
     }
 
 }; // template class TNear
