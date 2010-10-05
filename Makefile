@@ -4,8 +4,8 @@ CXX=g++
 
 all: canupo density xyz_to_bintree
 
-multiscale_features:
-	$(CXX) $(CXXFLAGS) multiscale_features.cpp -llapack -o multiscale_features
+multiscale_123D:
+	$(CXX) $(CXXFLAGS) multiscale_123D.cpp -llapack -o multiscale_123D
 
 canupo:
 	$(CXX) $(CXXFLAGS) -Iboost-numeric-bindings canupo.cpp -llapack -o canupo
@@ -19,5 +19,5 @@ density: density.cpp
 clean:
 	rm -f canupo density
 
-.PHONY: canupo xyz_to_bintree multiscale_features
+.PHONY: canupo xyz_to_bintree multiscale_123D
 

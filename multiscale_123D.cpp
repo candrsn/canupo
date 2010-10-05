@@ -44,8 +44,6 @@ int main(int argc, char** argv) {
 
     // compute PCA on the neighbors at this radius
     int ptidx = -1;
-    
-    vector<FloatType> featavg(nrad*2, 0);
 
     seq = data.sequence();
     while (seq.hasNext()) {
@@ -92,9 +90,6 @@ int main(int argc, char** argv) {
             FloatType a = 0.5 * svalues[0] + 2.5 * svalues[1] - 0.5;
             // 3 * sqrt(3) / 2
             FloatType b = -2.59807621135332 * (svalues[0] + svalues[1] - 1);
-
-            featavg[radi*2] += a;
-            featavg[radi*2+1] += b;
             
             featuresfile.write(reinterpret_cast<char*>(&a), sizeof(FloatType));
             featuresfile.write(reinterpret_cast<char*>(&b), sizeof(FloatType));
