@@ -29,6 +29,18 @@ extern "C" {
 // S shall be an array of size N. It will be filled with the square roots of the eigenvalues, in decreasing order
 // B shall be either null or a NxN column-major matrix
 // - if B is not null, each row will be filled with one eigenvector of ( A.transpose() * A )
+//
+// In octave / matlab
+//   Aori = (Ares .* S) * b'
+// but b = inv(b') as it is unitary vects
+//   Aori * b = Ares .* S
+// thus
+//   Ares = (Aori * b) ./ S
+// 
+// So it is now easy to project an unknown observation in the principal component space
+// - divide each column of B by entries in S
+// - multiply the new observation (as a row vector) by the B matrix
+
 void svd(int nrows, int ncols, double* A, double* S, bool projectObservations = false, double* B = 0) {
     int info = 0;
     double Dummy; int ld_Dummy = 1;
