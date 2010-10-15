@@ -95,9 +95,15 @@ int main(int argc, char** argv) {
         linereader >> b;
 
         // Density plot of (a,b) points: discretize the triangle and count how many points are in each cell
-        // Transform (a,b) such that equilateral triangle goes to triangle with right angle (0,0) (1,0) (0,1)
-        FloatType c = nsubdiv * (a + 0.577350269189626 * b); // sqrt(3)/3
-        FloatType d = nsubdiv * (1.154700538379252 * b);     // sqrt(3)*2/3
+        
+        // Old ab def
+        // Transform (a,b) such that equilateral triangle goes to triangle with right angle (0,0) (1,0) (1,1)
+        // FloatType c = nsubdiv * (a + 0.577350269189626 * b); // sqrt(3)/3
+        // FloatType d = nsubdiv * (1.154700538379252 * b);     // sqrt(3)*2/3
+        
+        // Barycentric coordinates : a * (0,0) + b * (1,0) + (1-a-b) * (1,1)
+        FloatType c = nsubdiv * (1-a);
+        FloatType d = nsubdiv * (1-a-b);
         int cellx = (int)floor(c);
         int celly = (int)floor(d);
         int lower = (c - cellx) > (d - celly);

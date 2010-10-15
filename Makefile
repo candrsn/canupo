@@ -1,8 +1,8 @@
 CXXFLAGS=-O3 -DNDEBUG -fopenmp
 #CXXFLAGS=-g
 CXX=g++
-LAPACK=./lapack_LINUX.a ./blas_LINUX.a
-#LAPACK=-llapack
+#LAPACK=./lapack_LINUX.a ./blas_LINUX.a
+LAPACK=-llapack
 
 all: canupo density xyz_to_bintree
 

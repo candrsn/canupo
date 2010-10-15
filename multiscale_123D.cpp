@@ -6,12 +6,10 @@
 
 using namespace std;
 
-CNearTree<Point, FloatType, &point_dist> data;
-
 int main(int argc, char** argv) {
 
     if (argc<4) {
-        cout << "Arguments required: bintree_data_file binary_feature_output_file radius1 [radius2...]" << endl;
+        cout << "Arguments required: data_file binary_feature_output_file radius1 [radius2...]" << endl;
         return 0;
     }
 
@@ -22,9 +20,7 @@ int main(int argc, char** argv) {
     }
     int nrad = radiusvec.size();
 
-    ifstream bintreefile(argv[1], ifstream::binary);
-    data.load(bintreefile);
-    bintreefile.close();
+    cloud.load_txt(argv[1]);
     
     ofstream multiscalefile(argv[2], ofstream::binary);
     
@@ -39,6 +35,10 @@ int main(int argc, char** argv) {
 
     ofstream borderfield("borderfield.xyz");
 
+
+    
+    // TODO: new cloud struct
+    
     
     Sequence seq = data.sequence();
     while (seq.hasNext()) {
