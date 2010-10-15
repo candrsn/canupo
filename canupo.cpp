@@ -113,10 +113,14 @@ int main(int argc, char** argv) {
         // as the points are nearby in the cloud
         // we also must keep the order of the points in the msc file => need to store the results
         // => use the points user data pointer
-#pragma omp parallel for
+#pragma omp parallel for schedule(static)
         for (int ptidx = 0; ptidx < cloud.data.size(); ++ptidx) {
-#ifndef _OPENMP
+#ifdef _OPENMP
+if (omp_get_thread_num()==0) {
+            int percentcomplete = ((ptidx+1) * 100 * omp_get_num_threads()) / cloud.data.size();
+#else
             int percentcomplete = ((ptidx+1) * 100) / cloud.data.size();
+#endif
             if (percentcomplete>=nextpercentcomplete) {
                 if (percentcomplete>=nextpercentcomplete) {
                     nextpercentcomplete+=5;
@@ -124,12 +128,8 @@ int main(int argc, char** argv) {
                     else if (percentcomplete % 5 == 0) cout << "." << flush;
                 }
             }
-#endif
 #ifdef _OPENMP
-            // store ab points for later if openmp is used
-            FloatType* abarray = new FloatType[nscales*2];
-            int abidx = 0;
-            cloud.data[ptidx].user = abarray;
+}
 #endif
 
             vector<Point*> neighbors;
@@ -226,25 +226,14 @@ int main(int argc, char** argv) {
                 // similarly constrain the values to 0..1
                 if (a>1) a=1; if (b>1) b=1; //if (c>1) c=1;
 
-#ifdef _OPENMP
-                abarray[abidx++] = a;
-                abarray[abidx++] = b;
-#else
-                mscfile.write((char*)&a, sizeof(a));
-                mscfile.write((char*)&b, sizeof(b));
-#endif
+#pragma omp critical
+                {
+                    mscfile.write((char*)&ptidx, sizeof(ptidx));
+                    mscfile.write((char*)&a, sizeof(a));
+                    mscfile.write((char*)&b, sizeof(b));
+                }
             }
         }
-#ifdef _OPENMP
-        for (int ptidx = 0; ptidx < cloud.data.size(); ++ptidx) {
-            FloatType* abarray = (FloatType*)cloud.data[ptidx].user;
-            for (int i=0; i<nscales; ++i) {
-                mscfile.write((char*)&abarray[i*2], sizeof(FloatType));
-                mscfile.write((char*)&abarray[i*2+1], sizeof(FloatType));
-            }
-            delete [] abarray;
-        }
-#endif
         cout << endl;
         
         mscfile.close();
