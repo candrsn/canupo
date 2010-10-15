@@ -109,10 +109,6 @@ int main(int argc, char** argv) {
         // for each point in the cloud
         // TODO: subsampling and/or fixed points for the computation
         int nextpercentcomplete = 5;
-        // parallel for needs to act on far away points so the risk of false sharing diminishes
-        // as the points are nearby in the cloud
-        // we also must keep the order of the points in the msc file => need to store the results
-        // => use the points user data pointer
 #pragma omp parallel for schedule(static)
         for (int ptidx = 0; ptidx < cloud.data.size(); ++ptidx) {
 #ifdef _OPENMP
