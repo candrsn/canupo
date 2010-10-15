@@ -63,10 +63,10 @@ int main(int argc, char** argv) {
             if (minscale<=0 || maxscale<=0) return help("Invalid scale range");
             bool validRange = false;
             if ((minscale - maxscale) * increment > 0) return help("Invalid range specification");
-            if (minscale<=maxscale) for (FloatType scale = minscale; scale <= maxscale*(1-1e-6); scale += increment) {
+            if (minscale<=maxscale) for (FloatType scale = minscale; scale < maxscale*(1-1e-6); scale += increment) {
                 validRange = true;
                 scales.insert(scale);
-            } else for (FloatType scale = minscale; scale >= maxscale*(1+1e-6); scale += increment) {
+            } else for (FloatType scale = minscale; scale > maxscale*(1+1e-6); scale += increment) {
                 validRange = true;
                 scales.insert(scale);
             }
@@ -131,6 +131,9 @@ if (omp_get_thread_num()==0) {
             vector<Point*> neighbors;
             vector<FloatType> sqdistances;
             vector<Point> neighsums; // avoid recomputing cumulated sums at each scale
+            
+            vector<FloatType> abdata(nscales*2);
+            int abdataidx = 0;
             
             // Scales shall be sorted from max to lowest 
             for (ScaleSet::iterator scaleit = scales.begin(); scaleit != scales.end(); ++scaleit) {
@@ -221,13 +224,15 @@ if (omp_get_thread_num()==0) {
                 if (a<0) a=0; if (b<0) b=0; //if (c<0) c=0;
                 // similarly constrain the values to 0..1
                 if (a>1) a=1; if (b>1) b=1; //if (c>1) c=1;
-
+                
+                abdata[abdataidx++] = a;
+                abdata[abdataidx++] = b;
+            }
+            // need to write full blocks sequencially for each point
 #pragma omp critical
-                {
-                    mscfile.write((char*)&ptidx, sizeof(ptidx));
-                    mscfile.write((char*)&a, sizeof(a));
-                    mscfile.write((char*)&b, sizeof(b));
-                }
+            {
+                mscfile.write((char*)&ptidx, sizeof(ptidx));
+                for (int i=0; i<abdata.size(); ++i) mscfile.write((char*)&abdata[i], sizeof(FloatType));
             }
         }
         cout << endl;
