@@ -27,14 +27,15 @@ struct Point : boost::addable<Point, boost::subtractable<Point, boost::multiplia
     
     FloatType x,y,z;
     Point* next; // for the cell/grid structure
+    void* user;
 
     inline FloatType& operator[](int idx) {
         assert(idx>=0 && idx<3);
         return idx==0?x:(idx==1?y:z);
     }
-    Point() : x(0),y(0),z(0),next(0) {}
-    Point(FloatType _x, FloatType _y, FloatType _z) : x(_x),y(_y),z(_z), next(0) {}
-    Point(Point* n) : x(0),y(0),z(0),next(n) {}
+    Point() : x(0),y(0),z(0),next(0),user(0) {}
+    Point(FloatType _x, FloatType _y, FloatType _z) : x(_x),y(_y),z(_z), next(0),user(0) {}
+    Point(Point* n) : x(0),y(0),z(0),next(n),user(0) {}
     
     // Baaah, how many times will similar code be rewriten ? Thanks boost::operators for easing the task
     inline Point& operator+=(const Point& v) {x+=v.x; y+=v.y; z+=v.z; return *this;}
