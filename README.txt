@@ -21,11 +21,11 @@ annotate data.xyz data.msc annotated_file.xyz [some scales]
   # Note: can be used on the whole scene as well, the dimensionality characterisation is local
 
 
-density data.msc nametag [some scales]
+density data.msc nsubdiv nametag [some scales]
   input: data.msc              # The multiscale parameters computed by canupo
+  input: nsubdiv               # Number of subdivisions on each side of the triangle
   input: nametag               # The base name for the output files
   input: some scales           # Selected scales at which to perform the density plot
-                               # The closest match from the parameter file is selected.
                                # All scales in the parameter file are used if not specified.
   output: nametag_scale.svg    # One density plot per selected scale
 
