@@ -6,153 +6,124 @@
 
 #include "points.hpp"
 #include "svd.hpp"
+#include "leastSquares.hpp"
 
 using namespace std;
 
-
-extern "C" {
-    // least square solving from lapack
-    void dgelsd_ (const int* m, const int* n, const int* nrhs, double* A, const int* lda, double* B, const int* ldb, double* S, const double* rcond, int* rank, double* work, const int* lwork, int* iwork, int* info);
-    void sgelsd_ (const int* m, const int* n, const int* nrhs, float* A, const int* lda, float* B, const int* ldb, float* S, const float* rcond, int* rank, float* work, const int* lwork, int* iwork, int* info);
-}
-
-// Our own somewhat simplified wrapper.
-void solveLeastSquares(double* A, int nrows, int ncols, double* B, int nrhs) {
-    int info = 0;
-    int ldb = max(nrows,ncols);
-    double *sval = new double[min(nrows,ncols)];
-    double rcond = -1;
-    int rank;
-    // first, workspace query
-    int lwork = -1;
-    double tmpwork;
-    int tmpiwork;
-    dgelsd_(&nrows, &ncols, &nrhs, A, &nrows, B, &ldb, sval, &rcond, &rank, &tmpwork, &lwork, &tmpiwork, &info);
-    if (info) {
-        cerr << "Could not retrieve the work array size for lapack" << endl;
-        exit(1);
-    }
-    lwork = (int)tmpwork;
-    double* work = new double[lwork];
-    // doc says read size of the int array in tmpiwork, but debugging says it is irrelevant
-    // => doc says min required sizes and formula for work is > formula for iwork in all cases: reuse lwork
-    int* iwork = new int[lwork]; 
-    dgelsd_(&nrows, &ncols, &nrhs, A, &nrows, B, &ldb, sval, &rcond, &rank, work, &lwork, iwork, &info);
-    if (info) {
-        cerr << "Error in dgelsd: " << info << endl;
-        exit(1);
-    }
-    delete [] iwork;
-    delete [] work;
-    delete [] sval;
-}
-void solveLeastSquares(float* A, int nrows, int ncols, float* B, int nrhs) {
-    int info = 0;
-    int ldb = max(nrows,ncols);
-    float *sval = new float[min(nrows,ncols)];
-    float rcond = -1;
-    int rank;
-    // first, workspace query
-    int lwork = -1;
-    float tmpwork;
-    int tmpiwork;
-    sgelsd_(&nrows, &ncols, &nrhs, A, &nrows, B, &ldb, sval, &rcond, &rank, &tmpwork, &lwork, &tmpiwork, &info);
-    if (info) {
-        cerr << "Could not retrieve the work array size for lapack" << endl;
-        exit(1);
-    }
-    lwork = (int)tmpwork;
-    float* work = new float[lwork];
-    // doc says read size of the int array in tmpiwork, but debugging says it is irrelevant
-    // => doc says min required sizes and formula for work is > formula for iwork in all cases: reuse lwork
-    int* iwork = new int[lwork]; 
-    sgelsd_(&nrows, &ncols, &nrhs, A, &nrows, B, &ldb, sval, &rcond, &rank, work, &lwork, iwork, &info);
-    if (info) {
-        cerr << "Error in sgelsd: " << info << endl;
-        exit(1);
-    }
-    delete [] iwork;
-    delete [] work;
-    delete [] sval;
+int help(const char* errmsg = 0) {
+    if (errmsg) cout << "Error: " << errmsg << endl;
+cout << "\
+make_features features.prm data1.msc data2.msc - data3.msc - data4.msc...\n\
+  inputs: dataX.msc     # The multiscale parameters for the samples the user wishes to discriminate\n\
+                        # Use - separators to indicate each class, one or more samples allowed per class\n\
+  output: features.prm  # The resulting parameters for feature extraction and classification of the whole scene\n\
+"<<endl;
+        return 0;
 }
 
 
 int main(int argc, char** argv) {
-    if (argc<5 || strcmp(argv[2],":")) {
-        cout << "Arguments required: output_classification_definition followed by : then several multiscale files from class 1 followed by - then for class 2, etc" << endl;
-        cout << "Ex: " << argv[0] << " classifparams.prm : class1_ex1.msc class1_ex2.msc - class2_ex.msc - class3_ex1.msc class3_ex2.msc class3_ex3.msc" << endl;
-        cout << "The classification parameters would here be stored in the file 'classifparams.prm'. They can be used later on to process and classify a full scene, based on the training done on the given examples." << endl;
-        return 0;
-    }
+    
+    if (argc<4) return help();
 
     int nclasses = 1;
     vector<int> classboundaries(1,0);
     
-    int fdim = 0;
     int total_pts = 0;
+
+    int nscales = 0;
+    vector<FloatType> scales;
     
     ofstream classifparamsfile(argv[1], ofstream::binary);
 
-    for (int argi = 3; argi<argc; ++argi) {
+    for (int argi = 2; argi<argc; ++argi) {
         if (!strcmp("-",argv[argi])) {
             ++nclasses;
             classboundaries.push_back(total_pts);
             continue;
         }
-        ifstream multiscalefile(argv[argi], ifstream::binary);
+        ifstream mscfile(argv[argi], ifstream::binary);
         // read the file header
         int npts;
-        multiscalefile.read(reinterpret_cast<char*>(&npts), sizeof(int));
-        int fdim_local;
-        multiscalefile.read(reinterpret_cast<char*>(&fdim_local), sizeof(int));
-        if (fdim==0) fdim = fdim_local;
-        if (fdim==0) {cerr<<"input file error: "<<argv[argi]<<endl; return 1;}
-        if (fdim!=fdim_local) {cerr<<"input file mismatch: "<<argv[argi]<<endl; return 1;}
-        multiscalefile.close();
+        mscfile.read((char*)&npts,sizeof(npts));
+        if (npts<=0) help("invalid file");
+        
+        int nscales_thisfile;
+        mscfile.read((char*)&nscales_thisfile, sizeof(nscales_thisfile));
+        vector<FloatType> scales_thisfile(nscales_thisfile);
+        for (int si=0; si<nscales_thisfile; ++si) mscfile.read((char*)&scales_thisfile[si], sizeof(FloatType));
+        if (nscales_thisfile<=0) help("invalid file");
+        
+        // all files must be consistant
+        if (nscales == 0) {
+            nscales = nscales_thisfile;
+            scales = scales_thisfile;
+        } else {
+            if (nscales != nscales_thisfile) {cerr<<"input file mismatch: "<<argv[argi]<<endl; return 1;}
+            for (int si=0; si<nscales; ++si) if (scales[si]!=scales_thisfile[si]) {cerr<<"input file mismatch: "<<argv[argi]<<endl; return 1;}
+        }
+        mscfile.close();
         // this allows to pre-allocate the big matrix for the svd
         total_pts += npts;
     }
     classboundaries.push_back(total_pts);
 
-    //for (int c=0; c<(int)classboundaries.size(); ++c) cout << classboundaries[c] << endl;
-
     if (nclasses==1) {
         cerr << "Only one class! Please provide several classes to distinguish." << endl;
-        return 0;
+        return 1;
     }
     
     // allocate the big matrix. it will be column-major,
+    int fdim = nscales * 2;
     vector<FloatType> A(total_pts * fdim);
     vector<FloatType> avg_feat(fdim, 0);
     
     int base_pt = 0;
     // and then fill it with the files
-    for (int argi = 3; argi<argc; ++argi) {
+    for (int argi = 2; argi<argc; ++argi) {
         if (!strcmp("-",argv[argi])) continue;
-        ifstream multiscalefile(argv[argi], ifstream::binary);
-        // read but ignore the file header
+        ifstream mscfile(argv[argi], ifstream::binary);
+
+        // read the file header (again)
         int npts;
-        multiscalefile.read(reinterpret_cast<char*>(&npts), sizeof(int));
-        int fdim_local;
-        multiscalefile.read(reinterpret_cast<char*>(&fdim_local), sizeof(int));
-        if (fdim_local!=fdim) {cerr << "internal error" << endl; return 1;}
+        mscfile.read((char*)&npts,sizeof(npts));
+        int nscales_thisfile;
+        mscfile.read((char*)&nscales_thisfile, sizeof(nscales_thisfile));
+        vector<FloatType> scales_thisfile(nscales_thisfile);
+        for (int si=0; si<nscales_thisfile; ++si) mscfile.read((char*)&scales_thisfile[si], sizeof(FloatType));
+        
         // now fill in the matrix with the points
         for (int pt=0; pt<npts; ++pt) {
-            FloatType borderStat;
-            multiscalefile.read(reinterpret_cast<char*>(&borderStat), sizeof(FloatType));
+            int ptidx; // we do not care for the point order here
+            mscfile.read((char*)&ptidx, sizeof(ptidx));
             
-            // TODO: option to eliminate points with bad borderStat
-            
+/*
             for (int f=0; f<fdim; ++f) {
                 // matrix is column-major, but input file is row-major...
                 FloatType value;
-                multiscalefile.read((char*)(&value), sizeof(FloatType));
-assert(f*total_pts+base_pt+pt<A.size());
+                mscfile.read((char*)(&value), sizeof(FloatType));
                 A[f*total_pts+base_pt+pt] = value;
                 avg_feat[f] += value;
             }
+*/
+            for (int f=0; f<nscales; ++f) {
+                // matrix is column-major, but input file is row-major...
+                FloatType a,b;
+                mscfile.read((char*)(&a), sizeof(FloatType));
+                mscfile.read((char*)(&b), sizeof(FloatType));
+                FloatType c = 1 - a - b;
+                // project in the equilateral triangle a*(0,0) + b*(1,0) + c*(1/2,sqrt3/2)
+                // so each dimension is given equal weight during the PCA
+                // is this necessary ?
+                FloatType x = b + c / 2;
+                FloatType y = c * sqrt(3)/2;                
+                A[(f*2)*total_pts+base_pt+pt] = x;
+                avg_feat[f*2] += x;
+                A[(f*2+1)*total_pts+base_pt+pt] = y;
+                avg_feat[f*2+1] += y;
+            }
         }
-        multiscalefile.close();
+        mscfile.close();
         base_pt += npts;
     }
     
@@ -173,7 +144,7 @@ assert(f*total_pts+base_pt+pt<A.size());
     // now do the big svd, keeping all projected series in A for further classification
     svd(total_pts, fdim, &A[0], &S[0], true, &B[0]);
 
-    // display first observation
+/*    // display first observation
     cout << "s=[ "; for (int comp=0; comp<fdim; ++comp) cout << S[comp] << " "; cout << "]"<<endl;
     cout << "aori=[ "; for (int comp=0; comp<fdim; ++comp) cout << Aori[comp*total_pts] << " "; cout << "]"<<endl;
     cout << "acmp=[ "; for (int comp=0; comp<fdim; ++comp) cout << A[comp*total_pts] << " "; cout << "]"<<endl;
@@ -181,16 +152,20 @@ assert(f*total_pts+base_pt+pt<A.size());
         for (int f=0; f<fdim; ++f) cout << B[f*fdim+comp] << " ";
         if (comp<fdim-1) cout << "; "; else cout << "]";
     } cout << endl;
-  
-    // sanity check: project the original data on the basis vectors, shall find the series
+*/  
+
+    // sanity check: project the original data on the basis vectors, shall find the svd series
+    // first scale the B matrix by the singular values so as to get the projected series directly
+    for (int comp=0; comp<fdim; ++comp) {
+        for (int f=0; f<fdim; ++f) B[f*fdim+comp] /= S[comp];
+    }
     vector<FloatType> avgdiff(fdim,0), avgscale(fdim,0);
     for (int obs = 0; obs<total_pts; ++obs) {
         // for each component
         for (int comp=0; comp<fdim; ++comp) {
             double res = 0;
             // that component is the observation dot the unit vector, times S[comp]
-            for (int f=0; f<fdim; ++f) res += Aori[f*total_pts + obs] * B[f*fdim+comp]; // take the transpose
-            res /= S[comp];
+            for (int f=0; f<fdim; ++f) res += Aori[f*total_pts + obs] * B[f*fdim+comp];
             //cout << res << " shall be equal to " << A[comp * total_pts + obs] << endl;
             avgdiff[comp] += fabs(A[comp * total_pts + obs] - res);
             avgscale[comp] += fabs(A[comp * total_pts + obs] + res) * 0.5;
@@ -211,6 +186,17 @@ assert(f*total_pts+base_pt+pt<A.size());
     }
     cout << endl;
 
+    // Output file contains all valid scaled projection vectors and classif params
+    classifparamsfile.write((char*)&nreliablecomp, sizeof(int));
+    for (int comp=0; comp<nreliablecomp; ++comp) {
+        // write the B vector for this component, row-major to simplify later reuse...
+        for (int f=0; f<fdim; ++f) B[f*fdim+comp];
+        
+        // TODO: here
+        
+    }
+
+    
     // informative output, may help select a number of features
     cout << "Total variance explained by each reliable feature" << endl;
     FloatType totalvar = 0;
@@ -227,7 +213,8 @@ assert(f*total_pts+base_pt+pt<A.size());
     }
     cout << endl;
 
-    //classifparamsfile.write
+    // set of weights for classifying each class, at each level of retained components
+    vector<vector<FloatType> > weights[nclasses];
     
     // std technique : ssq to separate one class from all others => 1 set of weights for each class
     // apply that to each subset of features
@@ -235,6 +222,8 @@ assert(f*total_pts+base_pt+pt<A.size());
         int ncomp = f+1;
         FloatType accuracy = 0;
         for (int c = 0; c < nclasses; ++c) {
+            // ncomp+1 coefficients for the hyperplane def (aka col of 1, shifting coef, etc)
+            weights[c].push_back(vector<FloatType>(ncomp+1,0));
             // need to allocate a new matrix as the content is destroyed by the algorithm
             // Add a column of 1 to the projected information so that we can properly do the least-square fitting
             vector<FloatType> Asel(total_pts * (ncomp+1));
@@ -250,8 +239,9 @@ assert(f*total_pts+base_pt+pt<A.size());
             for (int pt=beg; pt<end; ++pt) Bsel[pt] = 1;
             for (int pt=end; pt<total_pts; ++pt) Bsel[pt] = -1;
             // Do the least square fit
-            solveLeastSquares(&Asel[0], total_pts, ncomp+1, &Bsel[0], 1);
+            leastSquares(&Asel[0], total_pts, ncomp+1, &Bsel[0], 1);
             // result is the ncomp+1 first entries of B
+            for (int i=0; i<=ncomp; ++i) weights[c].back()[i] = Bsel[i];
             // compute the classification error for this class
             int ncorrectclasses = 0;
             for (int pt=beg; pt<end; ++pt) {
@@ -264,10 +254,10 @@ assert(f*total_pts+base_pt+pt<A.size());
             accuracy += (FloatType)ncorrectclasses / (FloatType)(end-beg);
         }
         accuracy /= nclasses;
-        // TODO: display
         cout << "Classification accuracy for " << (f+1) << " retained component(s): " << (accuracy*100) << "%" << endl;
+        //if (accuracy==1) break;
     }
-    
+
     // TODO: write matrix B for projection
     // trick : scale B, not A, so that the projections of unknown points from the full data set are compatible
         

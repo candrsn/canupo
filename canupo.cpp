@@ -32,6 +32,7 @@ canupo scales... - data1.xyz data2.xyz...\n\
         return 0;
 }
 
+
 int main(int argc, char** argv) {
 
     if (argc<3) return help();
@@ -128,8 +129,9 @@ if (omp_get_thread_num()==0) {
 }
 #endif
 
-            vector<Point*> neighbors;
-            vector<FloatType> sqdistances;
+            vector<DistPoint> neighbors;
+            //vector<Point*> neighbors;
+            //vector<FloatType> sqdistances;
             vector<Point> neighsums; // avoid recomputing cumulated sums at each scale
             
             vector<FloatType> abdata(nscales*2);
@@ -139,43 +141,34 @@ if (omp_get_thread_num()==0) {
             for (ScaleSet::iterator scaleit = scales.begin(); scaleit != scales.end(); ++scaleit) {
                 // Neighborhood search only on max radius
                 if (scaleit == scales.begin()) {
+                    // we have all neighbors, unsorted, but with distances computed already
                     cloud.findNeighbors(back_inserter(neighbors), cloud.data[ptidx], *scaleit);
 
                     // Sort the neighbors from closest to farthest, so we can process all lower scales easily
-                    multimap<FloatType, Point*> sortingMap;
-                    for (int i=0; i<neighbors.size(); ++i) sortingMap.insert(make_pair(dist2(cloud.data[ptidx], *neighbors[i]),neighbors[i]));
+                    sort(neighbors.begin(), neighbors.end());
                     
-                    // put data back in faster containers allowing dicho searches at lower scales
-                    sqdistances.resize(neighbors.size());
-                    int nidx=0;
-                    for (multimap<FloatType, Point*>::iterator it = sortingMap.begin(); it != sortingMap.end(); ++it) {
-                        sqdistances[nidx] = it->first;
-                        neighbors[nidx] = it->second;
-                        ++nidx;
-                    }
                     // pre-compute cumulated sums. The total is needed anyway at the larger scale
                     // so we might as well share the intermediates to lower levels
                     neighsums.resize(neighbors.size());
-                    neighsums[0] = *neighbors[0];
-                    for (int i=1; i<neighbors.size(); ++i) neighsums[i] = neighsums[i-1] + *neighbors[i];
+                    neighsums[0] = *neighbors[0].pt;
+                    for (int i=1; i<neighbors.size(); ++i) neighsums[i] = neighsums[i-1] + *neighbors[i].pt;
                 }
                 // lower scale : restrict previously found neighbors to the new distance
                 else {
                     FloatType radiussq = *scaleit * *scaleit;
                     // dicho search might be faster than sequencially from the vector end if there are many points
                     int dichofirst = 0;
-                    int dicholast = sqdistances.size();
+                    int dicholast = neighbors.size();
                     int dichomed;
                     while (true) {
                         dichomed = (dichofirst + dicholast) / 2;
                         if (dichomed==dichofirst) break;
-                        if (radiussq==sqdistances[dichomed]) break;
-                        if (radiussq<sqdistances[dichomed]) { dicholast = dichomed; continue;}
+                        if (radiussq==neighbors[dichomed].distsq) break;
+                        if (radiussq<neighbors[dichomed].distsq) { dicholast = dichomed; continue;}
                         dichofirst = dichomed;
                     }
                     // dichomed is now the last index with distance below or equal to requested radius
                     neighbors.resize(dichomed+1);
-                    sqdistances.resize(dichomed+1);
                     neighsums.resize(dichomed+1);
                 }
                 
@@ -198,9 +191,11 @@ if (omp_get_thread_num()==0) {
                     // a copy is needed as LAPACK destroys the matrix, and the center changes anyway
                     // => cannot keep the points from one scale to the lower, need to rebuild the matrix
                     vector<FloatType> A(neighbors.size() * 3);
-                    for (int i=0; i<neighbors.size(); ++i) for (int j=0; j<3; ++j) {
+                    for (int i=0; i<neighbors.size(); ++i) {
                         // A is column-major
-                        A[j * neighbors.size() + i] = (*neighbors[i])[j] - avg[j];
+                        A[i] = neighbors[i].pt->x - avg.x;
+                        A[i+neighbors.size()] = neighbors[i].pt->y - avg.y;
+                        A[i+neighbors.size()+neighbors.size()] = neighbors[i].pt->z - avg.z;
                     }
                     // SVD decomposition handled by LAPACK
                     svd(neighbors.size(), 3, &A[0], &svalues[0]);

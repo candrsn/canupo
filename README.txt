@@ -9,6 +9,15 @@ canupo scales... - data1.xyz data2.xyz...
 TODO: Eliminate points on the border of the scene.
       How ? Simply retain only points within max radius from scene center ?
       Compute scene bounds (how?) and retain points not closer than 1 maxscale from the border
+      Better: centering the neighbor cloud is necessary for PCA => compute effective radius
+              Then check what given scale is closest the the effective radius
+              Points on the very edge of the scene have effective radius approx 1/2 the given scale
+              and no stats are available for them at full scale ?
+              => remove any point for which stat not available at all scales
+                 include isolated points as well.
+              BUT then: how to match these points in a real scene ?
+              => in fact, if the class def is not polluted too much, better keep the borders
+              => trade-off between better global recognition vs better classification for the edge points
 
 annotate data.xyz data.msc annotated_file.xyz [some scales]
   input: data.xyz            # Original data file that was used to compute the multiscale parameters
@@ -28,7 +37,8 @@ density data.msc nsubdiv nametag [some scales]
   input: some scales           # Selected scales at which to perform the density plot
                                # All scales in the parameter file are used if not specified.
   output: nametag_scale.svg    # One density plot per selected scale
-
+TODO: allow to merge several msc files in a unique density, in order to have the density
+      for one class def as defined in make_features
 
 make_features features.prm data1.msc data2.msc - data3.msc - data4.msc...
   inputs: dataX.msc     # The multiscale parameters for the samples the user wishes to discriminate

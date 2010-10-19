@@ -28,6 +28,7 @@ struct Point : boost::addable<Point, boost::subtractable<Point, boost::multiplia
     FloatType x,y,z;
     Point* next; // for the cell/grid structure
 
+    // convenient but slow : avoid it !
     inline FloatType& operator[](int idx) {
         assert(idx>=0 && idx<3);
         return idx==0?x:(idx==1?y:z);
@@ -56,6 +57,18 @@ inline FloatType dist2(const Point& a, const Point& b) {
       + (a.z-b.z)*(a.z-b.z)
     ;
 }
+
+// this struct accelerate the management of neighbors
+// the std::multimaps are way too slow
+struct DistPoint {
+    FloatType distsq;
+    Point* pt;
+    bool operator<(const DistPoint& other) const {
+        return distsq < other.distsq;
+    }
+    DistPoint(FloatType _distsq, Point* _pt) : distsq(_distsq), pt(_pt) {}
+    DistPoint() : distsq(0), pt(0) {}
+};
 
 struct PointCloud {
     std::vector<Point> data; // avoids many mem allocations for individual points
@@ -150,7 +163,8 @@ struct PointCloud {
         double r2 = radius * radius;
         for (int cy = cy1; cy <= cy2; ++cy) for (int cx = cx1; cx <= cx2; ++cx) {
             for (Point* p = grid[cy * ncellx + cx]; p!=0; p=p->next) {
-                if (dist2(center,*p)<=r2) (*outit++) = p;
+                FloatType d2 = dist2(center,*p);
+                if (d2<=r2) (*outit++) = DistPoint(d2,p);
             }
         }
     }

@@ -118,7 +118,7 @@ int main(int argc, char** argv) {
     vector<vector<int> > density(selectedScalesIdx.size(), vector<int>(nsubdiv*(nsubdiv+1), 0));
 
     for (int pt=0; pt<npts; ++pt) {
-        int ptidx; // we do not care of the point order here, just the density
+        int ptidx; // we do not care for the point order here, just the density
         mscfile.read((char*)&ptidx, sizeof(ptidx));
         vector<FloatType> mscdata(nscales*2);
         for (int si=0; si<nscales; ++si) {
