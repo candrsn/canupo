@@ -110,6 +110,13 @@ int main(int argc, char** argv) {
                 FloatType y = c * sqrt(3)/2;
                 data[(base_pt+pt)*fdim + s*2] = x;
                 data[(base_pt+pt)*fdim + s*2+1] = y;
+
+/*                // keep 3 coordinates for later interpretation of the weights !
+                // nop, not well conditionned...
+                data[(base_pt+pt)*fdim + s*3  ] = a;
+                data[(base_pt+pt)*fdim + s*3+1] = b;
+                data[(base_pt+pt)*fdim + s*3+2] = c;
+*/
             }
         }
         mscfile.close();
@@ -133,6 +140,55 @@ int main(int argc, char** argv) {
             int iend = classboundaries[iclass+1];
             int ni = iend - ibeg;
             int ntotal = ni + nj;
+            
+            cout << "Classifier for classes " << iclass << " vs " << jclass << endl;
+            // scale by scale classif, look for characteristic scale and add more scales if necessary
+            for(int s=0; s<nscales; ++s) {
+                // train a classifier only at this scale
+                vector<FloatType> A(ntotal * 3);
+                vector<FloatType> B(ntotal);
+                // fill the matrices with the classes data
+                for (int pt=0; pt<ni; ++pt) {
+                    for(int f=0; f<2; ++f) A[f * ntotal + pt] = data[(ibeg+pt)*fdim + s*2+f];
+                    A[2*ntotal + pt] = 1;
+                    B[pt] = -1;
+                }
+                for (int pt=0; pt<nj; ++pt) {
+                    for(int f=0; f<2; ++f) A[f * ntotal + (pt+ni)] = data[(jbeg+pt)*fdim + s*2+f];
+                    A[2*ntotal + (pt+ni)] = 1;
+                    B[pt+ni] = 1;
+                }
+                // now the least squares hyperplane fit
+                leastSquares(&A[0], ntotal, 3, &B[0], 1);
+                // percent classif obtained by this scale alone ?
+                int ncorrecti = 0; FloatType perfclassifi = 0;
+                for (int pt=0; pt<ni; ++pt) {
+                    FloatType pred = B[2];
+                    pred += data[(ibeg+pt)*fdim + s*2] * B[0];
+                    pred += data[(ibeg+pt)*fdim + s*2+1] * B[1];
+                    if (pred<0) ++ncorrecti;
+                    // go through sigmoid function, seek for negative class
+                    perfclassifi += 1.0 / (1.0 + exp(pred));
+                }
+                int ncorrectj = 0; FloatType perfclassifj = 0;
+                for (int pt=0; pt<nj; ++pt) {
+                    FloatType pred = B[2];
+                    pred += data[(jbeg+pt)*fdim + s*2] * B[0];
+                    pred += data[(jbeg+pt)*fdim + s*2+1] * B[1];
+                    if (pred>=0) ++ncorrectj;
+                    // go through sigmoid function, seek for positive class
+                    perfclassifj += 1.0 / (1.0 + exp(-pred));
+//                    perfclassifj += tanh(pred);
+                }
+                FloatType accuracy = 0.5 * (ncorrecti / (FloatType)ni + ncorrectj / (FloatType)nj);
+                FloatType perfclassif = 0.5 * (perfclassifi / ni + perfclassifj / nj);
+                cout << "accuracy using scale " << scales[s] << " only: " << accuracy << " perf " << perfclassif << endl;
+                
+            }
+            
+            
+            
+#if 0
             // need to allocate a new matrix as the content is destroyed by the algorithm
             // Add a column of 1 so as to allow hyperplanes not necessarily going through the origin
             // A is column-major... and each row of A is an instance
@@ -175,10 +231,41 @@ int main(int argc, char** argv) {
             cout << "set of weights + bias:";
             for(int f=0; f<fdim; ++f) cout << " " << B[f];
             cout << " " << B[fdim] << endl;
+    
+            // TODO: write weights in param file
+            
+            // TODO: interpretation of weights according to scales
+            for(int s=0; s<nscales; ++s) {
+                FloatType xw = B[s*2];
+                FloatType yw = B[s*2+1];
+                FloatType cte = B[fdim];
+                // percent classif obtained by this scale alone ?
+                int ncorrecti = 0;
+                for (int pt=0; pt<ni; ++pt) {
+                    FloatType pred = cte;
+                    pred += data[(ibeg+pt)*fdim + s*2] * xw;
+                    pred += data[(ibeg+pt)*fdim + s*2+1] * yw;
+                    if (pred<0) ++ncorrecti;
+                }
+                int ncorrectj = 0;
+                for (int pt=0; pt<nj; ++pt) {
+                    FloatType pred = cte;
+                    pred += data[(jbeg+pt)*fdim + s*2] * xw;
+                    pred += data[(jbeg+pt)*fdim + s*2+1] * yw;
+                    if (pred>=0) ++ncorrectj;
+                }
+                FloatType accuracy = 0.5 * (ncorrecti / (FloatType)ni + ncorrectj / (FloatType)nj);
+                cout << "accuracy using scale " << scales[s] << " only: " << accuracy << endl;
+                
+                // Line equa of projected hyperplane on this plane : xw * x + yw * y + cte = 0
+                // all other components are 0 due to projection
+                // but x = b + c / 2  and   y = c * sqrt(3)/2;  and  a + b + c = 1
+                // so:  xw * (b + c / 2) + yw * (c * sqrt(3)/2) + cte * (a + b + c) = 0
+                //      (xw + cte) * b + (xw/2 + yw *sqrt(3)/2 + cte) * c + cte * a = 0;
+            }
+#endif
         }
     }
-    
-    // TODO: write weights in param file
         
     return 0;
 }
