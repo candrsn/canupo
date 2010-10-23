@@ -1,8 +1,10 @@
 #include <iostream>
 #include <fstream>
+#include <algorithm>
 #include <string.h>
 
 #include <assert.h>
+#include <stdlib.h>
 
 #include "points.hpp"
 #include "svd.hpp"
@@ -20,6 +22,103 @@ make_features features.prm data1.msc data2.msc - data3.msc - data4.msc...\n\
 "<<endl;
         return 0;
 }
+
+// simple linear fit trying to map data to -1,+1 classes with least squared error
+struct LeastSquareModel {
+    vector<FloatType> weights;
+    vector<FloatType> A, B; // matrices for lapack
+    int ndata, dim, dataidx;
+    
+    void prepareTraining(int _ndata, int _dim) {
+        ndata = _ndata; dim = _dim;
+        assert(ndata>dim);
+        // LAPACK matrices are column-major and destroyed in the process => allocate new matrices now
+        // add a column of 1 for allowing hyperplanes not going through the origin
+        A.resize(ndata * (dim+1));
+        B.resize(ndata);
+        dataidx = 0;
+    }
+    
+    // data shall point to an array of dim floats. label shall be either +1 or -1
+    void addTrainData(const FloatType* data, FloatType label) {
+        for (int d=0; d<dim; ++d) A[d*ndata + dataidx] = data[d];
+        A[dim*ndata + dataidx] = 1;
+        B[dataidx] = label;
+        ++dataidx;
+    }
+    
+    void train() {
+        // now the least squares hyperplane fit
+        leastSquares(&A[0], ndata, dim+1, &B[0], 1);
+        weights.resize(dim+1);
+        for (int d=0; d<=dim; ++d) weights[d] = B[d];
+    }
+    
+    FloatType predict(const FloatType* data) {
+        FloatType ret = weights[dim];
+        for (int d=0; d<dim; ++d) ret += weights[d] * data[d];
+        return ret;
+    }
+
+    // shuffling the data order is necessary so classes are equally distributed in each fold region
+    void shuffle() {
+        for (int i=ndata-1; i>=1; --i) {
+            // may select i itself for the permutation if the element does not change place
+            int ridx = random() % (i+1);
+            for (int d=0; d<dim; ++d) swap(A[d * ndata + ridx], A[d * ndata + i]);
+            swap(B[ridx], B[i]);
+        }
+    }
+    
+    void crossValidate(int nfolds, FloatType &accuracy, FloatType &perf) {
+        // shall shuffle first if necessary
+        int ncorrectpos = 0, ncorrectneg = 0;
+        // stats on each class
+        int npos = 0, nneg = 0;
+        //FloatType perfpos = 1e6, perfneg = 1e6;
+        FloatType perfpos = 0, perfneg = 0;
+        for (int pt=0; pt<ndata; ++pt) {
+            if (B[pt]>=0) ++npos;
+            if (B[pt]<0) ++nneg;
+        }
+        for (int fold = 0; fold < nfolds; ++fold) {
+            int fbeg = ndata * fold / nfolds;
+            int fend = ndata * (fold+1) / nfolds;
+            int ncv = fend - fbeg;
+            int nremdata = ndata - ncv;
+            vector<FloatType> Acv(nremdata * (dim+1));
+            vector<FloatType> Bcv(nremdata);
+            for (int d=0; d<dim; ++d) {
+                const int baseremdata = d * nremdata;
+                const int basedata = d * ndata;
+                for (int pt=0; pt<fbeg; ++pt) {
+                    Acv[baseremdata + pt] = A[basedata + pt];
+                    Bcv[pt] = B[pt];
+                }
+                for (int pt=fend; pt<ndata; ++pt) {
+                    Acv[baseremdata + pt - ncv] = A[basedata + pt];
+                    Bcv[pt-ncv] = B[pt];
+                }
+            }
+            // column of 1
+            for (unsigned int i = dim * nremdata; i<Acv.size(); ++i) Acv[i] = 1.0;
+            // train only on partial data
+            leastSquares(&Acv[0], nremdata, dim+1, &Bcv[0], 1);
+            // predict on the cv region
+            for (int pt=fbeg; pt<fend; ++pt) {
+                FloatType pred = Bcv[dim];
+                for (int d=0; d<dim; ++d) pred += Bcv[d] * A[d * ndata + pt];
+                if (B[pt] >= 0) {if (pred >= 0) ++ncorrectpos; perfpos += pred*fabs(pred);}
+                if (B[pt] < 0) {if (pred < 0) ++ncorrectneg; perfneg -= pred*fabs(pred);}
+            }
+        }
+        // return the equilibrated performance
+        accuracy = 0.5 * (ncorrectpos / (FloatType)npos + ncorrectneg / (FloatType)nneg);
+        perf = 0.5 * (perfpos / npos + perfneg / nneg);
+    }
+        
+};
+
 
 int main(int argc, char** argv) {
     
@@ -110,13 +209,6 @@ int main(int argc, char** argv) {
                 FloatType y = c * sqrt(3)/2;
                 data[(base_pt+pt)*fdim + s*2] = x;
                 data[(base_pt+pt)*fdim + s*2+1] = y;
-
-/*                // keep 3 coordinates for later interpretation of the weights !
-                // nop, not well conditionned...
-                data[(base_pt+pt)*fdim + s*3  ] = a;
-                data[(base_pt+pt)*fdim + s*3+1] = b;
-                data[(base_pt+pt)*fdim + s*3+2] = c;
-*/
             }
         }
         mscfile.close();
@@ -128,7 +220,8 @@ int main(int argc, char** argv) {
     // let i,j and i<j be two classes to compare (hence j>=1 and i>=0)
     // the classifier for these two classes is stored idx = j*(j-1)/2 + i
     // each classifier is a set of fdim+1 weights = one hyperplane that may be shifted from origin
-    vector<vector<FloatType> > weights(nclasses * (nclasses-1) / 2, vector<FloatType>(fdim+1));
+    vector<vector<FloatType> > weights(nclasses * (nclasses-1) / 2);
+    vector<int> selectedScales(nclasses * (nclasses-1) / 2, -1);
     
     // train all one-against-one classifiers
     for (int jclass = 1; jclass < nclasses; ++jclass) {
@@ -139,134 +232,117 @@ int main(int argc, char** argv) {
             int ibeg = classboundaries[iclass];
             int iend = classboundaries[iclass+1];
             int ni = iend - ibeg;
+            
             int ntotal = ni + nj;
             
             cout << "Classifier for classes " << iclass << " vs " << jclass << endl;
+            FloatType bestaccuracy = -1;
+            FloatType bestperf = -1e6;
+            int bestscale = -1;
+            
             // scale by scale classif, look for characteristic scale and add more scales if necessary
             for(int s=0; s<nscales; ++s) {
-                // train a classifier only at this scale
-                vector<FloatType> A(ntotal * 3);
-                vector<FloatType> B(ntotal);
-                // fill the matrices with the classes data
-                for (int pt=0; pt<ni; ++pt) {
-                    for(int f=0; f<2; ++f) A[f * ntotal + pt] = data[(ibeg+pt)*fdim + s*2+f];
-                    A[2*ntotal + pt] = 1;
-                    B[pt] = -1;
+            
+                // 10-fold CV for estimating generalisation ability instead of train classif
+                // train a classifier per scale
+                LeastSquareModel classifier;
+                classifier.prepareTraining(ntotal, 2);
+                
+                // fill the training data
+                for (int pt=0; pt<ni; ++pt) classifier.addTrainData(&data[(ibeg+pt)*fdim + s*2], -1);
+                for (int pt=0; pt<nj; ++pt) classifier.addTrainData(&data[(jbeg+pt)*fdim + s*2], 1);
+
+                classifier.shuffle();                
+                FloatType accuracy, perf;
+                classifier.crossValidate(10, accuracy, perf);
+                cout << "cv accuracy using scale " << scales[s] << " only: " << accuracy << " perf " << perf << endl;
+                
+                if (bestaccuracy < accuracy || (bestaccuracy == accuracy && bestperf < perf) ) {
+                    bestaccuracy = accuracy;
+                    bestperf = perf;
+                    bestscale = s;
                 }
-                for (int pt=0; pt<nj; ++pt) {
-                    for(int f=0; f<2; ++f) A[f * ntotal + (pt+ni)] = data[(jbeg+pt)*fdim + s*2+f];
-                    A[2*ntotal + (pt+ni)] = 1;
-                    B[pt+ni] = 1;
-                }
-                // now the least squares hyperplane fit
-                leastSquares(&A[0], ntotal, 3, &B[0], 1);
-                // percent classif obtained by this scale alone ?
-                int ncorrecti = 0; FloatType perfclassifi = 0;
-                for (int pt=0; pt<ni; ++pt) {
-                    FloatType pred = B[2];
-                    pred += data[(ibeg+pt)*fdim + s*2] * B[0];
-                    pred += data[(ibeg+pt)*fdim + s*2+1] * B[1];
-                    if (pred<0) ++ncorrecti;
-                    // go through sigmoid function, seek for negative class
-                    perfclassifi += 1.0 / (1.0 + exp(pred));
-                }
-                int ncorrectj = 0; FloatType perfclassifj = 0;
-                for (int pt=0; pt<nj; ++pt) {
-                    FloatType pred = B[2];
-                    pred += data[(jbeg+pt)*fdim + s*2] * B[0];
-                    pred += data[(jbeg+pt)*fdim + s*2+1] * B[1];
-                    if (pred>=0) ++ncorrectj;
-                    // go through sigmoid function, seek for positive class
-                    perfclassifj += 1.0 / (1.0 + exp(-pred));
-//                    perfclassifj += tanh(pred);
-                }
-                FloatType accuracy = 0.5 * (ncorrecti / (FloatType)ni + ncorrectj / (FloatType)nj);
+                
+/*                FloatType accuracy = 0.5 * (ncorrecti / (FloatType)ni + ncorrectj / (FloatType)nj);
                 FloatType perfclassif = 0.5 * (perfclassifi / ni + perfclassifj / nj);
                 cout << "accuracy using scale " << scales[s] << " only: " << accuracy << " perf " << perfclassif << endl;
-                
+*/
             }
+            cout << "Selected scale " << scales[bestscale] << endl;
             
+            // train a classifier at this scale on the whole data set
+            int idx = jclass*(jclass-1)/2 + iclass;
+            LeastSquareModel classifier;
+            classifier.prepareTraining(ntotal, 2);
+            // fill the training data
+            for (int pt=0; pt<ni; ++pt) classifier.addTrainData(&data[(ibeg+pt)*fdim + bestscale*2], -1);
+            for (int pt=0; pt<nj; ++pt) classifier.addTrainData(&data[(jbeg+pt)*fdim + bestscale*2], 1);
+            // no need to shuffle for whole data set training
+            classifier.train();
+            // store the weights and best scale for later use
+            weights[idx] = classifier.weights;
+            selectedScales[idx] = bestscale;
             
-            
-#if 0
-            // need to allocate a new matrix as the content is destroyed by the algorithm
-            // Add a column of 1 so as to allow hyperplanes not necessarily going through the origin
-            // A is column-major... and each row of A is an instance
-            vector<FloatType> A(ntotal * (fdim+1));
-            // Prepare B = the classes indicator. class i = -1, j = +1
-            vector<FloatType> B(ntotal);
-            // fill the matrices with the classes data
-            for (int pt=0; pt<ni; ++pt) {
-                for(int f=0; f<fdim; ++f) A[f * ntotal + pt] = data[(ibeg+pt)*fdim + f];
-                A[fdim*ntotal + pt] = 1;
-                B[pt] = -1;
-            }
-            for (int pt=0; pt<nj; ++pt) {
-                for(int f=0; f<fdim; ++f) A[f * ntotal + (pt+ni)] = data[(jbeg+pt)*fdim + f];
-                A[fdim*ntotal + (pt+ni)] = 1;
-                B[pt+ni] = 1;
-            }
-            // now the least squares hyperplane fit
-            leastSquares(&A[0], ntotal, fdim+1, &B[0], 1);
-            // result is the fdim+1 first entries of B
-            // compute the classification error
-            int ncorrecti = 0;
-            for (int pt=0; pt<ni; ++pt) {
-                FloatType pred = 0;
-                for(int f=0; f<fdim; ++f) pred += data[(ibeg+pt)*fdim + f] * B[f];
-                pred += B[fdim]; // bias at origin
-                if (pred<0) ++ncorrecti;
-            }
-            int ncorrectj = 0;
-            for (int pt=0; pt<nj; ++pt) {
-                FloatType pred = 0;
-                for(int f=0; f<fdim; ++f) pred += data[(jbeg+pt)*fdim + f] * B[f];
-                pred += B[fdim]; // bias at origin
-                if (pred>=0) ++ncorrectj;
-            }
-            // accuracy that gives equal weight to each class
-            FloatType accuracy = 0.5 * (ncorrecti / (FloatType)ni + ncorrectj / (FloatType)nj);
-            // that accuracy will be the voting weight for this classifer when predicting new points
-            cout << "accuracy for discriminating classes " << iclass << " and " << jclass << " is: " << accuracy << endl;
-            cout << "set of weights + bias:";
-            for(int f=0; f<fdim; ++f) cout << " " << B[f];
-            cout << " " << B[fdim] << endl;
-    
-            // TODO: write weights in param file
-            
-            // TODO: interpretation of weights according to scales
-            for(int s=0; s<nscales; ++s) {
-                FloatType xw = B[s*2];
-                FloatType yw = B[s*2+1];
-                FloatType cte = B[fdim];
-                // percent classif obtained by this scale alone ?
-                int ncorrecti = 0;
-                for (int pt=0; pt<ni; ++pt) {
-                    FloatType pred = cte;
-                    pred += data[(ibeg+pt)*fdim + s*2] * xw;
-                    pred += data[(ibeg+pt)*fdim + s*2+1] * yw;
-                    if (pred<0) ++ncorrecti;
-                }
-                int ncorrectj = 0;
-                for (int pt=0; pt<nj; ++pt) {
-                    FloatType pred = cte;
-                    pred += data[(jbeg+pt)*fdim + s*2] * xw;
-                    pred += data[(jbeg+pt)*fdim + s*2+1] * yw;
-                    if (pred>=0) ++ncorrectj;
-                }
-                FloatType accuracy = 0.5 * (ncorrecti / (FloatType)ni + ncorrectj / (FloatType)nj);
-                cout << "accuracy using scale " << scales[s] << " only: " << accuracy << endl;
-                
-                // Line equa of projected hyperplane on this plane : xw * x + yw * y + cte = 0
-                // all other components are 0 due to projection
-                // but x = b + c / 2  and   y = c * sqrt(3)/2;  and  a + b + c = 1
-                // so:  xw * (b + c / 2) + yw * (c * sqrt(3)/2) + cte * (a + b + c) = 0
-                //      (xw + cte) * b + (xw/2 + yw *sqrt(3)/2 + cte) * c + cte * a = 0;
-            }
-#endif
+            // TODO: Select more than one scale
+            //       process combination of best scales so long as it increases the performance
+            //       here we found 100% CV classif... but wait till we do n-class voting
         }
     }
+
+    // compute error of one-against-one on the training set
+    // TODO: split and keep a test set here
+    vector<int> ncorrectclassif(nclasses,0);
+    for (int pt=0; pt<total_pts; ++pt) {
+        FloatType* ptdata = &data[pt*fdim];
+        // one-against-one process: apply all classifiers and vote for this point class
+        vector<FloatType> predictions(nclasses * (nclasses-1) / 2);
+        vector<int> votes(nclasses, 0);
+        for (int j=1; j<nclasses; ++j) for (int i=0; i<j; ++i) {
+            int idx = j*(j-1)/2 + i;
+            // single scale classifier for now: TODO: multi-scale
+            FloatType pred = weights[idx][2];
+            pred += ptdata[selectedScales[idx]*2] * weights[idx][0];
+            pred += ptdata[selectedScales[idx]*2+1] * weights[idx][1];
+            if (pred>=0) ++votes[j];
+            else ++votes[i];
+            predictions[idx] = pred;
+        }
+        // search for max vote, in case equality = use the classifier between both to break the vote
+        // TODO: in case of loops (ex: all 3 ex-aequo amongst 3) and all classifiers say a > b > c > a
+        //       currently the loop is broken by the order in which comparisons are made, but another
+        //       criterion like distance from hyperplanes would be better
+        int maxvote = -1; int selectedclass = 0;
+cout << "votes:";
+        for (int i=0; i<votes.size(); ++i) {
+cout << " " << votes[i];            
+            if (maxvote < votes[i]) {
+                selectedclass = i;
+                maxvote = votes[i];
+            } else if (maxvote == votes[i]) {
+                int iclass = min(selectedclass, i);
+                int jclass = max(selectedclass, i);
+                int idx = jclass*(jclass-1)/2 + iclass;
+                // choose the best between both equal
+                if (predictions[idx]>=0) selectedclass = jclass;
+                else selectedclass = iclass;
+                maxvote = votes[selectedclass];
+            }
+        }
+cout << endl;
+        // loot at this point real class for checking
+        int ptclass = -1;
+        for (int c=0; c<nclasses; ++c) if (pt>=classboundaries[c] && pt<classboundaries[c+1]) {ptclass=c; break;}
+        assert(ptclass!=-1);
         
+        if (selectedclass == ptclass) ++ncorrectclassif[ptclass];
+    }
+    
+    // compute accuracy that a given point in the data set is correctly classified: weight all classes 
+    FloatType accuracy = 0;
+    for (int c=0; c<nclasses; ++c) accuracy += ncorrectclassif[c] / (FloatType)(classboundaries[c+1] - classboundaries[c]);
+    accuracy /= nclasses;
+    cout << "One-against-one voting accuracy: " << accuracy << endl;
+
     return 0;
 }
 
