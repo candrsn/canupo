@@ -169,6 +169,55 @@ struct PointCloud {
         }
     }
 
+    // returns the index of the nearest point in the cloud from the point given in argument
+    // returns -1 iff the cloud is empty
+    int findNearest(const Point& center) {
+        int cx = floor((center.x - xmin) / cellside);
+        int cy = floor((center.y - ymin) / cellside);
+        // look for a non-empty cell in increasing distance. Once it is found, the nearest neighbor is necessarily within that radius
+        int found_dcell = -1;
+        for (int dcell = 0; dcell<std::max(ncellx,ncelly); ++dcell) {
+            // loop only in the square at dcell distance from the center cell
+            for (int cxi = cx-dcell; cxi <= cx + dcell; ++cxi) {
+                // top
+                if (cxi>=0 && cxi<ncellx && cy-dcell>=0 && cy-dcell<ncelly && grid[(cy-dcell) * ncellx + cxi]!=0) {found_dcell = dcell; break;}
+                // bottom
+                if (cxi>=0 && cxi<ncellx && cy+dcell>=0 && cy+dcell<ncelly && grid[(cy+dcell) * ncellx + cxi]!=0) {found_dcell = dcell; break;}
+            }
+            if (found_dcell!=-1) break;
+            // left and right, omitting the corners
+            for (int cyi = cy-dcell+1; cyi <= cy + dcell - 1; ++cyi) {
+                // left
+                if (cx-dcell>=0 && cx-dcell<ncellx && cyi>=0 && cyi<ncelly && grid[cyi * ncellx + cx - dcell]!=0) {found_dcell = dcell; break;}
+                // right
+                if (cx+dcell>=0 && cx+dcell<ncellx && cyi>=0 && cyi<ncelly && grid[cyi * ncellx + cx + dcell]!=0) {found_dcell = dcell; break;}
+            }
+            if (found_dcell!=-1) break;
+        }
+        if (found_dcell==-1) return -1;
+        // neighbor necessarily within dcell+1 distance, limit case if we are very close to a cell edge
+        int idx = -1;
+        int cx1 = cx - found_dcell;
+        int cx2 = cx + found_dcell;
+        int cy1 = cy - found_dcell;
+        int cy2 = cy + found_dcell;
+        if (cx1<0) cx1=0;
+        if (cx2>=ncellx) cx2=ncellx-1;
+        if (cy1<0) cy1=0;
+        if (cy2>=ncelly) cy2=ncelly-1;
+        FloatType mind2 = std::numeric_limits<FloatType>::max();
+        for (int cy = cy1; cy <= cy2; ++cy) for (int cx = cx1; cx <= cx2; ++cx) {
+            for (Point* p = grid[cy * ncellx + cx]; p!=0; p=p->next) {
+                FloatType d2 = dist2(center,*p);
+                if (d2<=mind2) {
+                    mind2 = d2;
+                    idx = p - &data[0];
+                }
+            }
+        }
+        return idx;
+    }
+
 };
 PointCloud cloud;
 

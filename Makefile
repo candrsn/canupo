@@ -18,8 +18,11 @@ annotate:
 make_features:
 	$(CXX) $(CXXFLAGS) make_features.cpp $(LAPACK) -o make_features
 
-clean:
-	rm -f canupo density
+classify:
+	$(CXX) $(CXXFLAGS) classify.cpp -o classify
 
-.PHONY: canupo density annotate make_features
+clean:
+	rm -f canupo density annotate make_features classify
+
+.PHONY: canupo density annotate make_features classify clean
 

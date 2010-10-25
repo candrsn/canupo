@@ -1,5 +1,6 @@
 #include <iostream>
 #include <fstream>
+#include <set>
 #include <algorithm>
 #include <string.h>
 
@@ -176,13 +177,11 @@ int main(int argc, char** argv) {
 
     // store all data in memory, keep overhead to a minimum as we plan for a lot of points...
     vector<FloatType> data(total_pts * fdim);
-
     int base_pt = 0;
     // and then fill data from the files
     for (int argi = 2; argi<argc; ++argi) {
         if (!strcmp("-",argv[argi])) continue;
         ifstream mscfile(argv[argi], ifstream::binary);
-
         // read the file header (again)
         int npts;
         mscfile.read((char*)&npts,sizeof(npts));
@@ -193,8 +192,10 @@ int main(int argc, char** argv) {
         
         // now fill in the big data storage with the points
         for (int pt=0; pt<npts; ++pt) {
-            int ptidx; // we do not care for the point order here
-            mscfile.read((char*)&ptidx, sizeof(ptidx));
+            FloatType coord; // we do not care for the point coordinates
+            mscfile.read((char*)&coord, sizeof(coord));
+            mscfile.read((char*)&coord, sizeof(coord));
+            mscfile.read((char*)&coord, sizeof(coord));
             for (int s=0; s<nscales; ++s) {
                 FloatType a,b;
                 mscfile.read((char*)(&a), sizeof(FloatType));
@@ -270,6 +271,16 @@ int main(int argc, char** argv) {
             }
             cout << "Selected scale " << scales[bestscale] << endl;
             
+            
+            // TODO: multiple scales
+            // - sort scales by accuracy
+            // - select best accuracy + next best, etc.
+            // - OR select all combo : too many combinations...
+            // - select best + run through (best + all others) = N-1 tests
+            // if some two-element combo (best + one other) is > best alone, then take it
+            // - go to three element combo (best 2 combo + one other) = N-2 tests...
+            // until no more improvement (stop before if accuracy 1 is reached)
+            
             // train a classifier at this scale on the whole data set
             int idx = jclass*(jclass-1)/2 + iclass;
             LeastSquareModel classifier;
@@ -312,9 +323,7 @@ int main(int argc, char** argv) {
         //       currently the loop is broken by the order in which comparisons are made, but another
         //       criterion like distance from hyperplanes would be better
         int maxvote = -1; int selectedclass = 0;
-cout << "votes:";
         for (int i=0; i<votes.size(); ++i) {
-cout << " " << votes[i];            
             if (maxvote < votes[i]) {
                 selectedclass = i;
                 maxvote = votes[i];
@@ -328,8 +337,7 @@ cout << " " << votes[i];
                 maxvote = votes[selectedclass];
             }
         }
-cout << endl;
-        // loot at this point real class for checking
+        // look at the real class for checking
         int ptclass = -1;
         for (int c=0; c<nclasses; ++c) if (pt>=classboundaries[c] && pt<classboundaries[c+1]) {ptclass=c; break;}
         assert(ptclass!=-1);
@@ -343,6 +351,34 @@ cout << endl;
     accuracy /= nclasses;
     cout << "One-against-one voting accuracy: " << accuracy << endl;
 
+    // parameters in the classifier definition file :
+    // write nunique selected scales first
+    // write these scales numeric values (so reduced msc files containing only these are OK too)
+    // write num of classes
+    // write for each of the n(n-1)/2 classifiers 
+    // - num of scales used by (here 1 unique scale for now, but plan for extension)
+    // - the scales used 
+    // - weights (2*n_used_scales + 1 coefs per classifier)
+    set<int> uniqueScales(selectedScales.begin(), selectedScales.end());
+    int nuniqueScales = uniqueScales.size();
+    classifparamsfile.write((char*)&nuniqueScales, sizeof(nuniqueScales));
+    cout << "Selected scales (for extraction of the whole scene):";
+    for (set<int>::iterator it = uniqueScales.begin(); it!=uniqueScales.end(); ++it) {
+        cout << " " << scales[*it];
+        classifparamsfile.write((char*)&scales[*it], sizeof(FloatType));
+    }
+    cout << endl;
+    classifparamsfile.write((char*)&nclasses, sizeof(nclasses));
+    int nclassifiers = nclasses * (nclasses-1) / 2;
+    for (int i=0; i<nclassifiers; ++i) {
+        int numscales = 1; // TODO: implement multi-scale classifiers
+        classifparamsfile.write((char*)&numscales, sizeof(numscales));
+        //for (int j=0; j<numscales; ++j)
+        classifparamsfile.write((char*)&scales[selectedScales[i]], sizeof(FloatType));
+        // (2*n_used_scales + 1 coefs per classifier)
+        for (int j=0; j<=2*numscales; ++j) classifparamsfile.write((char*)&weights[i][j], sizeof(FloatType));
+    }
+    
     return 0;
 }
 
