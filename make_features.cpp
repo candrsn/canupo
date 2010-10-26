@@ -2,8 +2,10 @@
 #include <fstream>
 #include <set>
 #include <algorithm>
-#include <string.h>
 
+#include <boost/algorithm/string.hpp>
+
+#include <string.h>
 #include <assert.h>
 #include <stdlib.h>
 
@@ -12,6 +14,7 @@
 #include "leastSquares.hpp"
 
 using namespace std;
+using namespace boost;
 
 int help(const char* errmsg = 0) {
     if (errmsg) cout << "Error: " << errmsg << endl;
@@ -121,6 +124,13 @@ struct LeastSquareModel {
 };
 
 
+bool fpeq(FloatType a, FloatType b) {
+    static const FloatType epsilon = 1e-6;
+    if (b==0) return fabs(a)<epsilon;
+    FloatType ratio = a/b;
+    return ratio>1-epsilon && ratio<1+epsilon;
+}
+
 int main(int argc, char** argv) {
     
     if (argc<4) return help();
@@ -222,7 +232,8 @@ int main(int argc, char** argv) {
     // the classifier for these two classes is stored idx = j*(j-1)/2 + i
     // each classifier is a set of fdim+1 weights = one hyperplane that may be shifted from origin
     vector<vector<FloatType> > weights(nclasses * (nclasses-1) / 2);
-    vector<int> selectedScales(nclasses * (nclasses-1) / 2, -1);
+    vector<vector<int> > selectedScales(nclasses * (nclasses-1) / 2);
+    set<int> uniqueScales;
     
     // train all one-against-one classifiers
     for (int jclass = 1; jclass < nclasses; ++jclass) {
@@ -239,64 +250,121 @@ int main(int argc, char** argv) {
             cout << "Classifier for classes " << iclass << " vs " << jclass << endl;
             FloatType bestaccuracy = -1;
             FloatType bestperf = -1e6;
-            int bestscale = -1;
             
-            // scale by scale classif, look for characteristic scale and add more scales if necessary
-            for(int s=0; s<nscales; ++s) {
+            vector<int> bestscales;
             
-                // 10-fold CV for estimating generalisation ability instead of train classif
-                // train a classifier per scale
-                LeastSquareModel classifier;
-                classifier.prepareTraining(ntotal, 2);
+            // scale by scale classif, look for scale leading to best classification and add more scales if necessary
+            for (int nusedscales = 0; nusedscales < nscales; ++nusedscales) {
+                FloatType bestaccuracy_without_new_scale = bestaccuracy;
+                FloatType bestperf_without_new_scale = bestperf;
+                int bestscale = -1;
                 
-                // fill the training data
-                for (int pt=0; pt<ni; ++pt) classifier.addTrainData(&data[(ibeg+pt)*fdim + s*2], -1);
-                for (int pt=0; pt<nj; ++pt) classifier.addTrainData(&data[(jbeg+pt)*fdim + s*2], 1);
+                for(int s=0; s<nscales; ++s) {
+                    bool usedscale = false;
+                    for (int i=0; i<bestscales.size(); ++i) if (bestscales[i]==s) {usedscale = true; break;}
+                    if (usedscale) continue;
+                
+                    // 10-fold CV for estimating generalisation ability instead of train classif
+                    // train a classifier per scale
+                    LeastSquareModel classifier;
+                    int nfeatures = (bestscales.size()+1)*2;
+                    classifier.prepareTraining(ntotal, nfeatures);
+                    
+                    // fill the training data
+                    vector<FloatType> mscdata(nfeatures);
+                    for (int pt=0; pt<ni; ++pt) {
+                        for (int i=0; i<bestscales.size(); ++i) {
+                            mscdata[i*2] = data[(ibeg+pt)*fdim + bestscales[i]*2];
+                            mscdata[i*2+1] = data[(ibeg+pt)*fdim + bestscales[i]*2+1];
+                        }
+                        mscdata[bestscales.size()*2] = data[(ibeg+pt)*fdim + s*2];
+                        mscdata[bestscales.size()*2+1] = data[(ibeg+pt)*fdim + s*2+1];
+                        classifier.addTrainData(&mscdata[0], -1);
+                    }
+                    for (int pt=0; pt<nj; ++pt) {
+                        for (int i=0; i<bestscales.size(); ++i) {
+                            mscdata[i*2] = data[(jbeg+pt)*fdim + bestscales[i]*2];
+                            mscdata[i*2+1] = data[(jbeg+pt)*fdim + bestscales[i]*2+1];
+                        }
+                        mscdata[bestscales.size()*2] = data[(jbeg+pt)*fdim + s*2];
+                        mscdata[bestscales.size()*2+1] = data[(jbeg+pt)*fdim + s*2+1];
+                        classifier.addTrainData(&mscdata[0], 1);
+                    }
 
-                classifier.shuffle();                
-                FloatType accuracy, perf;
-                classifier.crossValidate(10, accuracy, perf);
-                cout << "cv accuracy using scale " << scales[s] << " only: " << accuracy << " perf " << perf << endl;
-                
-                if (bestaccuracy < accuracy || (bestaccuracy == accuracy && bestperf < perf) ) {
-                    bestaccuracy = accuracy;
-                    bestperf = perf;
-                    bestscale = s;
+                    classifier.shuffle();                
+                    FloatType accuracy, perf;
+                    classifier.crossValidate(10, accuracy, perf);
+                    cout << "cv accuracy using scale";
+                    if (bestscales.empty()) cout << " " << scales[s] << " only: ";
+                    else {
+                        cout << "s";
+                        for (int i=0; i<bestscales.size(); ++i) cout << " " << scales[bestscales[i]];
+                        cout << " and " << scales[s] << ": ";
+                    }
+                    cout << accuracy << " perf " << perf << endl;
+                    
+                    if (bestaccuracy < accuracy || (bestaccuracy == accuracy && bestperf < perf) ) {
+                        bestaccuracy = accuracy;
+                        bestperf = perf;
+                        bestscale = s;
+                    }
                 }
                 
-/*                FloatType accuracy = 0.5 * (ncorrecti / (FloatType)ni + ncorrectj / (FloatType)nj);
-                FloatType perfclassif = 0.5 * (perfclassifi / ni + perfclassifj / nj);
-                cout << "accuracy using scale " << scales[s] << " only: " << accuracy << " perf " << perfclassif << endl;
-*/
+                if (bestaccuracy==bestaccuracy_without_new_scale && bestperf == bestperf_without_new_scale) break;
+                bestscales.push_back(bestscale);
+                // sort for display
+                sort(bestscales.begin(), bestscales.end());
             }
-            cout << "Selected scale " << scales[bestscale] << endl;
             
+            cout << "Please enter one or more selected scales (default =";
+            for (int i=0; i<bestscales.size(); ++i) cout << " " << scales[bestscales[i]];
+            cout << "): " << endl;
             
-            // TODO: multiple scales
-            // - sort scales by accuracy
-            // - select best accuracy + next best, etc.
-            // - OR select all combo : too many combinations...
-            // - select best + run through (best + all others) = N-1 tests
-            // if some two-element combo (best + one other) is > best alone, then take it
-            // - go to three element combo (best 2 combo + one other) = N-2 tests...
-            // until no more improvement (stop before if accuracy 1 is reached)
+            vector<int> usersidx;
+            do {
+                string userscalestring;
+                getline(cin, userscalestring);
+                trim(userscalestring);
+                if (userscalestring.empty()) {usersidx = bestscales; break;}
+                vector<string> tokens;
+                split(tokens, userscalestring, is_any_of(", \t"));
+                for (vector<string>::iterator it = tokens.begin(); it!=tokens.end(); ++it) {
+                    FloatType userscale = atof(it->c_str());
+                    int scaleidx = -1;
+                    for(int s=0; s<nscales; ++s) if (fpeq(scales[s],userscale)) {scaleidx = s; break;}
+                    if (scaleidx==-1) {usersidx.clear(); break;}
+                    usersidx.push_back(scaleidx);
+                }
+                if (usersidx.empty()) cout << "Invalid scale, please try again: " << endl;
+            } while (usersidx.empty());
             
-            // train a classifier at this scale on the whole data set
+            for (int i=0; i<usersidx.size(); ++i) uniqueScales.insert(usersidx[i]);
+            
+            // train a classifier at the selected scales on the whole data set
             int idx = jclass*(jclass-1)/2 + iclass;
             LeastSquareModel classifier;
             classifier.prepareTraining(ntotal, 2);
             // fill the training data
-            for (int pt=0; pt<ni; ++pt) classifier.addTrainData(&data[(ibeg+pt)*fdim + bestscale*2], -1);
-            for (int pt=0; pt<nj; ++pt) classifier.addTrainData(&data[(jbeg+pt)*fdim + bestscale*2], 1);
-            // no need to shuffle for whole data set training
+            vector<FloatType> mscdata(usersidx.size()*2);
+            for (int pt=0; pt<ni; ++pt) {
+                for (int i=0; i<usersidx.size(); ++i) {
+                    mscdata[i*2] = data[(ibeg+pt)*fdim + usersidx[i]*2];
+                    mscdata[i*2+1] = data[(ibeg+pt)*fdim + usersidx[i]*2+1];
+                }
+                classifier.addTrainData(&mscdata[0], -1);
+            }
+            for (int pt=0; pt<nj; ++pt) {
+                for (int i=0; i<usersidx.size(); ++i) {
+                    mscdata[i*2] = data[(jbeg+pt)*fdim + usersidx[i]*2];
+                    mscdata[i*2+1] = data[(jbeg+pt)*fdim + usersidx[i]*2+1];
+                }
+                classifier.addTrainData(&mscdata[0], 1);
+            }
+            // no need to shuffle for training on the whole data set
             classifier.train();
-            // store the weights and best scale for later use
+            // store the weights and selected scale indices for later use
             weights[idx] = classifier.weights;
-            selectedScales[idx] = bestscale;
-            
-            // TODO: Select more than one scale
-            //       process combination of best scales so long as it increases the performance
-            //       here we found 100% CV classif... but wait till we do n-class voting
+            selectedScales[idx] = usersidx;
         }
     }
 
@@ -310,10 +378,11 @@ int main(int argc, char** argv) {
         vector<int> votes(nclasses, 0);
         for (int j=1; j<nclasses; ++j) for (int i=0; i<j; ++i) {
             int idx = j*(j-1)/2 + i;
-            // single scale classifier for now: TODO: multi-scale
-            FloatType pred = weights[idx][2];
-            pred += ptdata[selectedScales[idx]*2] * weights[idx][0];
-            pred += ptdata[selectedScales[idx]*2+1] * weights[idx][1];
+            FloatType pred = weights[idx][selectedScales[idx].size()*2];
+            for (int ssi = 0; ssi < selectedScales[idx].size(); ++ssi) {
+                pred += ptdata[selectedScales[idx][ssi]*2] * weights[idx][ssi*2];
+                pred += ptdata[selectedScales[idx][ssi]*2+1] * weights[idx][ssi*2+1];
+            }
             if (pred>=0) ++votes[j];
             else ++votes[i];
             predictions[idx] = pred;
@@ -359,7 +428,6 @@ int main(int argc, char** argv) {
     // - num of scales used by (here 1 unique scale for now, but plan for extension)
     // - the scales used 
     // - weights (2*n_used_scales + 1 coefs per classifier)
-    set<int> uniqueScales(selectedScales.begin(), selectedScales.end());
     int nuniqueScales = uniqueScales.size();
     classifparamsfile.write((char*)&nuniqueScales, sizeof(nuniqueScales));
     cout << "Selected scales (for extraction of the whole scene):";
@@ -371,10 +439,9 @@ int main(int argc, char** argv) {
     classifparamsfile.write((char*)&nclasses, sizeof(nclasses));
     int nclassifiers = nclasses * (nclasses-1) / 2;
     for (int i=0; i<nclassifiers; ++i) {
-        int numscales = 1; // TODO: implement multi-scale classifiers
+        int numscales = selectedScales[i].size(); // TODO: implement multi-scale classifiers
         classifparamsfile.write((char*)&numscales, sizeof(numscales));
-        //for (int j=0; j<numscales; ++j)
-        classifparamsfile.write((char*)&scales[selectedScales[i]], sizeof(FloatType));
+        for (int j=0; j<numscales; ++j) classifparamsfile.write((char*)&scales[selectedScales[i][j]], sizeof(FloatType));
         // (2*n_used_scales + 1 coefs per classifier)
         for (int j=0; j<=2*numscales; ++j) classifparamsfile.write((char*)&weights[i][j], sizeof(FloatType));
     }
