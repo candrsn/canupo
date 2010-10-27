@@ -34,12 +34,17 @@ density data.msc nsubdiv nametag [some scales]
 TODO: allow to merge several msc files in a unique density, in order to have the density
       for one class def as defined in make_features
 
-make_features features.prm data1.msc data2.msc - data3.msc - data4.msc...
+make_features features.prm [scales] : data1.msc data2.msc - data3.msc - data4.msc...
+  output: features.prm  # The resulting parameters for feature extraction and classification of the whole scene
+  input:  scales        # Optional, a set of scales to compute the features on.
+                        # If this is not specified an automated procedure will find the scales that
+                        # best discriminates the given data. You will then be prompted for which
+                        # scales to use.
+                        # If the scales are specified on the command line there is no interaction and
+                        # no automated search.
   inputs: dataX.msc     # The multiscale parameters for the samples the user wishes to discriminate
                         # Use - separators to indicate each class, one or more samples allowed per class
-  output: features.prm  # The resulting parameters for feature extraction and classification of the whole scene  
-  # Note: Also displays the characteristic scales that allow each class to be best discriminated against all others
-  # Note2: Interactive selection
+                        # The data file lists start after the : separator on the command line
 
 trajectories some_file.svg features.prm N data1.msc data2.msc - data3.msc - data4.msc...
   input: data.msc         # The multiscale parameters computed by canupo
