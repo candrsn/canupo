@@ -392,51 +392,115 @@ int main(int argc, char** argv) {
             int cliscaleidx = -1;
             for (int i=0; i<classifierscales[cli].size(); ++i) if (fpeq(scales[si],classifierscales[cli][i])) cliscaleidx = i;
             if (cliscaleidx==-1) continue; // scale not used for this classifier
-            LinearPredictor* lp = dynamic_cast<LinearPredictor*>(predictors[cli].get());
-            if (!lp) {
-                cout << "Skipping classifier, sorry only linear classifiers are supported for now" << endl;
-                continue;
-            }
-            FloatType bias = lp->weights[lp->dim];
-            FloatType xw = lp->weights[cliscaleidx*2];
-            FloatType yw = lp->weights[cliscaleidx*2+1];
-            // Compute first the intersections in xy space, then scale and reverse top/down
-            // Intersection with triangle bottom line (1D-2D axis)
-            FloatType x12 = numeric_limits<FloatType>::max();
-            FloatType y12 = 0;
-            if (xw!=0) x12 = -bias / xw;
-            bool use12 = x12>=0 && x12<=1;
-            FloatType x13 = numeric_limits<FloatType>::max();
-            FloatType y13 = numeric_limits<FloatType>::max();
-            FloatType tmp = xw + sqrt3 * yw;
-            if (tmp!=0) {
-                x13 = -bias / tmp;
-                y13 = sqrt3 * x13;
-            }
-            bool use13 = x13>=0 && x13<=0.5 && y13>=0 && y13<=sqrt3*0.5;
-            FloatType x23 = numeric_limits<FloatType>::max();
-            FloatType y23 = numeric_limits<FloatType>::max();
-            tmp = sqrt3 * yw - xw;
-            if (tmp!=0) {
-                x23 = (bias + sqrt3 * yw) / tmp;
-                y23 = sqrt3 - sqrt3 * x23;
-            }
-            bool use23 = x23>=0.5 && x23<=1 && y23>=0 && y23<=sqrt3*0.5;
-            // the coordinates of the line we'll retain
-            FloatType xl1, yl1, xl2, yl2;
-            if (use12 && use23) {xl1 = x12; yl1 = y12; xl2 = x23; yl2 = y23; cout << "12-23" << endl;}
-            else if (use13 && use23) {xl1 = x13; yl1 = y13; xl2 = x23; yl2 = y23; cout << "13-23" << endl;}
-            else if (use12 && use13) {xl1 = x12; yl1 = y12; xl2 = x13; yl2 = y13; cout << "12-13" << endl;}
-            else {
-                cout << "hyperplane not intersecting scale " << scales[si] << " relevant discriminant area" << endl;
-                continue;
-            }
             const FloatType sf = scaleFactor*nsubdiv;
-            // TODO: color per classifier
-            densityfile << "<path style=\"fill:none;stroke:#000000;stroke-width:1px;\" ";
-            densityfile << "d=\"M " << sf*xl1 << "," << top - sf*yl1;
-            densityfile << " L " << sf*xl2 << "," << top - sf*yl2;
-            densityfile << "\" id=\"classif-" << (class1+1) << "-" << (class2+1) << "\" />";
+            LinearPredictor* lp = dynamic_cast<LinearPredictor*>(predictors[cli].get());
+            if (lp) {
+                FloatType bias = lp->weights[lp->dim];
+                FloatType xw = lp->weights[cliscaleidx*2];
+                FloatType yw = lp->weights[cliscaleidx*2+1];
+                // Compute first the intersections in xy space, then scale and reverse top/down
+                // Intersection with triangle bottom line (1D-2D axis)
+                FloatType x12 = numeric_limits<FloatType>::max();
+                FloatType y12 = 0;
+                if (xw!=0) x12 = -bias / xw;
+                bool use12 = x12>=0 && x12<=1;
+                FloatType x13 = numeric_limits<FloatType>::max();
+                FloatType y13 = numeric_limits<FloatType>::max();
+                FloatType tmp = xw + sqrt3 * yw;
+                if (tmp!=0) {
+                    x13 = -bias / tmp;
+                    y13 = sqrt3 * x13;
+                }
+                bool use13 = x13>=0 && x13<=0.5 && y13>=0 && y13<=sqrt3*0.5;
+                FloatType x23 = numeric_limits<FloatType>::max();
+                FloatType y23 = numeric_limits<FloatType>::max();
+                tmp = sqrt3 * yw - xw;
+                if (tmp!=0) {
+                    x23 = (bias + sqrt3 * yw) / tmp;
+                    y23 = sqrt3 - sqrt3 * x23;
+                }
+                bool use23 = x23>=0.5 && x23<=1 && y23>=0 && y23<=sqrt3*0.5;
+                // the coordinates of the line we'll retain
+                FloatType xl1, yl1, xl2, yl2;
+                if (use12 && use23) {xl1 = x12; yl1 = y12; xl2 = x23; yl2 = y23; cout << "12-23" << endl;}
+                else if (use13 && use23) {xl1 = x13; yl1 = y13; xl2 = x23; yl2 = y23; cout << "13-23" << endl;}
+                else if (use12 && use13) {xl1 = x12; yl1 = y12; xl2 = x13; yl2 = y13; cout << "12-13" << endl;}
+                else {
+                    cout << "hyperplane not intersecting scale " << scales[si] << " relevant discriminant area" << endl;
+                    continue;
+                }
+                // TODO: color per classifier
+                densityfile << "<path style=\"fill:none;stroke:#000000;stroke-width:1px;\" ";
+                densityfile << "d=\"M " << sf*xl1 << "," << top - sf*yl1;
+                densityfile << " L " << sf*xl2 << "," << top - sf*yl2;
+                densityfile << "\" id=\"classif-" << (class1+1) << "-" << (class2+1) << "\" />";
+                continue;
+            }
+            // TODO: user-defined, piecewise-linear, classifiers
+            
+            // generic classifier type (including gaussian)
+            // interpolate between cells
+            // choose a better resolution than the cells
+            int segres = nsubdiv * 4; // 16 times more elements in 2D
+            vector<FloatType> mscdata(classifierscales[cli].size()*2, 0);
+            bool scaleUsed = false;
+            for (int segi = 1; segi <= segres; ++segi) {
+                vector<FloatType> preds(segi+1);
+                vector<FloatType> x(segi+1);
+                vector<FloatType> y(segi+1);
+                for (int segj = 0; segj <= segi; ++segj) {
+                    // horizontal, start from (1/2, sqrt3/2) down to (0,0)
+                    mscdata[cliscaleidx*2] = x[segj] = 0.5 - 0.5 * segi / (FloatType) segres + segj / (FloatType) segres;
+                    mscdata[cliscaleidx*2+1] = y[segj] = 0.5 * sqrt3 - 0.5 * sqrt3 * segi / (FloatType) segres;
+                    preds[segj] = predictors[cli]->predict(&mscdata[0]);
+                }
+                for (int segj = 0; segj < segi; ++segj) {
+                    // changing sign indicates this segment crosses the decision boundary
+                    if (preds[segj] * preds[segj+1] < 0) {
+                        scaleUsed = true;
+                        densityfile << "<path style=\"fill:none;stroke:#000000;stroke-width:1px;\" ";
+                        densityfile << "d=\"M " << sf*x[segj] << "," << top - sf*y[segj];
+                        densityfile << " L " << sf*x[segj+1] << "," << top - sf*y[segj+1];
+                        densityfile << "\" id=\"classif-" << (class1+1) << "-" << (class2+1) << "-h" << segi<<"-"<<segj<<"\" />";
+                    }
+                }
+                for (int segj = 0; segj <= segi; ++segj) {
+                    // slanted right, start from (1,0) to (0,0) then up-right-wards
+                    mscdata[cliscaleidx*2] = x[segj] = 1 - segi / (FloatType) segres + segj * 0.5 / (FloatType) segres;
+                    mscdata[cliscaleidx*2+1] = y[segj] = 0.5 * sqrt3 * segj / (FloatType) segres;
+                    preds[segj] = predictors[cli]->predict(&mscdata[0]);
+                }
+                for (int segj = 0; segj < segi; ++segj) {
+                    // changing sign indicates this segment crosses the decision boundary
+                    if (preds[segj] * preds[segj+1] < 0) {
+                        scaleUsed = true;
+                        densityfile << "<path style=\"fill:none;stroke:#000000;stroke-width:1px;\" ";
+                        densityfile << "d=\"M " << sf*x[segj] << "," << top - sf*y[segj];
+                        densityfile << " L " << sf*x[segj+1] << "," << top - sf*y[segj+1];
+                        densityfile << "\" id=\"classif-" << (class1+1) << "-" << (class2+1) << "-sr" << segi<<"-"<<segj<<"\" />";
+                    }
+                }
+                for (int segj = 0; segj <= segi; ++segj) {
+                    // slanted left, start from (0,0) to (1,0) then up-left-wards
+                    mscdata[cliscaleidx*2] = x[segj] = segi / (FloatType) segres - segj * 0.5 / (FloatType) segres;
+                    mscdata[cliscaleidx*2+1] = y[segj] = 0.5 * sqrt3 * segj / (FloatType) segres;
+                    preds[segj] = predictors[cli]->predict(&mscdata[0]);
+                }
+                for (int segj = 0; segj < segi; ++segj) {
+                    // changing sign indicates this segment crosses the decision boundary
+                    if (preds[segj] * preds[segj+1] < 0) {
+                        scaleUsed = true;
+                        densityfile << "<path style=\"fill:none;stroke:#000000;stroke-width:1px;\" ";
+                        densityfile << "d=\"M " << sf*x[segj] << "," << top - sf*y[segj];
+                        densityfile << " L " << sf*x[segj+1] << "," << top - sf*y[segj+1];
+                        densityfile << "\" id=\"classif-" << (class1+1) << "-" << (class2+1) << "-sl" << segi<<"-"<<segj<<"\" />";
+                    }
+                }
+            }
+            if (!scaleUsed) {
+                cout << "scale " << scales[si] << " is not a relevant discriminant scale for the given classifier" << endl;
+                continue;
+            }
         }
         
         densityfile << "</svg>" << endl;
