@@ -22,10 +22,10 @@ using namespace std;
 int help(const char* errmsg = 0) {
     if (errmsg) cout << "Error: " << errmsg << endl;
 cout << "\
-canupo scales... - data.xyz data_core.xyz data_core.msc\n\
+canupo scales... : data.xyz data_core.xyz data_core.msc\n\
   inputs: scales         # list of scales at which to perform the analysis\n\
                          # The syntax minscale:increment:maxscale is also accepted\n\
-                         # Use - to indicate the end of the list of scales\n\
+                         # Use : to indicate the end of the list of scales\n\
   input: data.xyz        # whole raw point cloud to process\n\
   input: data_core.xyz   # points at which to do the computation. It is not necessary that these\n\
                          # points match entries in data.xyz: This means data_core.xyz need not be\n\
@@ -45,7 +45,7 @@ int main(int argc, char** argv) {
     if (argc<3) return help();
 
     int separator = 0;
-    for (int i=1; i<argc; ++i) if (!strcmp("-",argv[i])) {
+    for (int i=1; i<argc; ++i) if (!strcmp(":",argv[i])) {
         separator = i;
         break;
     }
