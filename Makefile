@@ -15,8 +15,14 @@ density:
 annotate:
 	$(CXX) $(CXXFLAGS) annotate.cpp -o annotate
 
-make_features:
-	$(CXX) $(CXXFLAGS) make_features.cpp $(LAPACK) -o make_features
+features_least_squares:
+	$(CXX) $(CXXFLAGS) features.cpp $(LAPACK) -o features_least_squares
+
+features_linear_svm:
+	$(CXX) $(CXXFLAGS) -DLINEAR_SVM features.cpp -o features_linear_svm
+
+features_gaussian_svm:
+	$(CXX) $(CXXFLAGS) -DGAUSSIAN_SVM features.cpp -o features_gaussian_svm
 
 classify:
 	$(CXX) $(CXXFLAGS) classify.cpp -o classify
@@ -24,5 +30,5 @@ classify:
 clean:
 	rm -f canupo density annotate make_features classify
 
-.PHONY: canupo density annotate make_features classify clean
+.PHONY: canupo density annotate classify clean features_least_squares features_linear_svm features_gaussian_svm
 

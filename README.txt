@@ -24,17 +24,21 @@ TODO annotate data.xyz data_core.msc annotated_file.xyz [some scales]
   # Note: the data points take the same characteristics as their nearest neighbor from the core points
   #       defined in the msc file.
 
-density data.msc nsubdiv nametag [some scales]
-  input: data.msc              # The multiscale parameters computed by canupo
+density nsubdiv nametag [some scales] : [features.prm : ] data.msc [ - data2.msc ...]
   input: nsubdiv               # Number of subdivisions on each side of the triangle
-  input: nametag               # The base name for the output files
+  input: nametag               # The base name for the output files. One density plot is
+                               # generated per selected scale, named "nametag_scale.svg"
   input: some scales           # Selected scales at which to perform the density plot
                                # All scales in the parameter file are used if not specified.
-  output: nametag_scale.svg    # One density plot per selected scale
-TODO: allow to merge several msc files in a unique density, in order to have the density
-      for one class def as defined in make_features
+  input: data.msc              # The multiscale parameters computed by canupo.
+                               # Use - to separate classes. Multiple files per class are allowed.
+                               # If no classes are specified (ex: whole scene file) the density is color-coded from blue to red.
+                               # If multiple classes are specified the density is coded from light to bright colors with one color per class.
+  input: features.prm          # An optional classifier definition file. If it is specified the decision
+                               # boundaries at each scale will be displayed in the generated graphs.
 
-make_features features.prm [scales] : data1.msc data2.msc - data3.msc - data4.msc...
+
+features_XXX features.prm [scales] : data1.msc data2.msc - data3.msc - data4.msc...
   output: features.prm  # The resulting parameters for feature extraction and classification of the whole scene
   input:  scales        # Optional, a set of scales to compute the features on.
                         # If this is not specified an automated procedure will find the scales that
@@ -45,6 +49,10 @@ make_features features.prm [scales] : data1.msc data2.msc - data3.msc - data4.ms
   inputs: dataX.msc     # The multiscale parameters for the samples the user wishes to discriminate
                         # Use - separators to indicate each class, one or more samples allowed per class
                         # The data file lists start after the : separator on the command line
+# Note: XXX stands for the classifier type:
+# - least_squares: Basic minimal least squared error hyperplane for each pair of classes
+# - linear_svm: Hyperplane separating each pair of classes, but defined so as to lead to maximal margins instead of least squares
+# - gaussian_svm: Gaussian kernel SVM, same principle but using the "kernel trick" to get a non-linear mapping in the original space.
 
 trajectories some_file.svg features.prm N data1.msc data2.msc - data3.msc - data4.msc...
   input: data.msc         # The multiscale parameters computed by canupo

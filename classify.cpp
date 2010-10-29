@@ -4,9 +4,95 @@
 
 #include <math.h>
 
+#include <boost/make_shared.hpp>
+
 #include "points.hpp"
 
 using namespace std;
+using namespace boost;
+
+/* THIS SECTION SHALL BE CONSISTENT WITH features_XXX programs 
+   TODO: abstract a bit more and share common headers
+*/
+
+struct Predictor {
+    virtual ~Predictor() {}
+    virtual void load(istream& is) = 0;
+    virtual FloatType predict(const FloatType* data) = 0;
+};
+
+struct LinearPredictor : public Predictor {
+    int dim;
+    vector<FloatType> weights;
+    
+    void load(istream& is) {
+        is.read((char*)&dim, sizeof(int));
+        weights.resize(dim+1);
+        for (int d=0; d<=dim; ++d) is.read((char*)&weights[d],sizeof(FloatType));
+    }
+    
+    FloatType predict(const FloatType* data) {
+        FloatType ret = weights[dim];
+        for (int d=0; d<dim; ++d) ret += weights[d] * data[d];
+        return ret;
+    }
+};
+
+struct GaussianKernelPredictor : public Predictor {
+    int dim;
+    FloatType gamma;
+    FloatType bias;
+    vector<FloatType> coefs;
+    vector<FloatType> support_vectors;
+    
+    void load(istream& is) {
+        is.read((char*)&dim, sizeof(int));
+        // dlib::deserialize(decfun, is);
+        // Too bad the deserialize is buggy !
+        is.read((char*)&gamma, sizeof(FloatType));
+        is.read((char*)&bias, sizeof(FloatType));
+        int nvec;
+        is.read((char*)&nvec, sizeof(int));
+        coefs.resize(nvec);
+        support_vectors.resize(nvec*dim);
+        for (int i=0; i<nvec; ++i) {
+            is.read((char*)&coefs[i], sizeof(FloatType));
+            for (int j=0; j<dim; ++j) {
+                is.read((char*)&support_vectors[i*dim+j], sizeof(FloatType));
+            }
+        }        
+    }
+    
+    FloatType predict(const FloatType* data) {
+/*        dlib::matrix<FloatType> x(dim,1);
+        for (int d=0; d<dim; ++d) x(d) = data[d];
+        return decfun(x);
+*/
+        FloatType weighted_sum_kern_space = 0;
+        for (int i=0; i<coefs.size(); ++i) {
+            FloatType d2 = 0;
+            for (int j=0; j<dim; ++j) {
+                FloatType delta = support_vectors[i*dim+j] - data[j];
+                d2 += delta*delta;
+            }
+            weighted_sum_kern_space += coefs[i] * exp(-gamma*d2);
+        }
+        return weighted_sum_kern_space - bias;
+    }
+};
+
+shared_ptr<Predictor> getPredictorFromClassifierID(int id) {
+    switch(id) {
+        // both least-squares and linear SVM return an hyperplane
+        case 0:
+        case 1: return make_shared<LinearPredictor>();
+        case 2: return make_shared<GaussianKernelPredictor>();
+    }
+    cerr << "Invalid classifier ID" << endl;
+    exit(1);
+    return shared_ptr<Predictor>();
+}
+
 
 int help(const char* errmsg = 0) {
     if (errmsg) cout << "Error: " << errmsg << endl;
@@ -43,16 +129,18 @@ int main(int argc, char** argv) {
     for (int s=0; s<nuniqueScales; ++s) classifparamsfile.read((char*)&scales[s], sizeof(FloatType));
     int nclasses;
     classifparamsfile.read((char*)&nclasses, sizeof(nclasses));
+    int classifierID;
+    classifparamsfile.read((char*)&classifierID, sizeof(classifierID));
     int nclassifiers = nclasses * (nclasses-1) / 2;
     vector<vector<FloatType> > classifierscales(nclassifiers);
-    vector<vector<FloatType> > classifierweights(nclassifiers);
+    vector<shared_ptr<Predictor> > predictors(nclassifiers);
     for (int i=0; i<nclassifiers; ++i) {
         int numscales;
         classifparamsfile.read((char*)&numscales, sizeof(numscales));
         classifierscales[i].resize(numscales);
         for (int j=0; j<numscales; ++j) classifparamsfile.read((char*)&classifierscales[i][j], sizeof(FloatType));
-        classifierweights[i].resize(2*numscales+1);
-        for (int j=0; j<=2*numscales; ++j) classifparamsfile.read((char*)&classifierweights[i][j], sizeof(FloatType));
+        predictors[i] = getPredictorFromClassifierID(classifierID);
+        predictors[i]->load(classifparamsfile);
     }
     
     // reversed situation here compared to canupo:
@@ -141,6 +229,10 @@ int main(int argc, char** argv) {
     cout << "Loading and processing scene data" << endl;
     ofstream scene_annotated(argv[4]);
 
+    // allocate data only once, this is a storage for classifying each point
+    // there will not be more than nuniqueScales for a single classifier
+    vector<FloatType> selectedScalesData(nuniqueScales*2);
+    
     // TODO: load in mem then openmp
     
     ifstream datafile(argv[2]);
@@ -175,13 +267,13 @@ int main(int argc, char** argv) {
             vector<int> votes(nclasses, 0);
             for (int j=1; j<nclasses; ++j) for (int i=0; i<j; ++i) {
                 int cidx = j*(j-1)/2 + i;
-                // multi-scale classifier
-                FloatType pred = classifierweights[cidx].back();
+                // multi-scale classifier: select relevant scales
                 for (int k = 0; k<classifierscalesidx[cidx].size(); ++k) {
                     int sidx = classifierscalesidx[cidx][k];
-                    pred += msc[sidx*2] * classifierweights[cidx][k*2];
-                    pred += msc[sidx*2+1] * classifierweights[cidx][k*2+1];
+                    selectedScalesData[k*2] = msc[sidx*2];
+                    selectedScalesData[k*2+1] = msc[sidx*2+1];
                 }
+                FloatType pred = predictors[cidx]->predict(&selectedScalesData[0]);
                 if (pred>=0) ++votes[j];
                 else ++votes[i];
                 predictions[cidx] = pred;

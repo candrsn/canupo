@@ -59,13 +59,18 @@ string scaleColorMap(int density, int mind, int maxd) {
 int help(const char* errmsg = 0) {
     if (errmsg) cout << "Error: " << errmsg << endl;
 cout << "\
-density data.msc nsubdiv nametag [some scales]\n\
-  input: data.msc              # The multiscale parameters computed by canupo\n\
+density nsubdiv nametag [some scales] : [features.prm : ] data.msc [ - data2.msc ...]\n\
   input: nsubdiv               # Number of subdivisions on each side of the triangle\n\
-  input: nametag               # The base name for the output files\n\
+  input: nametag               # The base name for the output files. One density plot is\n\
+                               # generated per selected scale, named \"nametag_scale.svg\"\n\
   input: some scales           # Selected scales at which to perform the density plot\n\
                                # All scales in the parameter file are used if not specified.\n\
-  output: nametag_scale.svg    # One density plot per selected scale\n\
+  input: data.msc              # The multiscale parameters computed by canupo.\n\
+                               # Use - to separate classes. Multiple files per class are allowed.\n\
+                               # If no classes are specified (ex: whole scene file) the density is color-coded from blue to red.\n\
+                               # If multiple classes are specified the density is coded from light to bright colors with one color per class.\n\
+  input: features.prm          # An optional classifier definition file. If it is specified the decision\n\
+                               # boundaries at each scale will be displayed in the generated graphs.\n\
 "<<endl;
         return 0;
 }
@@ -118,8 +123,10 @@ int main(int argc, char** argv) {
     vector<vector<int> > density(selectedScalesIdx.size(), vector<int>(nsubdiv*(nsubdiv+1), 0));
 
     for (int pt=0; pt<npts; ++pt) {
-        int ptidx; // we do not care for the point order here, just the density
-        mscfile.read((char*)&ptidx, sizeof(ptidx));
+        FloatType coord; // we do not care for the coordinates here, just the multiscale values
+        mscfile.read((char*)&coord, sizeof(FloatType));
+        mscfile.read((char*)&coord, sizeof(FloatType));
+        mscfile.read((char*)&coord, sizeof(FloatType));
         vector<FloatType> mscdata(nscales*2);
         for (int si=0; si<nscales; ++si) {
             mscfile.read((char*)&mscdata[si*2], sizeof(FloatType));

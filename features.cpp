@@ -9,21 +9,32 @@
 #include <assert.h>
 #include <stdlib.h>
 
-#include "dlib/svm.h"
+#if defined(LINEAR_SVM) || defined(GAUSSIAN_SVM)
+#define USE_SVM 1
+#endif
 
 #include "points.hpp"
-#include "svd.hpp"
+
+#ifdef USE_SVM
+#include "dlib/svm.h"
+#else
 #include "leastSquares.hpp"
+#endif
 
 using namespace std;
 using namespace boost;
 
-static const bool useSVM = true;
-
 int help(const char* errmsg = 0) {
     if (errmsg) cout << "Error: " << errmsg << endl;
-cout << "\
-make_features features.prm [scales] : data1.msc data2.msc - data3.msc - data4.msc...\n\
+cout << ""
+#if defined(LINEAR_SVM)
+"features_linear_svm"
+#elif defined(GAUSSIAN_SVM)
+"features_gaussian_svm"
+#else
+"features_least_squares"
+#endif
+" features.prm [scales] : data1.msc data2.msc - data3.msc - data4.msc...\n\
   output: features.prm  # The resulting parameters for feature extraction and classification of the whole scene\n\
   input:  scales        # Optional, a set of scales to compute the features on.\n\
                         # If this is not specified an automated procedure will find the scales that\n\
@@ -39,50 +50,49 @@ make_features features.prm [scales] : data1.msc data2.msc - data3.msc - data4.ms
         return 0;
 }
 
-struct Classifier {
-    virtual ~Classifier() {}
-    virtual void prepareTraining(int _ndata, int _dim) = 0;    
-    virtual void addTrainData(const FloatType* data, FloatType label) = 0;
-    virtual void train() = 0;
-    virtual FloatType predict(const FloatType* data) = 0;
-    virtual void shuffle() = 0;
-    virtual void crossValidate(int nfolds, FloatType &accuracy, FloatType &perf) = 0;
-};
-
+#ifndef USE_SVM
 // simple linear fit trying to map data to -1,+1 classes with least squared error
-struct LeastSquareModel : public Classifier {
-    vector<FloatType> weights;
+struct LeastSquareModel {
+    
+    // parameters are all that's needed to make a prediction
+    struct Parameters {
+        vector<FloatType> weights;
+        int dim; // redundant but handy, as weights.size() == dim+1
+    };
+    
+    Parameters parameters; // weights
+    
     vector<FloatType> A, B; // matrices for lapack
-    int ndata, dim, dataidx;
+    int ndata, dataidx;
     
     void prepareTraining(int _ndata, int _dim) {
-        ndata = _ndata; dim = _dim;
-        assert(ndata>dim);
+        ndata = _ndata; parameters.dim = _dim;
+        assert(ndata>parameters.dim);
         // LAPACK matrices are column-major and destroyed in the process => allocate new matrices now
         // add a column of 1 for allowing hyperplanes not going through the origin
-        A.resize(ndata * (dim+1));
+        A.resize(ndata * (parameters.dim+1));
         B.resize(ndata);
         dataidx = 0;
     }
     
     // data shall point to an array of dim floats. label shall be either +1 or -1
     void addTrainData(const FloatType* data, FloatType label) {
-        for (int d=0; d<dim; ++d) A[d*ndata + dataidx] = data[d];
-        A[dim*ndata + dataidx] = 1;
+        for (int d=0; d<parameters.dim; ++d) A[d*ndata + dataidx] = data[d];
+        A[parameters.dim*ndata + dataidx] = 1;
         B[dataidx] = label;
         ++dataidx;
     }
     
     void train() {
         // now the least squares hyperplane fit
-        leastSquares(&A[0], ndata, dim+1, &B[0], 1);
-        weights.resize(dim+1);
-        for (int d=0; d<=dim; ++d) weights[d] = B[d];
+        leastSquares(&A[0], ndata, parameters.dim+1, &B[0], 1);
+        parameters.weights.resize(parameters.dim+1);
+        for (int d=0; d<=parameters.dim; ++d) parameters.weights[d] = B[d];
     }
     
     FloatType predict(const FloatType* data) {
-        FloatType ret = weights[dim];
-        for (int d=0; d<dim; ++d) ret += weights[d] * data[d];
+        FloatType ret = parameters.weights[parameters.dim];
+        for (int d=0; d<parameters.dim; ++d) ret += parameters.weights[d] * data[d];
         return ret;
     }
 
@@ -91,7 +101,7 @@ struct LeastSquareModel : public Classifier {
         for (int i=ndata-1; i>=1; --i) {
             // may select i itself for the permutation if the element does not change place
             int ridx = random() % (i+1);
-            for (int d=0; d<dim; ++d) swap(A[d * ndata + ridx], A[d * ndata + i]);
+            for (int d=0; d<parameters.dim; ++d) swap(A[d * ndata + ridx], A[d * ndata + i]);
             swap(B[ridx], B[i]);
         }
     }
@@ -112,9 +122,9 @@ struct LeastSquareModel : public Classifier {
             int fend = ndata * (fold+1) / nfolds;
             int ncv = fend - fbeg;
             int nremdata = ndata - ncv;
-            vector<FloatType> Acv(nremdata * (dim+1));
+            vector<FloatType> Acv(nremdata * (parameters.dim+1));
             vector<FloatType> Bcv(nremdata);
-            for (int d=0; d<dim; ++d) {
+            for (int d=0; d<parameters.dim; ++d) {
                 const int baseremdata = d * nremdata;
                 const int basedata = d * ndata;
                 for (int pt=0; pt<fbeg; ++pt) {
@@ -127,13 +137,13 @@ struct LeastSquareModel : public Classifier {
                 }
             }
             // column of 1
-            for (unsigned int i = dim * nremdata; i<Acv.size(); ++i) Acv[i] = 1.0;
+            for (unsigned int i = parameters.dim * nremdata; i<Acv.size(); ++i) Acv[i] = 1.0;
             // train only on partial data
-            leastSquares(&Acv[0], nremdata, dim+1, &Bcv[0], 1);
+            leastSquares(&Acv[0], nremdata, parameters.dim+1, &Bcv[0], 1);
             // predict on the cv region
             for (int pt=fbeg; pt<fend; ++pt) {
-                FloatType pred = Bcv[dim];
-                for (int d=0; d<dim; ++d) pred += Bcv[d] * A[d * ndata + pt];
+                FloatType pred = Bcv[parameters.dim];
+                for (int d=0; d<parameters.dim; ++d) pred += Bcv[d] * A[d * ndata + pt];
                 if (B[pt] >= 0) {if (pred >= 0) ++ncorrectpos; perfpos += pred*fabs(pred);}
                 if (B[pt] < 0) {if (pred < 0) ++ncorrectneg; perfneg -= pred*fabs(pred);}
             }
@@ -142,10 +152,24 @@ struct LeastSquareModel : public Classifier {
         accuracy = 0.5 * (ncorrectpos / (FloatType)npos + ncorrectneg / (FloatType)nneg);
         perf = 0.5 * (perfpos / npos + perfneg / nneg);
     }
-        
-};
 
-struct SVM_Model : public Classifier {
+    enum {ClassifierID = 0};
+    
+    void saveParameters(ostream& os) {
+        os.write((char*)&parameters.dim, sizeof(int));
+        for (int d=0; d<=parameters.dim; ++d) os.write((char*)&parameters.weights[d],sizeof(FloatType));
+    }
+};
+#endif
+
+#ifdef USE_SVM
+struct SVM_Model {
+
+#ifdef GAUSSIAN_SVM
+    enum {ClassifierID = 2};
+#else
+    enum {ClassifierID = 1};
+#endif
 
     // see dlib examples
     template <typename sample_type>
@@ -156,19 +180,27 @@ struct SVM_Model : public Classifier {
             int _nfolds
         ) : samples(samples_), labels(labels_), nfolds(_nfolds) {}
 
-//        double operator() (const dlib::matrix<double>& params) const {
+#ifdef GAUSSIAN_SVM
+        double operator() (const dlib::matrix<double>& params) const {
+#else
         double operator() (FloatType lognu) const {
+#endif
             using namespace dlib;
             // see below for changes from dlib examples
-            //const FloatType nu    = exp(params(0));
-            //const double gamma = exp(params(1));
-            
+#ifdef GAUSSIAN_SVM
+            const FloatType nu    = exp(params(0));
+            const FloatType gamma = exp(params(1));
+#else
             const FloatType nu    = exp(lognu);
+#endif
 
             // Make an SVM trainer and tell it what the parameters are supposed to be.
             svm_nu_trainer<kernel_type> trainer;
-            //trainer.set_kernel(kernel_type(gamma));
+#ifdef GAUSSIAN_SVM
+            trainer.set_kernel(kernel_type(gamma));
+#else
             trainer.set_kernel(kernel_type());
+#endif
             trainer.set_nu(nu);
 
             // Finally, perform 10-fold cross validation and then print and return the results.
@@ -186,22 +218,21 @@ struct SVM_Model : public Classifier {
     // declare dlib types for invoking the SVMs : samples are column vectors
     // dlib allows both static and dynamic lengths... perfect !
     typedef dlib::matrix<FloatType, 0, 1> sample_type;
-    int ndata, dim, dataidx;
+    int ndata, dataidx;
     
-    // gaussian kernel
-    //typedef radial_basis_kernel<sample_type> kernel_type;
-    // linear kernel to begin with
+#ifdef GAUSSIAN_SVM
+    typedef dlib::radial_basis_kernel<sample_type> kernel_type;
+#else
     typedef dlib::linear_kernel<sample_type> kernel_type;
+#endif
 
     vector<sample_type> samples;
     vector<FloatType> labels;
     
-    dlib::matrix<FloatType, 2, 1> params;
-    
-    virtual void prepareTraining(int _ndata, int _dim) {
-        ndata = _ndata; dim = _dim;
+    void prepareTraining(int _ndata, int _dim) {
+        ndata = _ndata; parameters.dim = _dim;
         // prepare one sample with the right dimensions as an argument to the vector init
-        sample_type undefsample; undefsample.set_size(dim,1);
+        sample_type undefsample; undefsample.set_size(parameters.dim,1);
         // use a vector of samples as in the dlib examples.
         samples.clear();
         samples.resize(ndata, undefsample);
@@ -209,45 +240,55 @@ struct SVM_Model : public Classifier {
         dataidx = 0;
     }
     
-    virtual void addTrainData(const FloatType* data, FloatType label) {
-        for (int i=0; i<dim; ++i) samples[dataidx](i) = data[i];
+    void addTrainData(const FloatType* data, FloatType label) {
+        for (int i=0; i<parameters.dim; ++i) samples[dataidx](i) = data[i];
         labels[dataidx] = label;
         ++dataidx;
     }
     
-    virtual void shuffle() {
+    void shuffle() {
         dlib::randomize_samples(samples, labels);
     }
     
-    virtual void crossValidate(int nfolds, FloatType &accuracy, FloatType &perf) {
+    void crossValidate(int nfolds, FloatType &accuracy, FloatType &perf) {
         using namespace dlib;
         // taken from dlib examples
         
         // largest allowed nu: strictly below what's returned by maximum_nu
         FloatType max_nu = 0.999*maximum_nu(labels);
         
-/*        matrix<FloatType> gridsearchspace = cartesian_product(
-            logspace(log10(max_nu), log10(1e-5), 4), // nu parameter
-            logspace(log10(5.0), log10(1e-5), 4)     // gamma parameter
+#ifdef GAUSSIAN_SVM
+        matrix<FloatType> gridsearchspace = cartesian_product(
+            logspace(log10(max_nu), log10(1e-5), 5), // nu parameter
+            logspace(log10(5.0), log10(1e-5), 5)     // gamma parameter
         );
-*/
+#else
         matrix<FloatType> gridsearchspace = logspace(log10(max_nu), log10(1e-5), 16); // nu parameter
+#endif
+
 
         matrix<FloatType> best_result(2,1);
         best_result = 0;
         FloatType best_nu = 1;
-        FloatType best_gamma = 0.1; // unused for linear kernel
+#ifdef GAUSSIAN_SVM
+        FloatType best_gamma = 0.1;
+#endif
         
         // grid search
         for (int col = 0; col < gridsearchspace.nc(); ++col) {
             // pull out the current set of model parameters
             const FloatType nu    = gridsearchspace(0, col);
-            //const FloatType gamma = gridsearchspace(1, col);
+#ifdef GAUSSIAN_SVM
+            const FloatType gamma = gridsearchspace(1, col);
+#endif
 
             // setup a training object using our current parameters
             svm_nu_trainer<kernel_type> trainer;
-            //trainer.set_kernel(kernel_type(gamma));
+#ifdef GAUSSIAN_SVM
+            trainer.set_kernel(kernel_type(gamma));
+#else
             trainer.set_kernel(kernel_type()); // no gamma parameter for the linear kernel
+#endif
             trainer.set_nu(nu);
 
             // Finally, do 10 fold cross validation and then check if the results are the best we have seen so far.
@@ -260,32 +301,32 @@ struct SVM_Model : public Classifier {
             {
                 best_result = result;
                 best_nu = nu;
-//                best_gamma = gamma;
+#ifdef GAUSSIAN_SVM
+                best_gamma = gamma;
+#endif
             }
         }
         //cout << "best result of grid search: " << sum(best_result) << endl;
         //cout << "best gamma: " << best_gamma << "   best nu: " << best_nu << endl;
         //cout << "best nu: " << best_nu << endl;
         
-        //params.resize(2,1);
+#ifdef GAUSSIAN_SVM
+        matrix<FloatType,2,1> params;
         params = best_nu, best_gamma;
-        
         // We also need to supply lower and upper bounds for the search.  
-        matrix<FloatType> lower_bound(2,1), upper_bound(2,1);
+        matrix<FloatType,2,1> lower_bound, upper_bound;
         lower_bound = 1e-7,   // smallest allowed nu
                       1e-7;   // smallest allowed gamma
         upper_bound = max_nu, // largest allowed nu
                       100;    // largest allowed gamma
-        
         // convert to log space
         params = log(params);
         lower_bound = log(lower_bound);
         upper_bound = log(upper_bound);
-
-        // Finally, ask BOBYQA to look for the best set of parameters
-/*        double best_score = find_max_bobyqa(
-            cross_validation_objective(samples, labels), // Function to maximize
-            params,                                      // starting point
+        // Start from the best grid point and launch the appropriate optimiser
+        FloatType best_score = find_max_bobyqa(
+            cross_validation_objective<sample_type>(samples, labels, nfolds), // Function to maximize
+            params,                                      // starting point and result
             params.size()*2 + 1,                         // See BOBYQA docs, generally size*2+1 is a good setting for this
             lower_bound,                                 // lower bound 
             upper_bound,                                 // upper bound
@@ -293,19 +334,22 @@ struct SVM_Model : public Classifier {
             0.01,                                        // desired accuracy
             100                                          // max number of allowable calls to cross_validation_objective()
             );
-*/
-
+        // Don't forget to convert back from log scale to normal scale
+        parameters.nu = exp(params(0));
+        parameters.gamma = exp(params(1));
+#else
+        parameters.nu = log(best_nu);
         FloatType best_score = find_max_single_variable(
             cross_validation_objective<sample_type>(samples, labels, nfolds), // Function to maximize
-            params(0),                                   // starting point
-            lower_bound(0),
-            upper_bound(0),
+            parameters.nu,              // starting point and result
+            log(1e-7),                  // lower bound
+            log(max_nu),                // upper bound
             1e-2,
             100
         );
+        parameters.nu = exp(parameters.nu);
+#endif
 
-        // Don't forget to convert back from log scale to normal scale
-        params = exp(params);
 
 //        cout << " best result of BOBYQA: " << best_score << endl;
 //        cout << " best gamma: " << params(1) << "   best nu: " << params(0) << endl;
@@ -316,54 +360,89 @@ struct SVM_Model : public Classifier {
         perf = best_score * 0.5; // TODO: find better measure
     }
     
-    virtual void train() {
+    void train() {
         using namespace dlib;
         
-        // we first need to select a good nu => crossvalidation no matter what
+        // we first need to select a good set of SVM parameters => crossvalidation no matter what
         shuffle();
         FloatType dummy0, dummy1;
         crossValidate(10, dummy0, dummy1);
         
-        const FloatType nu    = params(0);
-        //const FloatType gamma = params(1);
-        
         svm_nu_trainer<kernel_type> trainer;
-        //trainer.set_kernel(kernel_type(gamma));
-        trainer.set_kernel(kernel_type()); // no gamma parameter for the linear kernel
-        trainer.set_nu(nu);
+        trainer.set_nu(parameters.nu);
         
+#ifdef GAUSSIAN_SVM
+        trainer.set_kernel(kernel_type(parameters.gamma));
         // dlib returns a decision function
-        decfun = trainer.train(samples, labels);
-        
-        // linear kernel: convert it to proper weights for the hyperplane rather than support vectors
-        weights.clear();
-        weights.resize(dim+1, 0);
-        
-        matrix<FloatType> w(dim,1);
+        parameters.decfun = trainer.train(samples, labels);
+#else
+        trainer.set_kernel(kernel_type());
+        // linear kernel: convert the decision function to an hyperplane rather than support vectors
+        // This is equivalent but way more efficient for later scene classification
+        dlib::decision_function<kernel_type> decfun = trainer.train(samples, labels);
+        parameters.weights.clear();
+        parameters.weights.resize(parameters.dim+1, 0);
+        matrix<FloatType> w(parameters.dim,1);
         w = 0;
         for (int i=0; i<decfun.alpha.nr(); ++i) {
             w += decfun.alpha(i) * decfun.basis_vectors(i);
         }
-        for (int i=0; i<dim; ++i) weights[i] = w(i);
-        weights[dim] = -decfun.b;
-        
-
-        // test validity of the method on a few samples
-        for (int s=0; s<10; ++s) {
-            // by hand
-            FloatType p = 0;
-            for (int i=0; i<dim; ++i) p += weights[i] * samples[s](i);
-            p += weights[dim];
-            cout << "with weights: " << p << ", with dfun: " << decfun(samples[s]) << endl;
-        }
+        for (int i=0; i<parameters.dim; ++i) parameters.weights[i] = w(i);
+        parameters.weights[parameters.dim] = -decfun.b;
+#endif
 
     }
     
-    virtual FloatType predict(const FloatType* data) {}
+    struct Parameters {
+        int dim;
+        FloatType nu;
+#ifdef GAUSSIAN_SVM
+        FloatType gamma;
+        dlib::decision_function<kernel_type> decfun;
+#else
+        vector<FloatType> weights;
+#endif
+    };
     
-    dlib::decision_function<kernel_type> decfun;
-    vector<FloatType> weights;
+    Parameters parameters;
+    
+    FloatType predict(const FloatType* data) {
+#ifdef GAUSSIAN_SVM
+        dlib::matrix<FloatType> x(parameters.dim,1);
+        for (int d=0; d<parameters.dim; ++d) x(d) = data[d];
+        return parameters.decfun(x);
+#else
+        FloatType ret = parameters.weights[parameters.dim];
+        for (int d=0; d<parameters.dim; ++d) ret += parameters.weights[d] * data[d];
+        return ret;
+#endif
+    }
+    
+    void saveParameters(ostream& os) {
+        os.write((char*)&parameters.dim, sizeof(int));
+#ifdef GAUSSIAN_SVM
+        // dlib::serialize(parameters.decfun, os);
+        // the serialize function is buggy !
+        // do it tediously
+        os.write((char*)&parameters.gamma, sizeof(FloatType));
+        FloatType bias = parameters.decfun.b;
+        os.write((char*)&bias, sizeof(FloatType));
+        int nalpha = parameters.decfun.alpha.nr();
+        os.write((char*)&nalpha, sizeof(int));
+        for (int i=0; i<nalpha; ++i) {
+            FloatType alpha = parameters.decfun.alpha(i);
+            os.write((char*)&alpha, sizeof(FloatType));
+            for (int j=0; j<parameters.dim; ++j) {
+                FloatType v = parameters.decfun.basis_vectors(i)(j);
+                os.write((char*)&v, sizeof(FloatType));
+            }
+        }        
+#else
+        for (int d=0; d<=parameters.dim; ++d) os.write((char*)&parameters.weights[d],sizeof(FloatType));
+#endif
+    }
 };
+#endif
 
 bool fpeq(FloatType a, FloatType b) {
     static const FloatType epsilon = 1e-6;
@@ -371,6 +450,12 @@ bool fpeq(FloatType a, FloatType b) {
     FloatType ratio = a/b;
     return ratio>1-epsilon && ratio<1+epsilon;
 }
+
+#ifdef USE_SVM
+typedef SVM_Model Classifier;
+#else
+typedef LeastSquareModel Classifier;
+#endif
 
 int main(int argc, char** argv) {
     
@@ -495,7 +580,7 @@ int main(int argc, char** argv) {
     // let i,j and i<j be two classes to compare (hence j>=1 and i>=0)
     // the classifier for these two classes is stored idx = j*(j-1)/2 + i
     // each classifier is a set of fdim+1 weights = one hyperplane that may be shifted from origin
-    vector<vector<FloatType> > weights(nclasses * (nclasses-1) / 2);
+    vector<Classifier::Parameters > params(nclasses * (nclasses-1) / 2);
     vector<vector<int> > selectedScales(nclasses * (nclasses-1) / 2);
     set<int> uniqueScales;
     
@@ -532,11 +617,8 @@ int main(int argc, char** argv) {
                         if (usedscale) continue;
 
                         int nfeatures = (bestscales.size()+1)*2;
-#ifdef USE_SVM
-                        SVM_Model classifier;
-#else
-                        LeastSquareModel classifier;
-#endif
+                        
+                        Classifier classifier;
                         classifier.prepareTraining(ntotal, nfeatures);
 
                         // fill the training data
@@ -612,11 +694,9 @@ int main(int argc, char** argv) {
             
             // train a classifier at the selected scales on the whole data set
             int idx = jclass*(jclass-1)/2 + iclass;
-#ifdef USE_SVM
-            SVM_Model classifier;
-#else
-            LeastSquareModel classifier;
-#endif
+
+            Classifier classifier;
+
             classifier.prepareTraining(ntotal, usersidx.size()*2);
             // fill the training data
             vector<FloatType> mscdata(usersidx.size()*2);
@@ -637,7 +717,7 @@ int main(int argc, char** argv) {
             // no need to shuffle for training on the whole data set
             classifier.train();
             // store the weights and selected scale indices for later use
-            weights[idx] = classifier.weights;
+            params[idx] = classifier.parameters;
             selectedScales[idx] = usersidx;
         }
     }
@@ -652,11 +732,14 @@ int main(int argc, char** argv) {
         vector<int> votes(nclasses, 0);
         for (int j=1; j<nclasses; ++j) for (int i=0; i<j; ++i) {
             int idx = j*(j-1)/2 + i;
-            FloatType pred = weights[idx][selectedScales[idx].size()*2];
-            for (int ssi = 0; ssi < selectedScales[idx].size(); ++ssi) {
-                pred += ptdata[selectedScales[idx][ssi]*2] * weights[idx][ssi*2];
-                pred += ptdata[selectedScales[idx][ssi]*2+1] * weights[idx][ssi*2+1];
+            vector<FloatType> mscdata(selectedScales[idx].size()*2);
+            for (int ssi=0; ssi<selectedScales[idx].size(); ++ssi) {
+                mscdata[ssi*2] = ptdata[selectedScales[idx][ssi]*2];
+                mscdata[ssi*2+1] = ptdata[selectedScales[idx][ssi]*2+1];
             }
+            Classifier classifier;
+            classifier.parameters = params[idx];
+            FloatType pred = classifier.predict(&mscdata[0]);
             if (pred>=0) ++votes[j];
             else ++votes[i];
             predictions[idx] = pred;
@@ -698,10 +781,11 @@ int main(int argc, char** argv) {
     // write nunique selected scales first
     // write these scales numeric values (so reduced msc files containing only these are OK too)
     // write num of classes
+    // write the classifier type
     // write for each of the n(n-1)/2 classifiers 
-    // - num of scales used by (here 1 unique scale for now, but plan for extension)
+    // - num of scales used by this classifier
     // - the scales used 
-    // - weights (2*n_used_scales + 1 coefs per classifier)
+    // - the classifier parameters (ex: weights for linear classifiers)
     int nuniqueScales = uniqueScales.size();
     classifparamsfile.write((char*)&nuniqueScales, sizeof(nuniqueScales));
     cout << "Selected scales (for extraction of the whole scene):";
@@ -711,13 +795,18 @@ int main(int argc, char** argv) {
     }
     cout << endl;
     classifparamsfile.write((char*)&nclasses, sizeof(nclasses));
+    // write the classifier type
+    int classifierType = Classifier::ClassifierID;
+    classifparamsfile.write((char*)&classifierType, sizeof(int));
+    // and the parameters for each pair of classes
     int nclassifiers = nclasses * (nclasses-1) / 2;
     for (int i=0; i<nclassifiers; ++i) {
         int numscales = selectedScales[i].size(); // TODO: implement multi-scale classifiers
         classifparamsfile.write((char*)&numscales, sizeof(numscales));
         for (int j=0; j<numscales; ++j) classifparamsfile.write((char*)&scales[selectedScales[i][j]], sizeof(FloatType));
-        // (2*n_used_scales + 1 coefs per classifier)
-        for (int j=0; j<=2*numscales; ++j) classifparamsfile.write((char*)&weights[i][j], sizeof(FloatType));
+        Classifier classifier;
+        classifier.parameters = params[i];
+        classifier.saveParameters(classifparamsfile);
     }
     
     return 0;
