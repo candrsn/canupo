@@ -24,6 +24,9 @@ features_linear_svm:
 features_gaussian_svm:
 	$(CXX) $(CXXFLAGS) -DGAUSSIAN_SVM features.cpp -o features_gaussian_svm
 
+features: features_least_squares features_linear_svm features_gaussian_svm
+	echo "features generated"
+
 classify:
 	$(CXX) $(CXXFLAGS) classify.cpp -o classify
 

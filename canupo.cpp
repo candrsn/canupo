@@ -231,14 +231,14 @@ if (omp_get_thread_num()==0) {
                     totalvar += svalues[i];
                 }
                 for (int i=0; i<3; ++i) svalues[i] /= totalvar;
+                // Use barycentric coordinates : a for 1D, b for 2D and c for 3D
+                // Formula on wikipedia page for barycentric coordinates
+                // using directly the triangle in %variance space, they simplify a lot
+                //FloatType c = 1 - a - b; // they sum to 1
                 a = svalues[0] - svalues[1];
                 b = 2 * svalues[0] + 4 * svalues[1] - 2;
             }
 
-            // Use barycentric coordinates : a for 1D, b for 2D and c for 3D
-            // Formula on wikipedia page for barycentric coordinates
-            // using directly the triangle in %variance space, they simplify a lot
-            //FloatType c = 1 - a - b; // they sum to 1
             // negative values shall not happen, but there may be rounding errors and -1e25 is still <0
             if (a<0) a=0; if (b<0) b=0; //if (c<0) c=0;
             // similarly constrain the values to 0..1
