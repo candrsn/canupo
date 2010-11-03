@@ -167,6 +167,10 @@ if (omp_get_thread_num()==0) {
         vector<FloatType> abdata(nscales*2);
         int abdataidx = 0;
         
+        static const int min_neighbors = 10;
+        // ab values implicitly reused from higher scale if there are not enough neighbors
+        FloatType a = 1.0/3.0, b = 1.0/3.0;
+        
         // Scales shall be sorted from max to lowest 
         for (ScaleSet::iterator scaleit = scales.begin(); scaleit != scales.end(); ++scaleit) {
             // Neighborhood search only on max radius
@@ -203,18 +207,8 @@ if (omp_get_thread_num()==0) {
             }
             
             // In any case we now have a vector of neighbors at the current scale
-            FloatType svalues[3];
-            if (neighbors.size()<3) {
-                //cout << "Warning: not enough points for 3D PCA, try increasing radius size" << endl;
-                // barycentric coords: P = a.S1 + b.S2 + c.S3
-                // we want a=b=c=1/3
-                // P = 1/3 (S1+S2+S3)
-                // P = 1/3 ( 1 + 1/2 + 1/3 , 0 + 1/2 + 1/3 )
-                // P = 1/3 ( 11/6 , 5/6 ) = (11/18, 5/18)
-                svalues[0] = FloatType(11)/FloatType(18);
-                svalues[1] = FloatType(5)/FloatType(18);
-                svalues[2] = FloatType(2)/FloatType(18); // complement to 1
-            } else {
+            if (neighbors.size()>=min_neighbors) {
+                FloatType svalues[3];
                 // use the pre-computed sums to get the average point
                 Point avg = neighsums.back() / neighsums.size();
                 // compute PCA on the neighbors at this radius
@@ -237,13 +231,13 @@ if (omp_get_thread_num()==0) {
                     totalvar += svalues[i];
                 }
                 for (int i=0; i<3; ++i) svalues[i] /= totalvar;
+                a = svalues[0] - svalues[1];
+                b = 2 * svalues[0] + 4 * svalues[1] - 2;
             }
 
             // Use barycentric coordinates : a for 1D, b for 2D and c for 3D
             // Formula on wikipedia page for barycentric coordinates
             // using directly the triangle in %variance space, they simplify a lot
-            FloatType a = svalues[0] - svalues[1];
-            FloatType b = 2 * svalues[0] + 4 * svalues[1] - 2;
             //FloatType c = 1 - a - b; // they sum to 1
             // negative values shall not happen, but there may be rounding errors and -1e25 is still <0
             if (a<0) a=0; if (b<0) b=0; //if (c<0) c=0;
