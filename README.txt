@@ -76,3 +76,23 @@ classify features.prm scene.xyz scene_core.msc scene_annotated.xyz
                               # Scene points are labelled with the class of the nearest core point.
 
 
+----
+new way:
+----
+
+canupo: compute msc params from xyz
+
+suggest_classifier:  msc(non label) : class1.msc ... - class2.msc ...
+    generate svg files
+    project on 2 main linear svm dir
+    write one default path from gaussian SVM
+
+validate_classifier:  user_modified_svg  class_num_1  class_num_2
+    produce biclass prm file
+    from SVG, use path (predef path if not changed or user-defined)
+
+combine_classifiers: any number of prm classifiers (incl. multiclass files)
+    produce multiclass prm file
+    auto from class nums that were specified
+
+

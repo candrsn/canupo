@@ -169,6 +169,7 @@ if (omp_get_thread_num()==0) {
         
         static const int min_neighbors = 10;
         // ab values implicitly reused from higher scale if there are not enough neighbors
+        // TODO: nearest neighbors of ab at higher scales and get average of the neighbors ab at low scale
         FloatType a = 1.0/3.0, b = 1.0/3.0;
         
         // Scales shall be sorted from max to lowest 

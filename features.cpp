@@ -4,10 +4,15 @@
 #include <algorithm>
 
 #include <boost/algorithm/string.hpp>
+#include <boost/format.hpp>
 
 #include <string.h>
 #include <assert.h>
 #include <stdlib.h>
+
+#ifdef PROJ_USER_CLASSIF
+#define LINEAR_SVM 1
+#endif
 
 #if defined(LINEAR_SVM) || defined(GAUSSIAN_SVM)
 #define USE_SVM 1
@@ -401,6 +406,9 @@ struct SVM_Model {
         dlib::decision_function<kernel_type> decfun;
 #else
         vector<FloatType> weights;
+#ifdef PROJ_USER_CLASSIF
+        vector<FloatType> orthoweights;
+#endif
 #endif
     };
     
@@ -603,6 +611,7 @@ int main(int argc, char** argv) {
             vector<int> bestscales;
             vector<int> usersidx;
 
+#ifndef PROJ_USER_CLASSIF
             if (!specifiedScalesIdx.empty()) usersidx = specifiedScalesIdx;
             else {
                 // scale by scale classif, look for scale leading to best classification and add more scales if necessary
@@ -689,7 +698,11 @@ int main(int argc, char** argv) {
                     if (usersidx.empty()) cout << "Invalid scale, please try again: " << endl;
                 } while (usersidx.empty());
             }
-            
+#else
+            usersidx.resize(nscales);
+            for(int s=0; s<nscales; ++s) usersidx[s] = s;
+#endif
+
             for (int i=0; i<usersidx.size(); ++i) uniqueScales.insert(usersidx[i]);
             
             // train a classifier at the selected scales on the whole data set
@@ -716,11 +729,94 @@ int main(int argc, char** argv) {
             }
             // no need to shuffle for training on the whole data set
             classifier.train();
-            // store the weights and selected scale indices for later use
+            // store the parameters and selected scale indices for later use
             params[idx] = classifier.parameters;
             selectedScales[idx] = usersidx;
+            
+#ifdef PROJ_USER_CLASSIF
+            // projection onto orthogonal subspace and repeat SVM
+            
+            // projection parameters
+            vector<FloatType> nvec(classifier.parameters.dim); // normal vector
+            FloatType norm = 0;
+            for (int i=0; i<nvec.size(); ++i) {
+                nvec[i] = classifier.parameters.weights[i];
+                norm += nvec[i] * nvec[i];
+            }
+            norm = sqrt(norm);
+            for (int i=0; i<nvec.size(); ++i) nvec[i] /= norm;
+            vector<FloatType> svec(classifier.parameters.dim); // shift vector
+            // dot product between normal and shift is given by the bias
+            FloatType sndot = -classifier.parameters.weights[classifier.parameters.dim] / norm;
+            for (int i=0; i<nvec.size(); ++i) svec[i] = sndot * nvec[i];
+            
+            Classifier ortho_classifier;
+            ortho_classifier.prepareTraining(ntotal, usersidx.size()*2);
+            
+            // fill the training data
+            vector<FloatType> proj_mscdata(usersidx.size()*2);
+            for (int pt=0; pt<ni; ++pt) {
+                for (int i=0; i<usersidx.size(); ++i) {
+                    mscdata[i*2] = data[(ibeg+pt)*fdim + usersidx[i]*2];
+                    mscdata[i*2+1] = data[(ibeg+pt)*fdim + usersidx[i]*2+1];
+                }
+                // projection on the first classifier hyperplane
+                FloatType dotprod = 0;
+                for(int i=0; i<nvec.size(); ++i) dotprod += nvec[i] * (mscdata[i] - svec[i]);
+                for(int i=0; i<nvec.size(); ++i) proj_mscdata[i] = mscdata[i] - dotprod * nvec[i];
+                ortho_classifier.addTrainData(&proj_mscdata[0], -1);
+            }
+            for (int pt=0; pt<nj; ++pt) {
+                for (int i=0; i<usersidx.size(); ++i) {
+                    mscdata[i*2] = data[(jbeg+pt)*fdim + usersidx[i]*2];
+                    mscdata[i*2+1] = data[(jbeg+pt)*fdim + usersidx[i]*2+1];
+                }
+                FloatType dotprod = 0;
+                for(int i=0; i<nvec.size(); ++i) dotprod += nvec[i] * (mscdata[i] - svec[i]);
+                for(int i=0; i<nvec.size(); ++i) proj_mscdata[i] = mscdata[i] - dotprod * nvec[i];
+                ortho_classifier.addTrainData(&proj_mscdata[0], 1);
+            }
+            // no need to shuffle for training on the whole data set
+            ortho_classifier.train();
+            // store the weights and selected scale indices for later use
+            params[idx].orthoweights = ortho_classifier.parameters.weights;
+
+            // write data files
+            ofstream dataout(str(boost::format("class_%d_%d.txt") % iclass % jclass).c_str());
+            for (int pt=0; pt<ni; ++pt) {
+                for (int i=0; i<usersidx.size(); ++i) {
+                    mscdata[i*2] = data[(ibeg+pt)*fdim + usersidx[i]*2];
+                    mscdata[i*2+1] = data[(ibeg+pt)*fdim + usersidx[i]*2+1];
+                }
+                // projection on the first classifier hyperplane
+                FloatType dotprod = 0;
+                for(int i=0; i<nvec.size(); ++i) dotprod += nvec[i] * (mscdata[i] - svec[i]);
+                for(int i=0; i<nvec.size(); ++i) proj_mscdata[i] = mscdata[i] - dotprod * nvec[i];
+                dataout << classifier.predict(&mscdata[0]);
+                dataout << " " << ortho_classifier.predict(&proj_mscdata[0]);
+                dataout << " " << -1 << endl;
+            }
+            for (int pt=0; pt<nj; ++pt) {
+                for (int i=0; i<usersidx.size(); ++i) {
+                    mscdata[i*2] = data[(jbeg+pt)*fdim + usersidx[i]*2];
+                    mscdata[i*2+1] = data[(jbeg+pt)*fdim + usersidx[i]*2+1];
+                }
+                FloatType dotprod = 0;
+                for(int i=0; i<nvec.size(); ++i) dotprod += nvec[i] * (mscdata[i] - svec[i]);
+                for(int i=0; i<nvec.size(); ++i) proj_mscdata[i] = mscdata[i] - dotprod * nvec[i];
+                dataout << classifier.predict(&mscdata[0]);
+                dataout << " " << ortho_classifier.predict(&proj_mscdata[0]);
+                dataout << " " << 1 << endl;
+            }
+            dataout.close();
+#endif
         }
     }
+#ifdef PROJ_USER_CLASSIF
+    cout << "Projected data for each set of classes written in corresponding files" << endl;
+    cout << "You need to run features_user_validate on the SVG files to produce the final classifier." << endl;
+    return 0;
+#endif
 
     // compute error of one-against-one on the training set
     // TODO: split and keep a test set here

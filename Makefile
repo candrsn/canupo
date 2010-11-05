@@ -24,7 +24,10 @@ features_linear_svm:
 features_gaussian_svm:
 	$(CXX) $(CXXFLAGS) -DGAUSSIAN_SVM features.cpp -o features_gaussian_svm
 
-features: features_least_squares features_linear_svm features_gaussian_svm
+features_user_define:
+	$(CXX) $(CXXFLAGS) -DPROJ_USER_CLASSIF features.cpp -o features_user_define
+
+features: features_least_squares features_linear_svm features_gaussian_svm features_user_define
 	echo "features generated"
 
 classify:
@@ -33,5 +36,5 @@ classify:
 clean:
 	rm -f canupo density annotate make_features classify
 
-.PHONY: canupo density annotate classify clean features_least_squares features_linear_svm features_gaussian_svm
+.PHONY: canupo density annotate classify clean features_least_squares features_linear_svm features_gaussian_svm features_user_define
 
