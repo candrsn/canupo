@@ -136,7 +136,6 @@ int main(int argc, char** argv) {
     }
     // file ready to write data for all points one by one
 
-    // process each file separately, purely local features
     cout << "Processing \"" << datafilename << "\" using core points from \"" << corepointsfilename << "\"" << endl;
     cout << "Percent complete: 0" << flush;
     

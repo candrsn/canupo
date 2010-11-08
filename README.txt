@@ -82,7 +82,7 @@ new way:
 
 canupo: compute msc params from xyz
 
-suggest_classifier:  msc(non label) : class1.msc ... - class2.msc ...
+suggest_classifier: outfile.svg msc(non label) ... : class1.msc ... - class2.msc ...
     generate svg files
     project on 2 main linear svm dir
     write one default path from gaussian SVM

@@ -261,6 +261,7 @@ struct SVM_Model {
         
         // largest allowed nu: strictly below what's returned by maximum_nu
         FloatType max_nu = 0.999*maximum_nu(labels);
+cout << max_nu << endl;
         
 #ifdef GAUSSIAN_SVM
         matrix<FloatType> gridsearchspace = cartesian_product(
@@ -314,6 +315,7 @@ struct SVM_Model {
         //cout << "best result of grid search: " << sum(best_result) << endl;
         //cout << "best gamma: " << best_gamma << "   best nu: " << best_nu << endl;
         //cout << "best nu: " << best_nu << endl;
+cout << best_nu << endl;
         
 #ifdef GAUSSIAN_SVM
         matrix<FloatType,2,1> params;
@@ -354,6 +356,7 @@ struct SVM_Model {
         );
         parameters.nu = exp(parameters.nu);
 #endif
+cout << parameters.nu << endl;
 
 
 //        cout << " best result of BOBYQA: " << best_score << endl;
@@ -372,7 +375,6 @@ struct SVM_Model {
         shuffle();
         FloatType dummy0, dummy1;
         crossValidate(10, dummy0, dummy1);
-        
         svm_nu_trainer<kernel_type> trainer;
         trainer.set_nu(parameters.nu);
         
@@ -735,7 +737,12 @@ int main(int argc, char** argv) {
             
 #ifdef PROJ_USER_CLASSIF
             // projection onto orthogonal subspace and repeat SVM
-            
+for (int i=0; i<classifier.parameters.weights.size(); ++i) {
+    cout << classifier.parameters.weights[i] << " ";
+}
+cout << endl;
+return 0;
+
             // projection parameters
             vector<FloatType> nvec(classifier.parameters.dim); // normal vector
             FloatType norm = 0;

@@ -42,41 +42,120 @@ struct Point : boost::addable<Point, boost::subtractable<Point, boost::multiplia
     inline Point& operator-=(const Point& v) {x-=v.x; y-=v.y; z-=v.z; return *this;}
     inline Point& operator*=(const FloatType& f) {x*=f; y*=f; z*=f; return *this;}
     inline Point& operator/=(const FloatType& f) {x/=f; y/=f; z/=f; return *this;}
+
+    inline static FloatType dist(const Point& a, const Point& b) {
+        return sqrt(
+          (a.x-b.x)*(a.x-b.x)
+        + (a.y-b.y)*(a.y-b.y)
+        + (a.z-b.z)*(a.z-b.z)
+        );
+    }
+    inline static FloatType dist2(const Point& a, const Point& b) {
+        return (a.x-b.x)*(a.x-b.x)
+        + (a.y-b.y)*(a.y-b.y)
+        + (a.z-b.z)*(a.z-b.z)
+        ;
+    }
+
+    enum {dim = 3};
 };
 
-inline FloatType dist(const Point& a, const Point& b) {
-    return sqrt(
-        (a.x-b.x)*(a.x-b.x)
-      + (a.y-b.y)*(a.y-b.y)
-      + (a.z-b.z)*(a.z-b.z)
-    );
+struct Point2D : boost::addable<Point2D, boost::subtractable<Point2D, boost::multipliable2<Point2D, FloatType, boost::dividable2<Point2D, FloatType> > > > {
+    
+    FloatType x,y;
+    Point2D* next; // for the cell/grid structure
+
+    // convenient but slow : avoid it !
+    inline FloatType& operator[](int idx) {
+        assert(idx>=0 && idx<2);
+        return idx==0?x:y;
+    }
+    Point2D() : x(0),y(0),next(0) {}
+    Point2D(FloatType _x, FloatType _y) : x(_x),y(_y), next(0) {}
+    Point2D(Point2D* n) : x(0),y(0),next(n) {}
+    
+    // Baaah, how many times will similar code be rewriten ? Thanks boost::operators for easing the task
+    inline Point2D& operator+=(const Point2D& v) {x+=v.x; y+=v.y; return *this;}
+    inline Point2D& operator-=(const Point2D& v) {x-=v.x; y-=v.y; return *this;}
+    inline Point2D& operator*=(const FloatType& f) {x*=f; y*=f; return *this;}
+    inline Point2D& operator/=(const FloatType& f) {x/=f; y/=f; return *this;}
+    
+    inline static FloatType dist(const Point2D& a, const Point2D& b) {
+        return sqrt(
+          (a.x-b.x)*(a.x-b.x)
+        + (a.y-b.y)*(a.y-b.y)
+        );
+    }
+    inline static FloatType dist2(const Point2D& a, const Point2D& b) {
+        return (a.x-b.x)*(a.x-b.x)
+        + (a.y-b.y)*(a.y-b.y)
+        ;
+    }
+
+    enum {dim = 2};
+};
+
+template<class PointType>
+inline FloatType dist(const PointType& a, const PointType& b) {
+    return PointType::dist(a,b);
 }
-inline FloatType dist2(const Point& a, const Point& b) {
-    return (a.x-b.x)*(a.x-b.x)
-      + (a.y-b.y)*(a.y-b.y)
-      + (a.z-b.z)*(a.z-b.z)
-    ;
+
+template<class PointType>
+inline FloatType dist2(const PointType& a, const PointType& b) {
+    return PointType::dist2(a,b);
 }
 
 // this struct accelerate the management of neighbors
 // the std::multimaps are way too slow
+template<class PointType>
 struct DistPoint {
     FloatType distsq;
-    Point* pt;
+    PointType* pt;
     bool operator<(const DistPoint& other) const {
         return distsq < other.distsq;
     }
-    DistPoint(FloatType _distsq, Point* _pt) : distsq(_distsq), pt(_pt) {}
+    DistPoint(FloatType _distsq, PointType* _pt) : distsq(_distsq), pt(_pt) {}
     DistPoint() : distsq(0), pt(0) {}
 };
 
+template<class PointType>
 struct PointCloud {
-    std::vector<Point> data; // avoids many mem allocations for individual points
+    std::vector<PointType> data; // avoids many mem allocations for individual points
     FloatType xmin, xmax, ymin, ymax;
     FloatType cellside;
     int ncellx;
     int ncelly;
-    std::vector<Point*> grid; // cell lists are embedded in the points vector
+    std::vector<PointType*> grid; // cell lists are embedded in the points vector
+    int nextptidx;
+
+    void prepare(FloatType _xmin, FloatType _xmax, FloatType _ymin, FloatType _ymax, int npts) {
+        xmin = _xmin; xmax = _xmax;
+        ymin = _ymin; ymax = _ymax;
+        FloatType sizex = xmax - xmin;
+        FloatType sizey = ymax - ymin;
+        
+        cellside = sqrt(TargetAveragePointDensityPerGridCell * sizex * sizey / npts);
+        ncellx = floor(sizex / cellside) + 1;
+        ncelly = floor(sizey / cellside) + 1;
+        
+        // instanciate the points
+        data.resize(npts);
+        grid.resize(ncellx * ncelly);
+        for (int i=0; i<grid.size(); ++i) grid[i] = 0;
+        nextptidx = 0;
+    }
+
+    void insert(const PointType& point) {
+        // TODO: if necessary, reallocate data and update pointers. For now just assert
+        assert(nextptidx<data.size());
+        data[nextptidx] = point;
+        // add this point to the cell grid list
+        int cellx = floor((data[nextptidx].x - xmin) / cellside);
+        int celly = floor((data[nextptidx].y - ymin) / cellside);
+        data[nextptidx].next = grid[celly * ncellx + cellx];
+        grid[celly * ncellx + cellx] = &data[nextptidx];
+        ++nextptidx;
+    }
 
     void load_txt(const char* filename) {
         using namespace std;
@@ -94,14 +173,14 @@ struct PointCloud {
             getline(datafile, line);
             if (line.empty()) continue;
             stringstream linereader(line);
-            Point point;
+            PointType point;
             FloatType value;
             int i = 0;
             while (linereader >> value) {
                 point[i] = value;
-                if (++i==3) break;
+                if (++i==PointType::dim) break;
             }
-            if (i<3) {
+            if (i<PointType::dim) {
                 cerr << "Invalid data file: " << filename << endl;
                 exit(1);
             }
@@ -111,17 +190,8 @@ struct PointCloud {
             ymax = max(ymax, point[1]);
             ++npts;
         }
-        FloatType sizex = xmax - xmin;
-        FloatType sizey = ymax - ymin;
         
-        cellside = sqrt(TargetAveragePointDensityPerGridCell * sizex * sizey / npts);
-        ncellx = floor(sizex / cellside) + 1;
-        ncelly = floor(sizey / cellside) + 1;
-        
-        // instanciate the points
-        data.resize(npts);
-        grid.resize(ncellx * ncelly);
-        for (int i=0; i<grid.size(); ++i) grid[i] = 0;
+        prepare(xmin, xmax, ymin, ymax, npts);
         
         // second pass to load the data structure in place
         int ptidx=0;
@@ -131,18 +201,14 @@ struct PointCloud {
             getline(datafile, line);
             if (line.empty()) continue;
             stringstream linereader(line);
+            PointType point;
             FloatType value;
             int i = 0;
             while (linereader >> value) {
-                data[ptidx][i] = value;
-                if (++i==3) break;
+                point[i] = value;
+                if (++i==PointType::dim) break;
             }
-            // add this point to the cell grid list
-            int cellx = floor((data[ptidx].x - xmin) / cellside);
-            int celly = floor((data[ptidx].y - ymin) / cellside);
-            data[ptidx].next = grid[celly * ncellx + cellx];
-            grid[celly * ncellx + cellx] = &data[ptidx];
-            ++ptidx;
+            insert(point);
         }
         datafile.close();
     }
@@ -151,7 +217,7 @@ struct PointCloud {
     // TODO: save_bin / load_bin if txt files take too long to load
     
     template<typename OutputIterator>
-    void findNeighbors(OutputIterator outit, const Point& center, FloatType radius) {
+    void findNeighbors(OutputIterator outit, const PointType& center, FloatType radius) {
         int cx1 = floor((center.x - radius - xmin) / cellside);
         int cx2 = floor((center.x + radius - xmin) / cellside);
         int cy1 = floor((center.y - radius - ymin) / cellside);
@@ -162,16 +228,16 @@ struct PointCloud {
         if (cy2>=ncelly) cy2=ncelly-1;
         double r2 = radius * radius;
         for (int cy = cy1; cy <= cy2; ++cy) for (int cx = cx1; cx <= cx2; ++cx) {
-            for (Point* p = grid[cy * ncellx + cx]; p!=0; p=p->next) {
+            for (PointType* p = grid[cy * ncellx + cx]; p!=0; p=p->next) {
                 FloatType d2 = dist2(center,*p);
-                if (d2<=r2) (*outit++) = DistPoint(d2,p);
+                if (d2<=r2) (*outit++) = DistPoint<PointType>(d2,p);
             }
         }
     }
 
     // returns the index of the nearest point in the cloud from the point given in argument
     // returns -1 iff the cloud is empty
-    int findNearest(const Point& center) {
+    int findNearest(const PointType& center) {
         int cx = floor((center.x - xmin) / cellside);
         int cy = floor((center.y - ymin) / cellside);
         // look for a non-empty cell in increasing distance. Once it is found, the nearest neighbor is necessarily within that radius
@@ -207,7 +273,7 @@ struct PointCloud {
         if (cy2>=ncelly) cy2=ncelly-1;
         FloatType mind2 = std::numeric_limits<FloatType>::max();
         for (int cy = cy1; cy <= cy2; ++cy) for (int cx = cx1; cx <= cx2; ++cx) {
-            for (Point* p = grid[cy * ncellx + cx]; p!=0; p=p->next) {
+            for (PointType* p = grid[cy * ncellx + cx]; p!=0; p=p->next) {
                 FloatType d2 = dist2(center,*p);
                 if (d2<=mind2) {
                     mind2 = d2;
@@ -219,7 +285,7 @@ struct PointCloud {
     }
 
 };
-PointCloud cloud;
+PointCloud<Point> cloud;
 
 
 #endif
