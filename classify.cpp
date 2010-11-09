@@ -1,11 +1,11 @@
 #include <iostream>
 #include <limits>
 #include <fstream>
+#include <map>
 
 #include <math.h>
 
 #include "points.hpp"
-#include "predictors.hpp"
 
 using namespace std;
 using namespace boost;
@@ -32,6 +32,193 @@ bool fpeq(FloatType a, FloatType b) {
     return ratio>1-epsilon && ratio<1+epsilon;
 }
 
+struct Classifier {
+    
+    enum {gridsize = 100};
+    
+    int class1, class2;
+    vector<FloatType> weights_axis1, weights_axis2;
+    vector<Point2D> path;
+    FloatType absmaxXY;
+    
+    struct LineDef {
+        FloatType wx, wy, c;
+    };
+    vector<LineDef> pathlines;
+    
+    Point2D refpt, refpt2;
+    
+    vector<FloatType> grid;
+
+    void prepare() {
+        // compute the lines
+        for(int i=0; i<path.size()-1; ++i) {
+            LineDef ld;
+            FloatType xdelta = path[i+1].x - path[i].x;
+            FloatType ydelta = path[i+1].y - path[i].y;
+            if (fabs(xdelta) > 1e-6) {
+                // y = slope * x + bias
+                ld.wy = -1;
+                ld.wx = ydelta / xdelta; // slope
+                ld.c = path[i].y - path[i].x * ld.wx;
+            } else {
+                if (fabs(xdelta) < 1e-6) {
+                    cerr << "invalid path definition in classifier" << endl;
+                    exit(1);
+                }
+                // just reverse the roles for a quasi-vertical line at x ~ cte
+                ld.wx = -1;
+                ld.wy = xdelta / ydelta; // is quasi null here, assuming ydelta != 0
+                ld.c = path[i].x - path[i].y * ld.wy;
+            }
+            // normalize so we have unit norm vector
+            FloatType n = sqrt(ld.wx*ld.wx + ld.wy*ld.wy);
+            ld.wx /= n; ld.wy /= n; ld.c /= n;
+            pathlines.push_back(ld);
+        }
+
+        // ref points to classify. refpt shall be in class -1, classified as such by both SVM giving the main directions
+        refpt = Point2D(-M_PI*absmaxXY, -M_PI*absmaxXY);
+        // slighly off so to account for path lines parallel to refpt-somept, but shall still be in the -1 class
+        refpt2 = Point2D(-(M_PI+2)*absmaxXY, -(M_PI+1)*absmaxXY);
+        
+        // compute the classification at each grid point
+        vector<FloatType> nodeclassif((gridsize+1)*(gridsize+1));
+        for (int j=0; j<=gridsize; ++j) {
+            FloatType b = -absmaxXY + j * 2 * absmaxXY / gridsize;
+            for (int i=0; i<=gridsize; ++i) {
+                FloatType a = -absmaxXY + i * 2 * absmaxXY / gridsize;
+                nodeclassif[j*(gridsize+1)+i] = classify2D(a,b,false);
+            }
+        }
+
+        // some grid cells can be completely classified, speed up further operations
+        grid.resize(gridsize*gridsize);
+        for (int j=0; j<gridsize; ++j) for (int i=0; i<gridsize; ++i) {
+            bool classifiedCell = true;
+            if (nodeclassif[j*(gridsize+1)+i] >= 0) {
+                classifiedCell &= nodeclassif[j*(gridsize+1)+i+1] >= 0;
+                classifiedCell &= nodeclassif[(j+1)*(gridsize+1)+i] >= 0;
+                classifiedCell &= nodeclassif[(j+1)*(gridsize+1)+i+1] >= 0;
+            }
+            if (nodeclassif[j*(gridsize+1)+i] <= 0) {
+                classifiedCell &= nodeclassif[j*(gridsize+1)+i+1] <= 0;
+                classifiedCell &= nodeclassif[(j+1)*(gridsize+1)+i] <= 0;
+                classifiedCell &= nodeclassif[(j+1)*(gridsize+1)+i+1] <= 0;
+            }
+            FloatType avg = nodeclassif[j*(gridsize+1)+i];
+            avg += nodeclassif[j*(gridsize+1)+i+1];
+            avg += nodeclassif[(j+1)*(gridsize+1)+i];
+            avg += nodeclassif[(j+1)*(gridsize+1)+i+1];
+            // if avg is null then consider the cell is not classified in any case
+            // otherwise points have avg class boundary within the cell
+            // TODO: the min might be more relevant later on when we deal with the laser intensity information
+            grid[j*gridsize+i] = classifiedCell ? (avg/4) : 0;
+        }
+    }
+
+    // classification in the 2D space
+    FloatType classify2D(FloatType a, FloatType b, bool usegrid = true) {
+        if (usegrid && fabs(a) < absmaxXY && fabs(b) < absmaxXY) {
+            int i = (int)floor((a + absmaxXY) * gridsize / (2 * absmaxXY));
+            int j = (int)floor((b + absmaxXY) * gridsize / (2 * absmaxXY));
+            // return grid classif if it is unique, otherwise compute for this point
+            if (grid[j*gridsize+i]!=0) return grid[j*gridsize+i];
+        }
+        Point2D* refptr = &refpt;
+        Point2D* refptr2 = &refpt2;
+        if (a == refpt.x) {
+            refptr = &refpt2;
+            refptr2 = &refpt;
+        }
+        // line equa from refpt to (a,b).
+        // y = refpt.y + (b - refpt.y) * (x - refpt.x) / (a - refpt.x)
+        // y = refslope * x + refbias
+        FloatType refslope = (b - refptr->y) / (a - refptr->x); // not dividing by 0
+        FloatType refbias = refptr->y - refptr->x * refslope;
+        // equa for each segment: wx * x + wy * y + wc = 0
+        // intersection: wx * x + (wy * refslope) * x + (wc+refbias) = 0
+        // x = -(wc+refbias) / (wx + wy * refslope);  and  y = refslope * x + refbias
+        // if (wx + wy * refslope) is null : no intersection, parallel lines
+        // => use a secondary ref point on a different line
+        int crosscount = 0;
+        FloatType closestDist = numeric_limits<FloatType>::max();
+        for (int i=0; i<pathlines.size(); ++i) {
+            FloatType divisor = pathlines[i].wx + pathlines[i] * wy * refslope;
+            FloatType intersectx;
+            FloatType intersecty;
+            if (fabs(divisor)<1e-3) {
+                FloatType ref2slope = (b - refptr2->y) / (a - refptr2->x);
+                FloatType ref2bias = refptr2->y - refptr2->x * ref2slope;
+                divisor = pathlines[i].wx + pathlines[i] * wy * ref2slope;
+                intersectx = (ref2bias - pathlines[i].wx) / divisor;
+                intersecty = ref2slope * intersectx + ref2bias;
+            } else {
+                intersectx = (refbias - pathlines[i].wx) / divisor;
+                intersecty = refslope * intersectx + refbias;
+            }
+            bool intersect = true;
+            // first and last segments are prolongated to infinity
+            if (i==0) {
+                FloatType xdelta = path[i+1].x - intersectx;
+                FloatType ydelta = path[i+1].y - intersecty;
+                // use the more reliable delta
+                if (fabs(xdelta)>fabs(ydelta)) {
+                    // intersection is valid only if on the half-infinite side of the segment
+                    intersect &= (xdelta * (path[i+1].x - path[i].x)) > 0;
+                } else {
+                    intersect &= (ydelta * (path[i+1].y - path[i].y)) > 0;
+                }
+            } else if (i==pathlines.size()-1) {
+                // idem, just infinite on the other side
+                FloatType xdelta = path[i].x - intersectx;
+                FloatType ydelta = path[i].y - intersecty;
+                if (fabs(xdelta)>fabs(ydelta)) {
+                    intersect &= (xdelta * (path[i].x - path[i+1].x)) > 0;
+                } else {
+                    intersect &= (ydelta * (path[i].y - path[i+1].y)) > 0;
+                }
+            } else {
+                // intersection is valid only within the segment boundaries
+                intersect &= (intersectx >= min(path[i].x,path[i+1].x)) && (intersecty >= min(path[i].y,path[i+1].y));
+                intersect &= (intersectx <= max(path[i].x,path[i+1].x)) && (intersecty <= max(path[i].y,path[i+1].y));
+            }
+            // nodes joining segments might be duplicated, but then, they are on the boundary, so we do not care
+            // which class they are put into (either odd or even crossings)
+            if (intersect) ++crosscount;
+            // closest distance from the point to that segment
+            // 1. projection of the point of the line
+            Point2D p(a,b);
+            Point2D n(pathlines[i].wx, pathlines[i].wy);
+            p -= n * n.dot(p + n * pathlines[i].c);
+            FloatType closestToSeg = numeric_limits<FloatType>::max();
+            // 2. Is the projection within the segment limit ? yes => closest
+            if (intersect) closestToSeg = dist(Point2D(a,b), p);
+            else {
+                // 3. otherwise closest is the minimum of the distance to the segment ends
+                if (i!=0) closestToSeg = dist(Point2D(a,b), Point2D(path[i].x,path[i].y));
+                if (i!=pathlines.size()-1) closestToSeg = min(closestToSeg, dist(Point2D(a,b), Point2D(path[i+1].x,path[i+1].y)));
+            }
+            closestDist = min(closestDist, closestToSeg);
+        }
+        // even number of crossings => -1 class, odd = +1.
+        // then return closestDist as the confidence in this class
+        return ((crosscount&1) * 2 - 1) * closestDist;
+    }
+
+    // classification in MSC space
+    FloatType classify(FloatType* mscdata) {
+        FloatType a = weights_axis1[weights_axis1.size()-1];
+        FloatType b = weights_axis2[weights_axis2.size()-1];
+        for (int d=0; d<weights_axis1.size()-1; ++d) {
+            a += weights_axis1[d] * mscdata[d];
+            b += weights_axis2[d] * mscdata[d];
+        }
+        return classify2D(a,b);
+    }
+};
+
+
 int main(int argc, char** argv) {
 
     if (argc<5) return help();
@@ -39,53 +226,53 @@ int main(int argc, char** argv) {
     cout << "Loading parameters and core points" << endl;
     
     ifstream classifparamsfile(argv[1], ifstream::binary);
-    int nuniqueScales;
-    classifparamsfile.read((char*)&nuniqueScales, sizeof(nuniqueScales));
-    vector<FloatType> scales(nuniqueScales);
-    for (int s=0; s<nuniqueScales; ++s) classifparamsfile.read((char*)&scales[s], sizeof(FloatType));
-    int nclasses;
-    classifparamsfile.read((char*)&nclasses, sizeof(nclasses));
-    int classifierID;
-    classifparamsfile.read((char*)&classifierID, sizeof(classifierID));
-    int nclassifiers = nclasses * (nclasses-1) / 2;
-    vector<vector<FloatType> > classifierscales(nclassifiers);
-    vector<shared_ptr<Predictor> > predictors(nclassifiers);
-    for (int i=0; i<nclassifiers; ++i) {
-        int numscales;
-        classifparamsfile.read((char*)&numscales, sizeof(numscales));
-        classifierscales[i].resize(numscales);
-        for (int j=0; j<numscales; ++j) classifparamsfile.read((char*)&classifierscales[i][j], sizeof(FloatType));
-        predictors[i] = getPredictorFromClassifierID(classifierID);
-        predictors[i]->load(classifparamsfile);
+    int nscales;
+    classifparamsfile.read((char*)&nscales, sizeof(int));
+    int fdim = nscales*2;
+    vector<FloatType> scales(nscales);
+    for (int s=0; s<nscales; ++s) classifparamsfile.read((char*)&scales[s], sizeof(FloatType));
+    int nclassifiers; // number of 2-class classifiers
+    classifparamsfile.read((char*)&nclassifiers, sizeof(int));
+    vector<Classifier> classifiers(nclassifiers);
+    for (int ci=0; ci<nclassifiers; ++ci) {
+        classifparamsfile.read((char*)&classifiers[ci].class1, sizeof(int));
+        classifparamsfile.read((char*)&classifiers[ci].class2, sizeof(int));
+        classifiers[ci].weights_axis1.resize(fdim+1);
+        classifiers[ci].weights_axis2.resize(fdim+1);
+        for (int i=0; i<=fdim; ++i) classifierfile.read((char*)&classifiers[ci].weights_axis1[i],sizeof(FloatType));
+        for (int i=0; i<=fdim; ++i) classifierfile.read((char*)&classifiers[ci].weights_axis2[i],sizeof(FloatType));
+        int pathsize;
+        classifierfile.read((char*)&pathsize,sizeof(int));
+        classifiers[ci].path.resize(pathsize);
+        for (int i=0; i<pathsize; ++i) {
+            classifierfile.read((char*)&classifiers[ci].path[i].x,sizeof(FloatType));
+            classifierfile.read((char*)&classifiers[ci].path[i].y,sizeof(FloatType));
+        }
+        classifierfile.read((char*)&classifiers[ci].absmaxXY,sizeof(FloatType));
+        classifiers[ci].prepare();
     }
+    classifierfile.close();
+    int nclasses = uniqueClasses.size();
     
     // reversed situation here compared to canupo:
     // - we load the core points in the cloud so as to perform neighbor searches
-    // - the data itself may be unstructured as we only need to loop it in a single pass = not even loaded whole in memory
+    // - the data itself is unstructured, not even loaded whole in memory
     ifstream mscfile(argv[3], ifstream::binary);
     // read the file header
     int ncorepoints;
     mscfile.read((char*)&ncorepoints,sizeof(ncorepoints));
     int nscales_msc;
     mscfile.read((char*)&nscales_msc, sizeof(int));
-    vector<FloatType> scales_msc(nscales_msc);
-    for (int si=0; si<nscales_msc; ++si) mscfile.read((char*)&scales_msc[si], sizeof(FloatType));
-    // map classifier scales to indices in multiscale file for later computation of data indices
-    // also check that all required scales for the classifiers are present in the msc file
-    vector<vector<int> > classifierscalesidx(nclassifiers);
-    for (int i=0; i<nclassifiers; ++i) {
-        classifierscalesidx[i].resize(classifierscales[i].size());
-        for (int j=0; j<classifierscales[i].size(); ++j) {
-            int sidx = -1;
-            for (int si=0; si<nscales_msc; ++si) if (fpeq(classifierscales[i][j],scales_msc[si])) {sidx=si; break;}
-            if (sidx==-1) {
-                cerr << "Invalid combination of multiscale file and classifier parameters: scale " << classifierscales[i][j] << " not found." << endl;
-                cerr << "Available scales in the multiscale file:";
-                for (int si=0; si<nscales_msc; ++si) cerr << " " << scales_msc[si];
-                cerr << endl;
-                return 1;
-            }
-            classifierscalesidx[i][j] = sidx;
+    if (nscales_msc!=nscales) {
+        cerr << "Inconsistent combination of multiscale file and classifier parameters (wrong number of scales)" << endl;
+        return 1;
+    }
+    for (int si=0; si<nscales; ++si) {
+        FloatType scale_msc;
+        mscfile.read((char*)&scale_msc, sizeof(FloatType));
+        if (!fpeq(scale_msc, scales[si])) {
+            cerr << "Inconsistent combination of multiscale file and classifier parameters (not the same scales)" << endl;
+            return 1;
         }
     }
 
@@ -144,12 +331,6 @@ int main(int argc, char** argv) {
     
     cout << "Loading and processing scene data" << endl;
     ofstream scene_annotated(argv[4]);
-
-    // allocate data only once, this is a storage for classifying each point
-    // there will not be more than nuniqueScales for a single classifier
-    vector<FloatType> selectedScalesData(nuniqueScales*2);
-    
-    // TODO: load in mem then openmp
     
     ifstream datafile(argv[2]);
     string line;
@@ -179,8 +360,15 @@ int main(int argc, char** argv) {
         if (coreclasses[neighidx]==-1) {
             FloatType* msc = &mscdata[neighidx*nscales_msc*2];
             // one-against-one process: apply all classifiers and vote for this point class
+            
+            
+            // TODO : update
+            
+            
+            
+            
             vector<FloatType> predictions(nclassifiers);
-            vector<int> votes(nclasses, 0);
+            map<int,int> votes;
             for (int j=1; j<nclasses; ++j) for (int i=0; i<j; ++i) {
                 int cidx = j*(j-1)/2 + i;
                 // multi-scale classifier: select relevant scales

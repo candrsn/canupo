@@ -42,6 +42,8 @@ struct Point : boost::addable<Point, boost::subtractable<Point, boost::multiplia
     inline Point& operator-=(const Point& v) {x-=v.x; y-=v.y; z-=v.z; return *this;}
     inline Point& operator*=(const FloatType& f) {x*=f; y*=f; z*=f; return *this;}
     inline Point& operator/=(const FloatType& f) {x/=f; y/=f; z/=f; return *this;}
+    
+    inline FloatType dot(const Point& v) {return x*v.x + y*v.y + z*v.z;}
 
     inline static FloatType dist(const Point& a, const Point& b) {
         return sqrt(
@@ -79,6 +81,8 @@ struct Point2D : boost::addable<Point2D, boost::subtractable<Point2D, boost::mul
     inline Point2D& operator-=(const Point2D& v) {x-=v.x; y-=v.y; return *this;}
     inline Point2D& operator*=(const FloatType& f) {x*=f; y*=f; return *this;}
     inline Point2D& operator/=(const FloatType& f) {x/=f; y/=f; return *this;}
+    
+    inline FloatType dot(const Point& v) {return x*v.x + y*v.y;}
     
     inline static FloatType dist(const Point2D& a, const Point2D& b) {
         return sqrt(

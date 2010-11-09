@@ -158,8 +158,8 @@ int main(int argc, char** argv) {
     classifierfile.write((char*)&nscales,sizeof(int));
     for (int i=0; i<nscales; ++i) classifierfile.write((char*)&scales[i],sizeof(FloatType));
     // number of classifiers embedded in this parameter file
-    int nclassif=1;
-    classifierfile.write((char*)&nclassif,sizeof(int));
+    int nclassifiers=1;
+    classifierfile.write((char*)&nclassifiers,sizeof(int));
     // classes handled by this partial classifier, as numbered by the user
     // the first class is classified to -1, the second is to +1
     // further classifiers in the same file may handle different user classes
@@ -170,10 +170,14 @@ int main(int argc, char** argv) {
     for (int i=0; i<=fdim; ++i) classifierfile.write((char*)&weights_axis1[i],sizeof(FloatType));
     for (int i=0; i<=fdim; ++i) classifierfile.write((char*)&weights_axis2[i],sizeof(FloatType));
     // the list of points in the path (scaled in the 2D space)
+    int pathsize = path.size();
+    classifierfile.write((char*)&pathsize,sizeof(int));
     for(int i=0; i<path.size(); ++i) {
         classifierfile.write((char*)&path[i].x,sizeof(FloatType));
         classifierfile.write((char*)&path[i].y,sizeof(FloatType));
     }
+    // helper to get max grid size in classify
+    classifierfile.write((char*)&absmaxXY,sizeof(FloatType));
     classifierfile.close();
     
 /*    
