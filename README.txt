@@ -87,9 +87,10 @@ suggest_classifier: outfile.svg msc(non label) ... : class1.msc ... - class2.msc
     project on 2 main linear svm dir
     write one default path from gaussian SVM
 
-validate_classifier:  user_modified_svg  class_num_1  class_num_2
+validate_classifier:  user_modified_svg  [class_num_1  class_num_2]
     produce biclass prm file
     from SVG, use path (predef path if not changed or user-defined)
+    if not specified   class_num_1 = 1   and   class_num_2 = 2
 
 combine_classifiers: any number of prm classifiers (incl. multiclass files)
     produce multiclass prm file

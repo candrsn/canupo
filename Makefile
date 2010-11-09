@@ -31,7 +31,10 @@ features: features_least_squares features_linear_svm features_gaussian_svm featu
 	echo "features generated"
 
 suggest_classifier:
-	$(CXX) $(CXXFLAGS) suggest_classifier.cpp -o suggest_classifier
+	$(CXX) $(CXXFLAGS) suggest_classifier.cpp -lcairo -o suggest_classifier
+
+validate_classifier:
+	$(CXX) $(CXXFLAGS) validate_classifier.cpp -o validate_classifier
 
 classify:
 	$(CXX) $(CXXFLAGS) classify.cpp -o classify

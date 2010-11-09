@@ -496,6 +496,8 @@ int main(int argc, char** argv) {
             weights[s*2]*weights[s*2]
           + weights[s*2+1]*weights[s*2+1]
         );
+        // from dot-prod = cos to and angle between 0 and pi/2 => rescale in 0..1
+        contrib = min(1.0, max(0.0, acos(contrib) / M_PI_2));
         cout << "Scale " << scales[s] << " has a contribution coefficient of " << contrib << endl;
     }
     
@@ -598,47 +600,40 @@ int main(int argc, char** argv) {
     bool useTop = (xsvgy0 >= 0) && (xsvgy0 <= svgSize);
     bool useBottom = (xsvgymax >= 0) && (xsvgymax <= svgSize);
     int sidescount = useLeft + useRight + useTop + useBottom;
-    stringstream pathstring;
+    vector<Point2D> path;
     if (sidescount==2) {
-        pathstring << "<path style=\"fill:none;stroke:#000000;stroke-width:1px;\" d=\"M ";
+        svgfile << "<path style=\"fill:none;stroke:#000000;stroke-width:1px;\" d=\"M ";
         // in each case we add a point at the origin to ease user edition of the line
         // in this config only left/right or top/bottom would be useful as we
         // pass through the origin, but we keep this older more generic code just in case
         if (useLeft) {
-            pathstring << 0 << "," << ysvgx0 << " L " << halfSvgSize<<","<<halfSvgSize<<" L ";
-            if (useTop) pathstring << xsvgy0 << "," << 0 << " ";
-            if (useRight) pathstring << svgSize << "," << ysvgxmax << " ";
-            if (useBottom) pathstring << xsvgymax << "," << svgSize << " ";
+            svgfile << 0 << "," << ysvgx0 << " L " << halfSvgSize<<","<<halfSvgSize<<" L ";
+            if (useTop) svgfile << xsvgy0 << "," << 0 << " ";
+            if (useRight) svgfile << svgSize << "," << ysvgxmax << " ";
+            if (useBottom) svgfile << xsvgymax << "," << svgSize << " ";
         }
         if (useTop) {
-            pathstring << xsvgy0 << "," << 0 << " L " << halfSvgSize<<","<<halfSvgSize<<" L ";
-            if (useRight) pathstring << svgSize << "," << ysvgxmax << " ";
-            if (useBottom) pathstring << xsvgymax << "," << svgSize << " ";
+            svgfile << xsvgy0 << "," << 0 << " L " << halfSvgSize<<","<<halfSvgSize<<" L ";
+            if (useRight) svgfile << svgSize << "," << ysvgxmax << " ";
+            if (useBottom) svgfile << xsvgymax << "," << svgSize << " ";
         }
         if (useBottom) {
-            pathstring << xsvgymax << "," << svgSize << " L " << halfSvgSize<<","<<halfSvgSize<<" L ";
-            if (useRight) pathstring << svgSize << "," << ysvgxmax << " ";
+            svgfile << xsvgymax << "," << svgSize << " L " << halfSvgSize<<","<<halfSvgSize<<" L ";
+            if (useRight) svgfile << svgSize << "," << ysvgxmax << " ";
             // else internal error
         }
-        pathstring << "\" />";
+        svgfile << "\" />" << endl;
     }
-    svgfile << pathstring.str() << endl;
     
     // Save the classifier parameters as an SVG comment so we can find them back later on
     // Use base64 encoded binary to preserve full precision
-    // numscales
-    // the scales
-    // the weights for the default classifier
-    // the path definition for the default classifier, so we can recognize if it was modified
-    
-    // TODO: coefficients of the 2 initial projections to allow to analytically represent
-    //       user-specified boundaries
     
     vector<char> binary_parameters(
         sizeof(int)
       + nscales*sizeof(FloatType)
-      + (nscales*2+1)*sizeof(FloatType)
-      + pathstring.str().length()+1 // null terminator
+      + (fdim+1)*sizeof(FloatType)
+      + (fdim+1)*sizeof(FloatType)
+      + sizeof(FloatType)
     );
     int bpidx = 0;
     memcpy(&binary_parameters[bpidx],&nscales,sizeof(int)); bpidx += sizeof(int);
@@ -646,17 +641,27 @@ int main(int argc, char** argv) {
         memcpy(&binary_parameters[bpidx],&scales[i],sizeof(FloatType));
         bpidx += sizeof(FloatType);
     }
-    for (int i=0; i<fdim; ++i) {
-        memcpy(&binary_parameters[bpidx],&weights[i],sizeof(FloatType));
+    // Projections on the two 2D axis
+    for (int i=0; i<=fdim; ++i) {
+        memcpy(&binary_parameters[bpidx],&classifier.weights[i],sizeof(FloatType));
         bpidx += sizeof(FloatType);
     }
-    memcpy(&binary_parameters[bpidx], pathstring.str().c_str(), pathstring.str().length()+1);
+    for (int i=0; i<=fdim; ++i) {
+        memcpy(&binary_parameters[bpidx],&ortho_classifier.weights[i],sizeof(FloatType));
+        bpidx += sizeof(FloatType);
+    }
+    // boundaries
+    memcpy(&binary_parameters[bpidx],&absmaxXY,sizeof(FloatType)); bpidx += sizeof(FloatType);
+    // conversion from svg to 2D space
+    memcpy(&binary_parameters[bpidx],&scaleFactor,sizeof(FloatType)); bpidx += sizeof(FloatType);
+    memcpy(&binary_parameters[bpidx],&halfSvgSize,sizeof(int)); bpidx += sizeof(int);
+    
     codec.reset_encoder();
     std::vector<char> base64commentdata(codec.get_max_encoded_size(binary_parameters.size()));
     nbytes = codec.encode(&binary_parameters[0], binary_parameters.size(), &base64commentdata[0]);
     nbytes += codec.encode_end(&base64commentdata[nbytes]);
     
-    svgfile << "<!-- params=#" << &base64commentdata[0] << "# -->\n" << endl;    
+    svgfile << "<!-- params " << &base64commentdata[0] << " -->\n" << endl;    
 
     svgfile << "</svg>" << endl;
     svgfile.close();
