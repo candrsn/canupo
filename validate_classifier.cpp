@@ -54,7 +54,7 @@ int main(int argc, char** argv) {
     if (argc==5) {
         class_num_1 = atoi(argv[3]);
         class_num_2 = atoi(argv[4]);
-        if (class_num_1<=0 || class_num_2 <=0) return help();
+//        if (class_num_1<=0 || class_num_2 <=0) return help();
     }
     
     string line;
@@ -179,105 +179,6 @@ int main(int argc, char** argv) {
     // helper to get max grid size in classify
     classifierfile.write((char*)&absmaxXY,sizeof(FloatType));
     classifierfile.close();
-    
-/*    
-    
-    // compute each line in the path, boundaries given by path nodes
-    vector<LineDef> pathlines;
-    for(int i=0; i<path.size()-1; ++i) {
-        LineDef ld;
-        FloatType xdelta = path[i+1].x - path[i].x;
-        FloatType ydelta = path[i+1].y - path[i].y;
-        if (fabs(xdelta) > 1e-3) {
-            // y = slope * x + bias
-            ld.wy = -1;
-            ld.wx = ydelta / xdelta; // slope
-            ld.c = path[i].y - path[i].x * ld.wx;
-        } else {
-            if (fabs(xdelta) < 1e-3) {
-                cerr << "invalid path definition in svg (nodes too close to each other)" << endl;
-                return 0;
-            }
-            // just reverse the roles for a quasi-vertical line at x ~ cte
-            ld.wx = -1;
-            ld.wy = xdelta / ydelta; // is quasi null here, assuming ydelta != 0
-            ld.c = path[i].x - path[i].y * ld.wy;
-        }
-        pathlines.push_back(ld);
-    }
-    
-    
-    // take a reference point that is unlikely to fall exactly on a node, and in the -1 class
-    Point2D refpt(-M_PI*absmaxXY, -M_PI*absmaxXY);
-    // slighly off so to account for parallel lines, but shall still be in the -1 class
-    Point2D refpt2(-(M_PI+1)*absmaxXY, -M_PI*absmaxXY);
-    const int gridsize = 100;
-    vector<int> nodeclassif((gridsize+1)*(gridsize+1));
-    // compute the classification at each grid point
-    for (int j=0; j<=gridsize; ++j) {
-        FloatType b = -absmaxXY + j * 2 * absmaxXY / gridsize;
-        for (int i=0; i<=gridsize; ++i) {
-            FloatType a = -absmaxXY + i * 2 * absmaxXY / gridsize;
-            // line equa from refpt to (a,b). By construction a != refpt.x
-            // y = refpt.y + (b - refpt.y) * (x - refpt.x) / (a - refpt.x)
-            // y = refslope * x + refbias
-            FloatType refslope = (b - refpt.y) / (a - refpt.x);
-            FloatType refbias = refpt.y - refpt.x * refslope;
-            // equa for each segment: wx * x + wy * y + wc = 0
-            // intersection: wx * x + (wy * refslope) * x + (wc+refbias) = 0
-            // x = -(wc+refbias) / (wx + wy * refslope);  and  y = refslope * x + refbias
-            // if (wx + wy * refslope) is null : no intersection, parallel lines
-            // => use a secondary ref point on a different line
-            bool nodupflag = false;
-            int crosscount = 0;
-            for (int i=0; i<pathlines.size(); ++i) {
-                FloatType divisor = pathlines[i].wx + pathlines[i] * wy * refslope;
-                FloatType intersectx;
-                FloatType intersecty;
-                if (fabs(divisor)<1e-3) {
-                    FloatType ref2slope = (b - refpt2.y) / (a - refpt2.x);
-                    FloatType ref2bias = refpt2.y - refpt2.x * refslope;
-                    divisor = pathlines[i].wx + pathlines[i] * wy * ref2slope;
-                    intersectx = (ref2bias - pathlines[i].wx) / divisor;
-                    intersecty = ref2slope * intersectx + ref2bias;
-                } else {
-                    intersectx = (refbias - pathlines[i].wx) / divisor;
-                    intersecty = refslope * intersectx + refbias;
-                }
-                bool intersect = true;
-                // first and last segments are prolongated to infinity
-                if (i>0) {
-                    intersect &= (intersectx >= path[i].x) && (intersecty >= path[i].y);
-                    if (intersect && sqrt((intersectx-path[i].x)*(intersectx-path[i].x)+(intersecty-path[i].y)*(intersecty-path[i].y))<1e-6) {
-                        if (nodupflag) intersect = false;
-                    }
-                }
-                nodupflag = false;
-                if (i<pathlines.size()) {
-                    intersect &= (intersectx <= path[i+1].x) && (intersecty <= path[i+1].y);
-                    if (intersect && sqrt((intersectx-path[i+1].x)*(intersectx-path[i+1].x)+(intersecty-path[i+1].y)*(intersecty-path[i+1].y))<1e-6) {
-                        nodupflag = true;
-                    }
-                }
-                if (intersect) ++crosscount;
-            }
-            // even number of crossings => -1 class, odd = +1. Keep just parity for now
-            nodeclassif[j*(gridsize+1)+i] = ((crosscount&1)==1);
-        }
-    }
-    
-    vector<int8_t> gridClassif(gridsize*gridsize);
-    vector<int> gridIdxToPostProcess;
-    for (int j=0; j<gridsize; ++j) for (int i=0; i<gridsize; ++i) {
-        int8_t evenodd = nodeclassif[j*(gridsize+1)+i];
-        evenodd += nodeclassif[j*(gridsize+1)+i+1];
-        evenodd += nodeclassif[(j+1)*(gridsize+1)+i];
-        evenodd += nodeclassif[(j+1)*(gridsize+1)+i+1];
-        if (evenodd==4) {gridClassif[j*gridsize+i] = 1; continue;}
-        if (evenodd==0) {gridClassif[j*gridsize+i] = -1; continue;}
-        // do not know, we'll have to classify each point within the cell individually
-        gridClassif[j*gridsize+i] = 0;
-    }
-*/  
+
     return 0;
 }

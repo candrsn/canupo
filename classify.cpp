@@ -5,6 +5,8 @@
 
 #include <math.h>
 
+#include <cairo/cairo.h>
+
 #include "points.hpp"
 
 using namespace std;
@@ -81,50 +83,10 @@ struct Classifier {
         refpt = Point2D(-M_PI*absmaxXY, -M_PI*absmaxXY);
         // slighly off so to account for path lines parallel to refpt-somept, but shall still be in the -1 class
         refpt2 = Point2D(-(M_PI+2)*absmaxXY, -(M_PI+1)*absmaxXY);
-        
-        // compute the classification at each grid point
-        vector<FloatType> nodeclassif((gridsize+1)*(gridsize+1));
-        for (int j=0; j<=gridsize; ++j) {
-            FloatType b = -absmaxXY + j * 2 * absmaxXY / gridsize;
-            for (int i=0; i<=gridsize; ++i) {
-                FloatType a = -absmaxXY + i * 2 * absmaxXY / gridsize;
-                nodeclassif[j*(gridsize+1)+i] = classify2D(a,b,false);
-            }
-        }
-
-        // some grid cells can be completely classified, speed up further operations
-        grid.resize(gridsize*gridsize);
-        for (int j=0; j<gridsize; ++j) for (int i=0; i<gridsize; ++i) {
-            bool classifiedCell = true;
-            if (nodeclassif[j*(gridsize+1)+i] >= 0) {
-                classifiedCell &= nodeclassif[j*(gridsize+1)+i+1] >= 0;
-                classifiedCell &= nodeclassif[(j+1)*(gridsize+1)+i] >= 0;
-                classifiedCell &= nodeclassif[(j+1)*(gridsize+1)+i+1] >= 0;
-            }
-            if (nodeclassif[j*(gridsize+1)+i] <= 0) {
-                classifiedCell &= nodeclassif[j*(gridsize+1)+i+1] <= 0;
-                classifiedCell &= nodeclassif[(j+1)*(gridsize+1)+i] <= 0;
-                classifiedCell &= nodeclassif[(j+1)*(gridsize+1)+i+1] <= 0;
-            }
-            FloatType avg = nodeclassif[j*(gridsize+1)+i];
-            avg += nodeclassif[j*(gridsize+1)+i+1];
-            avg += nodeclassif[(j+1)*(gridsize+1)+i];
-            avg += nodeclassif[(j+1)*(gridsize+1)+i+1];
-            // if avg is null then consider the cell is not classified in any case
-            // otherwise points have avg class boundary within the cell
-            // TODO: the min might be more relevant later on when we deal with the laser intensity information
-            grid[j*gridsize+i] = classifiedCell ? (avg/4) : 0;
-        }
     }
 
     // classification in the 2D space
-    FloatType classify2D(FloatType a, FloatType b, bool usegrid = true) {
-        if (usegrid && fabs(a) < absmaxXY && fabs(b) < absmaxXY) {
-            int i = (int)floor((a + absmaxXY) * gridsize / (2 * absmaxXY));
-            int j = (int)floor((b + absmaxXY) * gridsize / (2 * absmaxXY));
-            // return grid classif if it is unique, otherwise compute for this point
-            if (grid[j*gridsize+i]!=0) return grid[j*gridsize+i];
-        }
+    FloatType classify2D(FloatType a, FloatType b) {
         Point2D* refptr = &refpt;
         Point2D* refptr2 = &refpt2;
         if (a == refpt.x) {
@@ -144,47 +106,52 @@ struct Classifier {
         int crosscount = 0;
         FloatType closestDist = numeric_limits<FloatType>::max();
         for (int i=0; i<pathlines.size(); ++i) {
-            FloatType divisor = pathlines[i].wx + pathlines[i] * wy * refslope;
+            FloatType divisor = pathlines[i].wx + pathlines[i].wy * refslope;
             FloatType intersectx;
             FloatType intersecty;
+            Point2D* selrefptr = refptr;
             if (fabs(divisor)<1e-3) {
                 FloatType ref2slope = (b - refptr2->y) / (a - refptr2->x);
                 FloatType ref2bias = refptr2->y - refptr2->x * ref2slope;
-                divisor = pathlines[i].wx + pathlines[i] * wy * ref2slope;
+                divisor = pathlines[i].wx + pathlines[i].wy * ref2slope;
                 intersectx = (ref2bias - pathlines[i].wx) / divisor;
                 intersecty = ref2slope * intersectx + ref2bias;
+                selrefptr = refptr2;
             } else {
                 intersectx = (refbias - pathlines[i].wx) / divisor;
                 intersecty = refslope * intersectx + refbias;
             }
-            bool intersect = true;
+            // intersection is valid only if distance is right... whatever the lines crossing point
+            bool intersect = dist2(*selrefptr, Point2D(a,b)) < dist2(*selrefptr, Point2D(intersectx,intersecty));
             // first and last segments are prolongated to infinity
-            if (i==0) {
-                FloatType xdelta = path[i+1].x - intersectx;
-                FloatType ydelta = path[i+1].y - intersecty;
-                // use the more reliable delta
-                if (fabs(xdelta)>fabs(ydelta)) {
-                    // intersection is valid only if on the half-infinite side of the segment
-                    intersect &= (xdelta * (path[i+1].x - path[i].x)) > 0;
+            if (intersect) {
+                if (i==0) {
+                    FloatType xdelta = path[i+1].x - intersectx;
+                    FloatType ydelta = path[i+1].y - intersecty;
+                    // use the more reliable delta
+                    if (fabs(xdelta)>fabs(ydelta)) {
+                        // intersection is valid only if on the half-infinite side of the segment
+                        intersect &= (xdelta * (path[i+1].x - path[i].x)) > 0;
+                    } else {
+                        intersect &= (ydelta * (path[i+1].y - path[i].y)) > 0;
+                    }
+                } else if (i==pathlines.size()-1) {
+                    // idem, just infinite on the other side
+                    FloatType xdelta = path[i].x - intersectx;
+                    FloatType ydelta = path[i].y - intersecty;
+                    if (fabs(xdelta)>fabs(ydelta)) {
+                        intersect &= (xdelta * (path[i].x - path[i+1].x)) > 0;
+                    } else {
+                        intersect &= (ydelta * (path[i].y - path[i+1].y)) > 0;
+                    }
                 } else {
-                    intersect &= (ydelta * (path[i+1].y - path[i].y)) > 0;
+                    // intersection is valid only within the segment boundaries
+                    intersect &= (intersectx >= min(path[i].x,path[i+1].x)) && (intersecty >= min(path[i].y,path[i+1].y));
+                    intersect &= (intersectx <= max(path[i].x,path[i+1].x)) && (intersecty <= max(path[i].y,path[i+1].y));
                 }
-            } else if (i==pathlines.size()-1) {
-                // idem, just infinite on the other side
-                FloatType xdelta = path[i].x - intersectx;
-                FloatType ydelta = path[i].y - intersecty;
-                if (fabs(xdelta)>fabs(ydelta)) {
-                    intersect &= (xdelta * (path[i].x - path[i+1].x)) > 0;
-                } else {
-                    intersect &= (ydelta * (path[i].y - path[i+1].y)) > 0;
-                }
-            } else {
-                // intersection is valid only within the segment boundaries
-                intersect &= (intersectx >= min(path[i].x,path[i+1].x)) && (intersecty >= min(path[i].y,path[i+1].y));
-                intersect &= (intersectx <= max(path[i].x,path[i+1].x)) && (intersecty <= max(path[i].y,path[i+1].y));
             }
-            // nodes joining segments might be duplicated, but then, they are on the boundary, so we do not care
-            // which class they are put into (either odd or even crossings)
+            // intersections at nodes joining segments might be duplicated (odd/even count mismatch)
+            // but they will have 0-distance decision boundary, so we do not care
             if (intersect) ++crosscount;
             // closest distance from the point to that segment
             // 1. projection of the point of the line
@@ -205,15 +172,20 @@ struct Classifier {
         // then return closestDist as the confidence in this class
         return ((crosscount&1) * 2 - 1) * closestDist;
     }
-
-    // classification in MSC space
-    FloatType classify(FloatType* mscdata) {
-        FloatType a = weights_axis1[weights_axis1.size()-1];
-        FloatType b = weights_axis2[weights_axis2.size()-1];
+    
+    void project(FloatType* mscdata, FloatType& a, FloatType& b) {
+        a = weights_axis1[weights_axis1.size()-1];
+        b = weights_axis2[weights_axis2.size()-1];
         for (int d=0; d<weights_axis1.size()-1; ++d) {
             a += weights_axis1[d] * mscdata[d];
             b += weights_axis2[d] * mscdata[d];
         }
+    }
+
+    // classification in MSC space
+    FloatType classify(FloatType* mscdata) {
+        FloatType a,b;
+        project(mscdata,a,b);
         return classify2D(a,b);
     }
 };
@@ -239,20 +211,19 @@ int main(int argc, char** argv) {
         classifparamsfile.read((char*)&classifiers[ci].class2, sizeof(int));
         classifiers[ci].weights_axis1.resize(fdim+1);
         classifiers[ci].weights_axis2.resize(fdim+1);
-        for (int i=0; i<=fdim; ++i) classifierfile.read((char*)&classifiers[ci].weights_axis1[i],sizeof(FloatType));
-        for (int i=0; i<=fdim; ++i) classifierfile.read((char*)&classifiers[ci].weights_axis2[i],sizeof(FloatType));
+        for (int i=0; i<=fdim; ++i) classifparamsfile.read((char*)&classifiers[ci].weights_axis1[i],sizeof(FloatType));
+        for (int i=0; i<=fdim; ++i) classifparamsfile.read((char*)&classifiers[ci].weights_axis2[i],sizeof(FloatType));
         int pathsize;
-        classifierfile.read((char*)&pathsize,sizeof(int));
+        classifparamsfile.read((char*)&pathsize,sizeof(int));
         classifiers[ci].path.resize(pathsize);
         for (int i=0; i<pathsize; ++i) {
-            classifierfile.read((char*)&classifiers[ci].path[i].x,sizeof(FloatType));
-            classifierfile.read((char*)&classifiers[ci].path[i].y,sizeof(FloatType));
+            classifparamsfile.read((char*)&classifiers[ci].path[i].x,sizeof(FloatType));
+            classifparamsfile.read((char*)&classifiers[ci].path[i].y,sizeof(FloatType));
         }
-        classifierfile.read((char*)&classifiers[ci].absmaxXY,sizeof(FloatType));
+        classifparamsfile.read((char*)&classifiers[ci].absmaxXY,sizeof(FloatType));
         classifiers[ci].prepare();
     }
-    classifierfile.close();
-    int nclasses = uniqueClasses.size();
+    classifparamsfile.close();
     
     // reversed situation here compared to canupo:
     // - we load the core points in the cloud so as to perform neighbor searches
@@ -278,7 +249,7 @@ int main(int argc, char** argv) {
 
     // now load the points and multiscale information from the msc file.
     // Put the points in the cloud, keep the multiscale information in a separate vector matched by point index
-    vector<FloatType> mscdata(ncorepoints * nscales_msc*2);
+    vector<FloatType> mscdata(ncorepoints * nscales*2);
     cloud.data.resize(ncorepoints);
     cloud.xmin = numeric_limits<FloatType>::max();
     cloud.xmax = -numeric_limits<FloatType>::max();
@@ -331,6 +302,19 @@ int main(int argc, char** argv) {
     
     cout << "Loading and processing scene data" << endl;
     ofstream scene_annotated(argv[4]);
+
+    static const int svgSize = 800;
+    cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, svgSize, svgSize);
+    cairo_t *cr = cairo_create(surface);
+    
+    cairo_set_source_rgb(cr, 1, 1, 1);
+    cairo_set_line_width(cr, 0);
+    cairo_rectangle(cr, 0, 0, svgSize, svgSize);
+    cairo_fill(cr);
+    cairo_stroke(cr);
+    
+    cairo_set_line_width(cr, 1);
+    
     
     ifstream datafile(argv[2]);
     string line;
@@ -358,52 +342,94 @@ int main(int argc, char** argv) {
         }
         // if that core point already has a class, fine, otherwise compute it
         if (coreclasses[neighidx]==-1) {
-            FloatType* msc = &mscdata[neighidx*nscales_msc*2];
-            // one-against-one process: apply all classifiers and vote for this point class
-            
-            
-            // TODO : update
-            
-            
-            
-            
-            vector<FloatType> predictions(nclassifiers);
+            //vector<FloatType> predictions(nclassifiers);
             map<int,int> votes;
-            for (int j=1; j<nclasses; ++j) for (int i=0; i<j; ++i) {
-                int cidx = j*(j-1)/2 + i;
-                // multi-scale classifier: select relevant scales
-                for (int k = 0; k<classifierscalesidx[cidx].size(); ++k) {
-                    int sidx = classifierscalesidx[cidx][k];
-                    selectedScalesData[k*2] = msc[sidx*2];
-                    selectedScalesData[k*2+1] = msc[sidx*2+1];
-                }
-                FloatType pred = predictors[cidx]->predict(&selectedScalesData[0]);
-                if (pred>=0) ++votes[j];
-                else ++votes[i];
-                predictions[cidx] = pred;
+            map< pair<int,int>, FloatType > predictions;
+            // one-against-one process: apply all classifiers and vote for this point class
+            for (int ci=0; ci<nclassifiers; ++ci) {
+                FloatType pred = classifiers[ci].classify(&mscdata[neighidx*nscales*2]);
+                if (pred>=0) ++votes[classifiers[ci].class2];
+                else ++votes[classifiers[ci].class1];
+                // uniformize the order, pred>0 selects the larger class of both
+                if (classifiers[ci].class1 > classifiers[ci].class2) pred = -pred;
+                predictions[make_pair(min(classifiers[ci].class1, classifiers[ci].class2), max(classifiers[ci].class1, classifiers[ci].class2))] = pred;
             }
-            // search for max vote, in case equality = use the classifier between both to break the vote
-            // TODO: loop breaking, see make_features.cpp
-            int maxvote = -1; int selectedclass = 0;
-            for (int i=0; i<votes.size(); ++i) {
-                if (maxvote < votes[i]) {
-                    selectedclass = i;
-                    maxvote = votes[i];
-                } else if (maxvote == votes[i]) {
-                    int iclass = min(selectedclass, i);
-                    int jclass = max(selectedclass, i);
-                    int idx = jclass*(jclass-1)/2 + iclass;
-                    // choose the best between both equal
-                    if (predictions[idx]>=0) selectedclass = jclass;
-                    else selectedclass = iclass;
-                    maxvote = votes[selectedclass];
+            // search for max vote
+            vector<int> bestclasses;
+            int maxvote = -1;
+            for (map<int,int>::iterator it = votes.begin(); it!=votes.end(); ++it) {
+                int vclass = it->first;
+                int vote = it->second;
+                if (maxvote < vote) {
+                    bestclasses.clear();
+                    bestclasses.push_back(vclass);
+                    maxvote = vote;
+                } else if (maxvote == vote) {
+                    bestclasses.push_back(vclass);
                 }
             }
-            coreclasses[neighidx] = selectedclass;
+            // only one class => do not bother with tie breaking
+            if (bestclasses.size()==1) coreclasses[neighidx] = bestclasses[0]; 
+            else {
+                // in case equality = use the distances from the decision boundary
+                map<int, FloatType> votepred;
+                // process only once each pair of classes
+                for (int j=1; j<bestclasses.size(); ++j) for (int i=0; i<j; ++i) {
+                    int minc = min(bestclasses[i], bestclasses[j]);
+                    int maxc = max(bestclasses[i], bestclasses[j]);
+                    FloatType pred = predictions[make_pair(minc,maxc)];
+                    if (pred>=0) votepred[maxc] += pred;
+                    else votepred[minc] -= pred; // sum positive contributions
+                }
+                // now look for the class with max total decision boundary
+                FloatType maxpred = -numeric_limits<FloatType>::max();
+                int selectedclass = 1;
+                for (map<int, FloatType>::iterator it = votepred.begin(); it!=votepred.end(); ++it) {
+                    if (maxpred < it->second) {
+                        maxpred = it->second;
+                        selectedclass = it->first;
+                    }
+                }
+                coreclasses[neighidx] = selectedclass;
+            }
+        
+            FloatType a,b;
+            FloatType scaleFactor = svgSize/2 / classifiers[0].absmaxXY;
+            classifiers[0].project(&mscdata[neighidx*nscales*2],a,b);
+            if (coreclasses[neighidx]==1) cairo_set_source_rgba(cr, 1, 0, 0, 0.75);
+            else cairo_set_source_rgba(cr, 0, 0, 1, 0.75);
+            FloatType x = a*scaleFactor + svgSize/2;
+            FloatType y = svgSize/2 - b*scaleFactor;
+            cairo_arc(cr, x, y, 0.714, 0, 2*M_PI);
+            cairo_stroke(cr);
         }
         // assign the scene point to this core point class
         scene_annotated << point.x << " " << point.y << " " << point.z << " " << coreclasses[neighidx] << endl;
     }
+
+    FloatType scaleFactor = svgSize/2 / classifiers[0].absmaxXY;
+    cairo_set_source_rgb(cr, 0,0,0);
+    for (int i=0; i<classifiers[0].path.size(); ++i) {
+        FloatType x = classifiers[0].path[i].x*scaleFactor + svgSize/2;
+        FloatType y = svgSize/2 - classifiers[0].path[i].y*scaleFactor;
+        if (i==0) cairo_move_to(cr, x,y);
+        else cairo_line_to(cr, x,y);
+    }
+    cairo_stroke(cr);
+
+    // draw lines on top of points
+    double dashes[2]; 
+    int halfSvgSize = svgSize/2;
+    dashes[0] = dashes[1] = svgSize*0.01;
+    cairo_set_dash(cr, dashes, 2, svgSize*0.005);
+    cairo_set_source_rgb(cr, 0.25,0.25,0.25);
+    cairo_move_to(cr, 0,halfSvgSize);
+    cairo_line_to(cr, svgSize,halfSvgSize);
+    cairo_move_to(cr, halfSvgSize,0);
+    cairo_line_to(cr, halfSvgSize,svgSize);
+    cairo_stroke(cr);
+    
+    cairo_surface_write_to_png (surface, "test.png");
     
     return 0;
 }

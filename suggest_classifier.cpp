@@ -634,6 +634,8 @@ int main(int argc, char** argv) {
       + (fdim+1)*sizeof(FloatType)
       + (fdim+1)*sizeof(FloatType)
       + sizeof(FloatType)
+      + sizeof(FloatType)
+      + sizeof(int)
     );
     int bpidx = 0;
     memcpy(&binary_parameters[bpidx],&nscales,sizeof(int)); bpidx += sizeof(int);
@@ -665,20 +667,6 @@ int main(int argc, char** argv) {
 
     svgfile << "</svg>" << endl;
     svgfile.close();
-
-    // tmp test
-    ofstream tmpfeatfile("test.prm", ofstream::binary);
-    tmpfeatfile.write((char*)&nscales,sizeof(int));
-    for (int i=0; i<nscales; ++i) tmpfeatfile.write((char*)&scales[i],sizeof(FloatType));
-    int nclasses=2;
-    tmpfeatfile.write((char*)&nclasses,sizeof(int));
-    int classifid=0;
-    tmpfeatfile.write((char*)&classifid,sizeof(int));
-    tmpfeatfile.write((char*)&nscales,sizeof(int));
-    for (int i=0; i<nscales; ++i) tmpfeatfile.write((char*)&scales[i],sizeof(FloatType));
-    tmpfeatfile.write((char*)&fdim,sizeof(int));
-    for (int i=0; i<=fdim; ++i) tmpfeatfile.write((char*)&weights[i],sizeof(FloatType));
-    tmpfeatfile.close();
 
     return 0;
 }

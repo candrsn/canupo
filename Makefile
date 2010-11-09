@@ -42,5 +42,5 @@ classify:
 clean:
 	rm -f canupo density annotate make_features classify suggest_classifier 
 
-.PHONY: canupo density annotate classify clean features_least_squares features_linear_svm features_gaussian_svm features_user_define suggest_classifier
+.PHONY: canupo density annotate classify clean features_least_squares features_linear_svm features_gaussian_svm features_user_define suggest_classifier validate_classifier
 
