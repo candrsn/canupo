@@ -5,6 +5,8 @@
 
 #include <math.h>
 
+#include <cairo/cairo.h>
+
 #include "points.hpp"
 
 using namespace std;
