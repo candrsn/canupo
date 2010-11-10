@@ -5,8 +5,6 @@
 
 #include <math.h>
 
-#include <cairo/cairo.h>
-
 #include "points.hpp"
 
 using namespace std;
@@ -93,7 +91,7 @@ struct Classifier {
         }
     }
 
-    FloatType classify2D_checkcondnum(FloatType a, FloatType b, Point2D& refpt, FloatType& condnum) {
+    FloatType classify2D_checkcondnum(FloatType a, FloatType b, Point2D& refpt, FloatType& condnumber) {
         Point2D pt(a,b);
         // consider each path line as a mini-classifier
         // the segments pt-refpt_pos  and  that segment line cross
@@ -101,46 +99,18 @@ struct Classifier {
         // we only need a normal vector in each case, not necessary unit 1, as only the sign counts
         // normal vector <=> homogeneous equa
         LineDef ld;
-        bool useneg = false;
-        Point2D *refpt = &refpt_pos;
-        FloatType xdelta = refpt_pos.x - a;
-        FloatType ydelta = refpt_pos.y - b;
+            FloatType xdelta = refpt.x - a;
+        FloatType ydelta = refpt.y - b;
         if (fabs(xdelta) > 1e-3) {
             // y = slope * x + bias
             ld.wy = -1;
             ld.wx = ydelta / xdelta; // slope
             ld.c = b - a * ld.wx;
         } else {
-            // point may be too close to reference point
-            if (fabs(xdelta) < 1e-3) useneg = true;
-            else {
-                // just reverse the roles for a quasi-vertical line at x ~ cte
-                ld.wx = -1;
-                ld.wy = xdelta / ydelta; // is quasi null here, assuming ydelta != 0
-                ld.c = a - b * ld.wy;
-            }
-        }
-        if (useneg) {
-            refpt = &refpt_neg;
-            xdelta = refpt_neg.x - a;
-            ydelta = refpt_neg.y - b;
-            if (fabs(xdelta) > 1e-3) {
-                // y = slope * x + bias
-                ld.wy = -1;
-                ld.wx = ydelta / xdelta; // slope
-                ld.c = b - a * ld.wx;
-            } else {
-                if (fabs(xdelta) < 1e-3) {
-                    cerr << "reference points are too close to each other" << endl;
-                    exit(1);
-                }
-                else {
-                    // just reverse the roles for a quasi-vertical line at x ~ cte
-                    ld.wx = -1;
-                    ld.wy = xdelta / ydelta; // is quasi null here, assuming ydelta != 0
-                    ld.c = a - b * ld.wy;
-                }
-            }
+            // just reverse the roles for a quasi-vertical line at x ~ cte
+            ld.wx = -1;
+            ld.wy = xdelta / ydelta; // is quasi null here, assuming ydelta != 0
+            ld.c = a - b * ld.wy;
         }
         FloatType norm = sqrt(ld.wx*ld.wx + ld.wy*ld.wy);
         ld.wx /= norm; ld.wy /= norm; ld.c /= norm;
@@ -149,7 +119,7 @@ struct Classifier {
         FloatType closestDist = numeric_limits<FloatType>::max();
         int selectedSeg = -1;
         int numcross = 0;
-        FloatType condnumber = -numeric_limits<FloatType>::max();
+        condnumber = -numeric_limits<FloatType>::max();
         for (int i=0; i<pathlines.size(); ++i) {
             Point2D n(pathlines[i].wx, pathlines[i].wy);
             condnumber = max(condnumber, fabs(n.dot(refsegn)));
@@ -157,7 +127,7 @@ struct Classifier {
             
             // Compute whether refpt-pt and that segment cross
             // 1. check whether the given pt and the refpt are on different sides of the classifier line
-            bool pathseparates = n.dot(pt + shift) * n.dot(*refpt + shift) < 0;
+            bool pathseparates = n.dot(pt + shift) * n.dot(refpt + shift) < 0;
             bool refsegseparates;
             // first and last lines are projected to infinity
             if (i==0) {
@@ -167,7 +137,7 @@ struct Classifier {
                 // compute whether refsegn * refsegn.dot(path[i+1] + refshift); and path[i+1] - path[i]; are in the same dir
                 Point2D to_infinity_and_beyond = path[i+1] - path[i];
                 refsegseparates = to_infinity_and_beyond.dot(refsegn * refsegn.dot(path[i+1] + refshift))>0;
-            } else if (i<pathlines.size()-1) {
+            } else if (i==pathlines.size()-1) {
                 Point2D to_infinity_and_beyond = path[i] - path[i+1];
                 refsegseparates = to_infinity_and_beyond.dot(refsegn * refsegn.dot(path[i] + refshift))>0;
             } else refsegseparates = refsegn.dot(path[i] + refshift) * refsegn.dot(path[i+1] + refshift) < 0;
@@ -218,7 +188,7 @@ struct Classifier {
         Point2D n(pathlines[selectedSeg].wx, pathlines[selectedSeg].wy);
         Point2D p = pt - n * n.dot(pt + n * pathlines[selectedSeg].c);
         Point2D delta = pt - p;
-        if ((numcross&1)==useneg) return delta.norm();
+        if ((numcross&1)==0) return delta.norm();
         else return -delta.norm();
     }
 
