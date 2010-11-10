@@ -213,6 +213,8 @@ int main(int argc, char** argv) {
     refpt2.y = (halfSvgSize - refpt2.y) / scaleFactor;
     classifierfile.write((char*)&refpt2.x,sizeof(FloatType));
     classifierfile.write((char*)&refpt2.y,sizeof(FloatType));
+    // some information useful for debugging
+    classifierfile.write((char*)&absmaxXY,sizeof(FloatType));
     classifierfile.close();
 
     return 0;

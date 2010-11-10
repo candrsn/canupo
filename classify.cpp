@@ -5,7 +5,9 @@
 
 #include <math.h>
 
+#ifdef CHECK_CLASSIFIER
 #include <cairo/cairo.h>
+#endif
 
 #include "points.hpp"
 
@@ -53,8 +55,6 @@ struct Classifier {
     vector<FloatType> grid;
 
     void prepare() {
-        absmaxXY=5.20822;
-        
         // exchange refpt_pos and refpt_neg if necessary, the user may have moved them
         // dot product with (+1,+1) vector gives the classification sign
         if (refpt_pos.x + refpt_pos.y < 0) {
@@ -256,6 +256,7 @@ int main(int argc, char** argv) {
         classifparamsfile.read((char*)&classifiers[ci].refpt_pos.y,sizeof(FloatType));
         classifparamsfile.read((char*)&classifiers[ci].refpt_neg.x,sizeof(FloatType));
         classifparamsfile.read((char*)&classifiers[ci].refpt_neg.y,sizeof(FloatType));
+        classifparamsfile.read((char*)&classifiers[ci].absmaxXY,sizeof(FloatType));
         classifiers[ci].prepare();
     }
     classifparamsfile.close();
@@ -338,18 +339,17 @@ int main(int argc, char** argv) {
     cout << "Loading and processing scene data" << endl;
     ofstream scene_annotated(argv[4]);
 
+#ifdef CHECK_CLASSIFIER
     static const int svgSize = 800;
     cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, svgSize, svgSize);
     cairo_t *cr = cairo_create(surface);
-    
     cairo_set_source_rgb(cr, 1, 1, 1);
     cairo_set_line_width(cr, 0);
     cairo_rectangle(cr, 0, 0, svgSize, svgSize);
     cairo_fill(cr);
     cairo_stroke(cr);
-    
     cairo_set_line_width(cr, 1);
-    
+#endif
     
     ifstream datafile(argv[2]);
     string line;
@@ -428,6 +428,7 @@ int main(int argc, char** argv) {
                 coreclasses[neighidx] = selectedclass;
             }
         
+#ifdef CHECK_CLASSIFIER
             FloatType a,b;
             FloatType scaleFactor = svgSize/2 / classifiers[0].absmaxXY;
             classifiers[0].project(&mscdata[neighidx*nscales*2],a,b);
@@ -437,11 +438,13 @@ int main(int argc, char** argv) {
             FloatType y = svgSize/2 - b*scaleFactor;
             cairo_arc(cr, x, y, 0.714, 0, 2*M_PI);
             cairo_stroke(cr);
+#endif
         }
         // assign the scene point to this core point class
         scene_annotated << point.x << " " << point.y << " " << point.z << " " << coreclasses[neighidx] << endl;
     }
 
+#ifdef CHECK_CLASSIFIER
     FloatType scaleFactor = svgSize/2 / classifiers[0].absmaxXY;
     cairo_set_source_rgb(cr, 0,0,0);
     for (int i=0; i<classifiers[0].path.size(); ++i) {
@@ -451,8 +454,6 @@ int main(int argc, char** argv) {
         else cairo_line_to(cr, x,y);
     }
     cairo_stroke(cr);
-
-    // draw lines on top of points
     double dashes[2]; 
     int halfSvgSize = svgSize/2;
     dashes[0] = dashes[1] = svgSize*0.01;
@@ -463,8 +464,8 @@ int main(int argc, char** argv) {
     cairo_move_to(cr, halfSvgSize,0);
     cairo_line_to(cr, halfSvgSize,svgSize);
     cairo_stroke(cr);
-    
     cairo_surface_write_to_png (surface, "test.png");
-    
+#endif
+
     return 0;
 }
