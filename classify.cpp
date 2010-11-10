@@ -5,6 +5,8 @@
 
 #include <math.h>
 
+#include <cairo/cairo.h>
+
 #include "points.hpp"
 
 using namespace std;
@@ -51,6 +53,7 @@ struct Classifier {
     vector<FloatType> grid;
 
     void prepare() {
+        absmaxXY=5.20822;
         
         // exchange refpt_pos and refpt_neg if necessary, the user may have moved them
         // dot product with (+1,+1) vector gives the classification sign
@@ -288,6 +291,19 @@ int main(int argc, char** argv) {
     
     cout << "Loading and processing scene data" << endl;
     ofstream scene_annotated(argv[4]);
+
+    static const int svgSize = 800;
+    cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, svgSize, svgSize);
+    cairo_t *cr = cairo_create(surface);
+    
+    cairo_set_source_rgb(cr, 1, 1, 1);
+    cairo_set_line_width(cr, 0);
+    cairo_rectangle(cr, 0, 0, svgSize, svgSize);
+    cairo_fill(cr);
+    cairo_stroke(cr);
+    
+    cairo_set_line_width(cr, 1);
+    
     
     ifstream datafile(argv[2]);
     string line;
@@ -365,9 +381,44 @@ int main(int argc, char** argv) {
                 }
                 coreclasses[neighidx] = selectedclass;
             }
+        
+            FloatType a,b;
+            FloatType scaleFactor = svgSize/2 / classifiers[0].absmaxXY;
+            classifiers[0].project(&mscdata[neighidx*nscales*2],a,b);
+            if (coreclasses[neighidx]==2) cairo_set_source_rgba(cr, 1, 0, 0, 0.75);
+            else cairo_set_source_rgba(cr, 0, 0, 1, 0.75);
+            FloatType x = a*scaleFactor + svgSize/2;
+            FloatType y = svgSize/2 - b*scaleFactor;
+            cairo_arc(cr, x, y, 0.714, 0, 2*M_PI);
+            cairo_stroke(cr);
         }
         // assign the scene point to this core point class
         scene_annotated << point.x << " " << point.y << " " << point.z << " " << coreclasses[neighidx] << endl;
     }
+
+    FloatType scaleFactor = svgSize/2 / classifiers[0].absmaxXY;
+    cairo_set_source_rgb(cr, 0,0,0);
+    for (int i=0; i<classifiers[0].path.size(); ++i) {
+        FloatType x = classifiers[0].path[i].x*scaleFactor + svgSize/2;
+        FloatType y = svgSize/2 - classifiers[0].path[i].y*scaleFactor;
+        if (i==0) cairo_move_to(cr, x,y);
+        else cairo_line_to(cr, x,y);
+    }
+    cairo_stroke(cr);
+
+    // draw lines on top of points
+    double dashes[2]; 
+    int halfSvgSize = svgSize/2;
+    dashes[0] = dashes[1] = svgSize*0.01;
+    cairo_set_dash(cr, dashes, 2, svgSize*0.005);
+    cairo_set_source_rgb(cr, 0.25,0.25,0.25);
+    cairo_move_to(cr, 0,halfSvgSize);
+    cairo_line_to(cr, svgSize,halfSvgSize);
+    cairo_move_to(cr, halfSvgSize,0);
+    cairo_line_to(cr, halfSvgSize,svgSize);
+    cairo_stroke(cr);
+    
+    cairo_surface_write_to_png (surface, "test.png");
+    
     return 0;
 }
