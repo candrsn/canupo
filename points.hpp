@@ -83,6 +83,8 @@ struct Point2D : boost::addable<Point2D, boost::subtractable<Point2D, boost::mul
     inline Point2D& operator/=(const FloatType& f) {x/=f; y/=f; return *this;}
     
     inline FloatType dot(const Point2D& v) {return x*v.x + y*v.y;}
+    inline FloatType norm2() {return x*x + y*y;}
+    inline FloatType norm() {return sqrt(x*x + y*y);}
     
     inline static FloatType dist(const Point2D& a, const Point2D& b) {
         return sqrt(

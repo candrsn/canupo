@@ -59,8 +59,10 @@ int main(int argc, char** argv) {
     
     string line;
     bool incomment = false, inparams = false, inpath = false, inpathdef = false;
+    bool incircle = false, hasrefpt1 = false;
     string params;
     vector<Point2D> path;
+    Point2D refpt1, refpt2;
     while (svgfile && !svgfile.eof()) {
         getline(svgfile, line);
         if (line.empty()) continue;
@@ -74,7 +76,11 @@ int main(int argc, char** argv) {
             if (inparams) params += token;
             if (token == "params" && incomment) {inparams = true; continue;}
             if (token == "<path") {inpath = true; continue;}
-            if (inpath && token=="/>") {inpath = false; inpathdef = false; continue;}
+            if (token=="/>") {
+                if (incircle) {hasrefpt1 = true; incircle=false;}
+                if (inpath) {inpath=false; inpathdef=false;}
+                continue;
+            }
             if (inpath && token=="d=\"M") { inpathdef = true; path.clear(); continue;}
             if (inpathdef) {
                 if (token=="L") continue;
@@ -96,7 +102,29 @@ int main(int argc, char** argv) {
                     path.push_back(point);
                 } catch(bad_lexical_cast) {
                     cerr << "invalid path definition in svg (bad value)" << endl;
-                    return 0;
+                    return 1;
+                }
+            }
+            if (token == "<circle") {incircle=true; continue;}
+            if (incircle && (starts_with(token, "cx=") || starts_with(token, "cy="))) {
+                bool iscx = starts_with(token, "cx=");
+                token = token.substr(3);
+                if (starts_with(token, "\"")) token = token.substr(1);
+                if (ends_with(token, "\"")) token = token.substr(0, token.length()-1);
+                FloatType value;
+                try {
+                    value = lexical_cast<FloatType>(token);
+                } catch(bad_lexical_cast) {
+                    cerr << "invalid circle definition in svg (bad cx or cy value)" << endl;
+                    return 1;
+                }
+                if (hasrefpt1) {
+                    if (iscx) refpt2.x = value;
+                    else refpt2.y = value;
+                }
+                else {
+                    if (iscx) refpt1.x = value;
+                    else refpt1.y = value;
                 }
             }
         }
@@ -108,7 +136,7 @@ int main(int argc, char** argv) {
     }
 
 //    cout << params << endl;
-    
+
     base64 codec;
     vector<char> binary_params(codec.get_max_decoded_size(params.size()));
     // no need for terminating 0, base64 has its own termination marker
@@ -176,8 +204,15 @@ int main(int argc, char** argv) {
         classifierfile.write((char*)&path[i].x,sizeof(FloatType));
         classifierfile.write((char*)&path[i].y,sizeof(FloatType));
     }
-    // helper to get max grid size in classify
-    classifierfile.write((char*)&absmaxXY,sizeof(FloatType));
+    // the reference points for each class
+    refpt1.x = (refpt1.x - halfSvgSize) / scaleFactor;
+    refpt1.y = (halfSvgSize - refpt1.y) / scaleFactor;
+    classifierfile.write((char*)&refpt1.x,sizeof(FloatType));
+    classifierfile.write((char*)&refpt1.y,sizeof(FloatType));
+    refpt2.x = (refpt2.x - halfSvgSize) / scaleFactor;
+    refpt2.y = (halfSvgSize - refpt2.y) / scaleFactor;
+    classifierfile.write((char*)&refpt2.x,sizeof(FloatType));
+    classifierfile.write((char*)&refpt2.y,sizeof(FloatType));
     classifierfile.close();
 
     return 0;

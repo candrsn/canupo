@@ -351,6 +351,18 @@ int main(int argc, char** argv) {
     FloatType sndot_ortho = -ortho_classifier.weights[fdim] / norm_ortho;
     for (int i=0; i<fdim; ++i) svec_ortho[i] = sndot_ortho * nvec_ortho[i];
     
+    // compute the reference points for orienting the classifier boundaries
+    // pathological cases are possible where an arbitrary point in the (>0,>0)
+    // quadrant is not in the +1 class for example
+    // here, just use the mean of the classes
+    Point refpt_pos(0,0,0);
+    Point refpt_neg(0,0,0);
+    for (int i=0; i<nsamples; ++i) {
+        if (labels[i]>0) refpt_pos += Point(proj1[i], proj2[i], 1);
+        else refpt_neg += Point(proj1[i], proj2[i], 1);
+    }
+    refpt_pos /= refpt_pos.z;
+    refpt_neg /= refpt_neg.z;
     
     FloatType xming = numeric_limits<FloatType>::max();
     FloatType xmaxg = -numeric_limits<FloatType>::max();
@@ -578,8 +590,12 @@ int main(int argc, char** argv) {
     
     // include the image inline    
     svgfile << "<image xlink:href=\"data:image/png;base64,"<< &base64pngdata[0]
-            << "\" width=\""<<svgSize<<"\" height=\""<<svgSize<<"\" x=\"0\" y=\"0\" />" << endl;
+            << "\" width=\""<<svgSize<<"\" height=\""<<svgSize<<"\" x=\"0\" y=\"0\" style=\"z-index:0\" />" << endl;
     
+    // include the reference points
+    svgfile << "<circle cx=\""<< (refpt_pos.x*scaleFactor+halfSvgSize) <<"\" cy=\""<< (halfSvgSize-refpt_pos.y*scaleFactor) <<"\" r=\"2\" style=\"fill:none;stroke:#000000;stroke-width:1px;z-index:1;\" />" << endl;
+    svgfile << "<circle cx=\""<< (refpt_neg.x*scaleFactor+halfSvgSize) <<"\" cy=\""<< (halfSvgSize-refpt_neg.y*scaleFactor) <<"\" r=\"2\" style=\"fill:none;stroke:#000000;stroke-width:1px;z-index:1;\" />" << endl;
+
     // plot decision boundary as a path
     // xy space in plane => scale and then reverse
     // first find homogeneous equa in the 2D space
@@ -602,7 +618,7 @@ int main(int argc, char** argv) {
     int sidescount = useLeft + useRight + useTop + useBottom;
     vector<Point2D> path;
     if (sidescount==2) {
-        svgfile << "<path style=\"fill:none;stroke:#000000;stroke-width:1px;\" d=\"M ";
+        svgfile << "<path style=\"fill:none;stroke:#000000;stroke-width:1px;z-index:1;\" d=\"M ";
         // in each case we add a point at the origin to ease user edition of the line
         // in this config only left/right or top/bottom would be useful as we
         // pass through the origin, but we keep this older more generic code just in case

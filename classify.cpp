@@ -48,11 +48,25 @@ struct Classifier {
     };
     vector<LineDef> pathlines;
     
-    Point2D refpt, refpt2;
+    Point2D refpt_pos, refpt_neg;
     
     vector<FloatType> grid;
 
     void prepare() {
+        absmaxXY=5.20822;
+        
+        // exchange refpt_pos and refpt_neg if necessary, the user may have moved them
+        // dot product with (+1,+1) vector gives the classification sign
+        if (refpt_pos.x + refpt_pos.y < 0) {
+            Point2D tmp = refpt_pos;
+            refpt_pos = refpt_neg;
+            refpt_neg = tmp;
+        }
+        if (refpt_pos.x + refpt_pos.y < 0) {
+            cerr << "Invalid reference points in the classifier" << endl;
+            exit(1);
+        }
+
         // compute the lines
         for(int i=0; i<path.size()-1; ++i) {
             LineDef ld;
@@ -74,103 +88,75 @@ struct Classifier {
                 ld.c = path[i].x - path[i].y * ld.wy;
             }
             // normalize so we have unit norm vector
-            FloatType n = sqrt(ld.wx*ld.wx + ld.wy*ld.wy);
-            ld.wx /= n; ld.wy /= n; ld.c /= n;
+            Point2D n(ld.wx, ld.wy);
+            FloatType norm = n.norm();
+            n /= norm;
+            // reverse norm if the line classifies the reference points wrongly
+            Point2D p = refpt_pos - n * n.dot(refpt_pos + n * ld.c/norm);
+            Point2D delta = refpt_pos - p;
+            if (delta.norm2() < 1e-6) {
+                p = refpt_neg - n * n.dot(refpt_neg + n * ld.c/norm);
+                delta = p - refpt_neg;
+            }
+            if (delta.dot(n)<0) norm = -norm;
+            ld.wx /= norm; ld.wy /= norm; ld.c /= norm;
             pathlines.push_back(ld);
         }
-
-        // ref points to classify. refpt shall be in class -1, classified as such by both SVM giving the main directions
-        refpt = Point2D(-M_PI*absmaxXY, -M_PI*absmaxXY);
-        // slighly off so to account for path lines parallel to refpt-somept, but shall still be in the -1 class
-        refpt2 = Point2D(-(M_PI+2)*absmaxXY, -(M_PI+1)*absmaxXY);
     }
 
     // classification in the 2D space
     FloatType classify2D(FloatType a, FloatType b) {
-        Point2D* refptr = &refpt;
-        Point2D* refptr2 = &refpt2;
-        if (a == refpt.x) {
-            refptr = &refpt2;
-            refptr2 = &refpt;
-        }
-        // line equa from refpt to (a,b).
-        // y = refpt.y + (b - refpt.y) * (x - refpt.x) / (a - refpt.x)
-        // y = refslope * x + refbias
-        FloatType refslope = (b - refptr->y) / (a - refptr->x); // not dividing by 0
-        FloatType refbias = refptr->y - refptr->x * refslope;
-        // equa for each segment: wx * x + wy * y + wc = 0
-        // intersection: wx * x + (wy * refslope) * x + (wc+refbias) = 0
-        // x = -(wc+refbias) / (wx + wy * refslope);  and  y = refslope * x + refbias
-        // if (wx + wy * refslope) is null : no intersection, parallel lines
-        // => use a secondary ref point on a different line
-        int crosscount = 0;
+        Point2D pt(a,b);
         FloatType closestDist = numeric_limits<FloatType>::max();
+        int selectedSeg = -1;
         for (int i=0; i<pathlines.size(); ++i) {
-            FloatType divisor = pathlines[i].wx + pathlines[i].wy * refslope;
-            FloatType intersectx;
-            FloatType intersecty;
-            Point2D* selrefptr = refptr;
-            if (fabs(divisor)<1e-3) {
-                FloatType ref2slope = (b - refptr2->y) / (a - refptr2->x);
-                FloatType ref2bias = refptr2->y - refptr2->x * ref2slope;
-                divisor = pathlines[i].wx + pathlines[i].wy * ref2slope;
-                intersectx = (ref2bias - pathlines[i].wx) / divisor;
-                intersecty = ref2slope * intersectx + ref2bias;
-                selrefptr = refptr2;
-            } else {
-                intersectx = (refbias - pathlines[i].wx) / divisor;
-                intersecty = refslope * intersectx + refbias;
-            }
-            // intersection is valid only if distance is right... whatever the lines crossing point
-            bool intersect = dist2(*selrefptr, Point2D(a,b)) < dist2(*selrefptr, Point2D(intersectx,intersecty));
-            // first and last segments are prolongated to infinity
-            if (intersect) {
-                if (i==0) {
-                    FloatType xdelta = path[i+1].x - intersectx;
-                    FloatType ydelta = path[i+1].y - intersecty;
-                    // use the more reliable delta
-                    if (fabs(xdelta)>fabs(ydelta)) {
-                        // intersection is valid only if on the half-infinite side of the segment
-                        intersect &= (xdelta * (path[i+1].x - path[i].x)) > 0;
-                    } else {
-                        intersect &= (ydelta * (path[i+1].y - path[i].y)) > 0;
-                    }
-                } else if (i==pathlines.size()-1) {
-                    // idem, just infinite on the other side
-                    FloatType xdelta = path[i].x - intersectx;
-                    FloatType ydelta = path[i].y - intersecty;
-                    if (fabs(xdelta)>fabs(ydelta)) {
-                        intersect &= (xdelta * (path[i].x - path[i+1].x)) > 0;
-                    } else {
-                        intersect &= (ydelta * (path[i].y - path[i+1].y)) > 0;
-                    }
-                } else {
-                    // intersection is valid only within the segment boundaries
-                    intersect &= (intersectx >= min(path[i].x,path[i+1].x)) && (intersecty >= min(path[i].y,path[i+1].y));
-                    intersect &= (intersectx <= max(path[i].x,path[i+1].x)) && (intersecty <= max(path[i].y,path[i+1].y));
-                }
-            }
-            // intersections at nodes joining segments might be duplicated (odd/even count mismatch)
-            // but they will have 0-distance decision boundary, so we do not care
-            if (intersect) ++crosscount;
             // closest distance from the point to that segment
             // 1. projection of the point of the line
-            Point2D p(a,b);
             Point2D n(pathlines[i].wx, pathlines[i].wy);
-            p -= n * n.dot(p + n * pathlines[i].c);
+            Point2D p = pt - n * n.dot(pt + n * pathlines[i].c);
             FloatType closestToSeg = numeric_limits<FloatType>::max();
+            bool intersect = true;
             // 2. Is the projection within the segment limit ? yes => closest
+            if (i==0) {
+                FloatType xdelta = path[i+1].x - p.x;
+                FloatType ydelta = path[i+1].y - p.y;
+                // use the more reliable delta
+                if (fabs(xdelta)>fabs(ydelta)) {
+                    // intersection is valid only if on the half-infinite side of the segment
+                    intersect &= (xdelta * (path[i+1].x - path[i].x)) > 0;
+                } else {
+                    intersect &= (ydelta * (path[i+1].y - path[i].y)) > 0;
+                }
+            } else if (i==pathlines.size()-1) {
+                // idem, just infinite on the other side
+                FloatType xdelta = path[i].x - p.x;
+                FloatType ydelta = path[i].y - p.y;
+                if (fabs(xdelta)>fabs(ydelta)) {
+                    intersect &= (xdelta * (path[i].x - path[i+1].x)) > 0;
+                } else {
+                    intersect &= (ydelta * (path[i].y - path[i+1].y)) > 0;
+                }
+            } else {
+                // intersection is valid only within the segment boundaries
+                intersect &= (p.x >= min(path[i].x,path[i+1].x)) && (p.y >= min(path[i].y,path[i+1].y));
+                intersect &= (p.x <= max(path[i].x,path[i+1].x)) && (p.y <= max(path[i].y,path[i+1].y));
+            }
             if (intersect) closestToSeg = dist(Point2D(a,b), p);
             else {
                 // 3. otherwise closest is the minimum of the distance to the segment ends
                 if (i!=0) closestToSeg = dist(Point2D(a,b), Point2D(path[i].x,path[i].y));
                 if (i!=pathlines.size()-1) closestToSeg = min(closestToSeg, dist(Point2D(a,b), Point2D(path[i+1].x,path[i+1].y)));
             }
-            closestDist = min(closestDist, closestToSeg);
+            if (closestToSeg < closestDist) {
+                selectedSeg = i;
+                closestDist = closestToSeg;
+            }
         }
-        // even number of crossings => -1 class, odd = +1.
-        // then return closestDist as the confidence in this class
-        return ((crosscount&1) * 2 - 1) * closestDist;
+        Point2D n(pathlines[selectedSeg].wx, pathlines[selectedSeg].wy);
+        Point2D p = pt - n * n.dot(pt + n * pathlines[selectedSeg].c);
+        Point2D delta = pt - p;
+        if (delta.dot(n) > 0) return delta.norm();
+        else return -delta.norm();
     }
     
     void project(FloatType* mscdata, FloatType& a, FloatType& b) {
@@ -220,7 +206,10 @@ int main(int argc, char** argv) {
             classifparamsfile.read((char*)&classifiers[ci].path[i].x,sizeof(FloatType));
             classifparamsfile.read((char*)&classifiers[ci].path[i].y,sizeof(FloatType));
         }
-        classifparamsfile.read((char*)&classifiers[ci].absmaxXY,sizeof(FloatType));
+        classifparamsfile.read((char*)&classifiers[ci].refpt_pos.x,sizeof(FloatType));
+        classifparamsfile.read((char*)&classifiers[ci].refpt_pos.y,sizeof(FloatType));
+        classifparamsfile.read((char*)&classifiers[ci].refpt_neg.x,sizeof(FloatType));
+        classifparamsfile.read((char*)&classifiers[ci].refpt_neg.y,sizeof(FloatType));
         classifiers[ci].prepare();
     }
     classifparamsfile.close();
@@ -396,7 +385,7 @@ int main(int argc, char** argv) {
             FloatType a,b;
             FloatType scaleFactor = svgSize/2 / classifiers[0].absmaxXY;
             classifiers[0].project(&mscdata[neighidx*nscales*2],a,b);
-            if (coreclasses[neighidx]==1) cairo_set_source_rgba(cr, 1, 0, 0, 0.75);
+            if (coreclasses[neighidx]==2) cairo_set_source_rgba(cr, 1, 0, 0, 0.75);
             else cairo_set_source_rgba(cr, 0, 0, 1, 0.75);
             FloatType x = a*scaleFactor + svgSize/2;
             FloatType y = svgSize/2 - b*scaleFactor;
