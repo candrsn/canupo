@@ -92,7 +92,7 @@ struct LinearSVM {
         return exp(lnu);
     }
     
-    void train(FloatType nu, const vector<sample_type>& samples, const vector<FloatType>& labels) {
+    void train(int nfolds, FloatType nu, const vector<sample_type>& samples, const vector<FloatType>& labels) {
         using namespace dlib;
         svm_nu_trainer<kernel_type> trainer;
         trainer.set_nu(nu);
@@ -100,7 +100,10 @@ struct LinearSVM {
         int dim = samples.back().size();
         // linear kernel: convert the decision function to an hyperplane rather than support vectors
         // This is equivalent but way more efficient for later scene classification
-        decision_function<kernel_type> decfun = trainer.train(samples, labels);
+        //decision_function<kernel_type> decfun = trainer.train(samples, labels);
+        probabilistic_decision_function<kernel_type> pdecfun = train_probabilistic_decision_function(trainer, samples, labels, nfolds);
+        decision_function<kernel_type>& decfun = pdecfun.decision_funct;
+        
         weights.clear();
         weights.resize(dim+1, 0);
         matrix<FloatType> w(dim,1);
@@ -110,6 +113,32 @@ struct LinearSVM {
         }
         for (int i=0; i<dim; ++i) weights[i] = w(i);
         weights[dim] = -decfun.b;
+        
+        // p(x) = 1/(1+exp(alpha*d(x)+beta)) 
+        // with d(x) the oriented dist the decision function
+        // linear kernel: equivalently shift and scale the values
+        // d(x) = w.x + w[dim]
+        // So in the final classifier we have d(x)=0 matching the probabilistic decfun
+        for (int i=0; i<=dim; ++i) weights[i] *= pdecfun.alpha;
+        weights[dim] += pdecfun.beta;
+/*
+        // checking for a few samples
+        for (int i=0; i<10; ++i) {
+            cout << pdecfun(samples[i]) << " ";
+            FloatType dx = weights[dim];
+            for (int j=0; j<dim; ++j) dx += weights[j] * samples[i](j);
+            dx = 1 / (1+exp(dx));
+            cout << dx << endl;
+        }
+*/
+        // revert the decision function so we compute proba to be in the -1 class, i.e.
+        // the first class given to the classifier program
+        for (int i=0; i<=dim; ++i) weights[i] = -weights[i];
+        
+        // note: we now have comparable proba for dx and dy
+        //       as 1 / (1+exp(dx)) = 1 / (1+exp(dy)) means same dx and dy
+        //       in this new space
+        // => consistant orthogonal axis
     }
     
     FloatType predict(const sample_type& data) {
@@ -291,7 +320,7 @@ int main(int argc, char** argv) {
     // shuffle before cross-validating to spread instances of each class
     dlib::randomize_samples(samples, labels);
     FloatType nu = classifier.crossValidate(10, samples, labels);
-    classifier.train(nu, samples, labels);
+    classifier.train(10, nu, samples, labels);
     
     // get the projections of each sample on the first classifier direction
     vector<FloatType> proj1(nsamples);
@@ -325,7 +354,7 @@ int main(int argc, char** argv) {
     }
     // already shuffled, and do not change order for the proj1 anyway
     nu = ortho_classifier.crossValidate(10, samples, labels);
-    ortho_classifier.train(nu, samples, labels);
+    ortho_classifier.train(10, nu, samples, labels);
 
     vector<FloatType> proj2(nsamples);
     for (int i=0; i<nsamples; ++i) proj2[i] = ortho_classifier.predict(samples[i]);
@@ -559,7 +588,55 @@ int main(int argc, char** argv) {
         cairo_arc(cr, x, y, 0.714, 0, 2*M_PI);
         cairo_stroke(cr);
     }
-    
+
+
+/*  // probabilistic circles every 5 % proba of correct classification
+    // too much, can't see anything in the middle
+    // 1 / (1+exp(-d)) = pval = 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95
+    for (int i=5; i<=45; i+=5) {
+        FloatType pval = (50.0 + i) / 100.0;
+        // 1+exp(-d) = 1/pval
+        // exp(-d) = 1/pval - 1
+        FloatType d = -log(1.0/pval - 1.0);  // OK as pval<1
+        cairo_arc(cr, halfSvgSize, halfSvgSize, d * scaleFactor, 0, 2*M_PI);
+        cairo_stroke(cr);
+    }
+
+    // plot the circle at 95% proba of being correct (5% of being wrong)
+    FloatType d95 = -log(1.0/0.95 - 1.0);
+    cairo_arc(cr, halfSvgSize, halfSvgSize, d95 * scaleFactor, 0, 2*M_PI);
+    cairo_stroke(cr);
+*/
+    // circles are prone to misinterpretation (radius = dist to hyperplane,
+    // error not only in the center zone)
+    // specify scales at the bottom-right of the image, in a less-used quadrant
+    cairo_set_source_rgb(cr, 0.25,0.25,0.25);
+    cairo_select_font_face (cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+    cairo_set_font_size (cr, 12);
+    cairo_text_extents_t extents;
+    FloatType dprob = -log(1.0/0.99 - 1.0) * scaleFactor;
+    const char* text = ">d eq. p(err)<1%";
+    cairo_text_extents(cr, text, &extents);
+    cairo_move_to(cr, svgSize - dprob - 20 - extents.width - extents.x_bearing, svgSize - 15 - extents.height/2 - extents.y_bearing);
+    cairo_show_text(cr, text);
+    cairo_move_to(cr, svgSize - dprob - 10, svgSize - 15);
+    cairo_line_to(cr, svgSize - 10, svgSize - 15);
+    dprob = -log(1.0/0.95 - 1.0) * scaleFactor;
+    text = ">d eq. p(err)<5%";
+    cairo_text_extents(cr, text, &extents);
+    cairo_move_to(cr, svgSize - dprob - 20 - extents.width - extents.x_bearing, svgSize - 35 - extents.height/2 - extents.y_bearing);
+    cairo_show_text(cr, text);
+    cairo_move_to(cr, svgSize - dprob - 10, svgSize - 35);
+    cairo_line_to(cr, svgSize - 10, svgSize - 35);
+    dprob = -log(1.0/0.9 - 1.0) * scaleFactor;
+    text = ">d eq. p(err)<10%";
+    cairo_text_extents(cr, text, &extents);
+    cairo_move_to(cr, svgSize - dprob - 20 - extents.width - extents.x_bearing, svgSize - 55 - extents.height/2 - extents.y_bearing);
+    cairo_show_text(cr, text);
+    cairo_move_to(cr, svgSize - dprob - 10, svgSize - 55);
+    cairo_line_to(cr, svgSize - 10, svgSize - 55);
+    cairo_stroke(cr);
+
     // draw lines on top of points
     double dashes[2]; 
     dashes[0] = dashes[1] = svgSize*0.01;
@@ -633,11 +710,12 @@ int main(int argc, char** argv) {
             if (useRight) svgfile << svgSize << "," << ysvgxmax << " ";
             if (useBottom) svgfile << xsvgymax << "," << svgSize << " ";
         }
-        if (useBottom) {
+/*        if (useBottom) {
             svgfile << xsvgymax << "," << svgSize << " L " << halfSvgSize<<","<<halfSvgSize<<" L ";
             if (useRight) svgfile << svgSize << "," << ysvgxmax << " ";
             // else internal error
         }
+*/
         svgfile << "\" />" << endl;
     }
     
