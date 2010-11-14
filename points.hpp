@@ -10,6 +10,7 @@
 #include <algorithm>
 
 #include <boost/operators.hpp>
+#include <boost/algorithm/string.hpp>
 
 #include <math.h>
 #include <stdlib.h>
@@ -23,93 +24,92 @@ static const int TargetAveragePointDensityPerGridCell = 10;
 
 /// /// /// ///
 
-struct Point : boost::addable<Point, boost::subtractable<Point, boost::multipliable2<Point, FloatType, boost::dividable2<Point, FloatType> > > > {
+template<class Base>
+struct PointTemplate : public Base, boost::addable<PointTemplate<Base>, boost::subtractable<PointTemplate<Base>, boost::multipliable2<PointTemplate<Base>, FloatType, boost::dividable2<PointTemplate<Base>, FloatType> > > > {
     
     FloatType x,y,z;
-    Point* next; // for the cell/grid structure
+    PointTemplate* next; // for the cell/grid structure
 
     // convenient but slow : avoid it !
     inline FloatType& operator[](int idx) {
         assert(idx>=0 && idx<3);
         return idx==0?x:(idx==1?y:z);
     }
-    Point() : x(0),y(0),z(0),next(0) {}
-    Point(FloatType _x, FloatType _y, FloatType _z) : x(_x),y(_y),z(_z), next(0) {}
-    Point(Point* n) : x(0),y(0),z(0),next(n) {}
+    PointTemplate() : x(0),y(0),z(0),next(0) {}
+    PointTemplate(FloatType _x, FloatType _y, FloatType _z) : x(_x),y(_y),z(_z), next(0) {}
+    PointTemplate(PointTemplate* n) : x(0),y(0),z(0),next(n) {}
     
     // Baaah, how many times will similar code be rewriten ? Thanks boost::operators for easing the task
-    inline Point& operator+=(const Point& v) {x+=v.x; y+=v.y; z+=v.z; return *this;}
-    inline Point& operator-=(const Point& v) {x-=v.x; y-=v.y; z-=v.z; return *this;}
-    inline Point& operator*=(const FloatType& f) {x*=f; y*=f; z*=f; return *this;}
-    inline Point& operator/=(const FloatType& f) {x/=f; y/=f; z/=f; return *this;}
+    inline PointTemplate& operator+=(const PointTemplate& v) {x+=v.x; y+=v.y; z+=v.z; return *this;}
+    inline PointTemplate& operator-=(const PointTemplate& v) {x-=v.x; y-=v.y; z-=v.z; return *this;}
+    inline PointTemplate& operator*=(const FloatType& f) {x*=f; y*=f; z*=f; return *this;}
+    inline PointTemplate& operator/=(const FloatType& f) {x/=f; y/=f; z/=f; return *this;}
     
-    inline FloatType dot(const Point& v) {return x*v.x + y*v.y + z*v.z;}
-
-    inline static FloatType dist(const Point& a, const Point& b) {
-        return sqrt(
-          (a.x-b.x)*(a.x-b.x)
-        + (a.y-b.y)*(a.y-b.y)
-        + (a.z-b.z)*(a.z-b.z)
-        );
-    }
-    inline static FloatType dist2(const Point& a, const Point& b) {
-        return (a.x-b.x)*(a.x-b.x)
-        + (a.y-b.y)*(a.y-b.y)
-        + (a.z-b.z)*(a.z-b.z)
-        ;
-    }
+    inline FloatType dot(const PointTemplate& v) {return x*v.x + y*v.y + z*v.z;}
 
     enum {dim = 3};
 };
 
-struct Point2D : boost::addable<Point2D, boost::subtractable<Point2D, boost::multipliable2<Point2D, FloatType, boost::dividable2<Point2D, FloatType> > > > {
+template<class Base>
+struct Point2DTemplate : public Base, boost::addable<Point2DTemplate<Base>, boost::subtractable<Point2DTemplate<Base>, boost::multipliable2<Point2DTemplate<Base>, FloatType, boost::dividable2<Point2DTemplate<Base>, FloatType> > > > {
     
     FloatType x,y;
-    Point2D* next; // for the cell/grid structure
+    Point2DTemplate* next; // for the cell/grid structure
 
     // convenient but slow : avoid it !
     inline FloatType& operator[](int idx) {
         assert(idx>=0 && idx<2);
         return idx==0?x:y;
     }
-    Point2D() : x(0),y(0),next(0) {}
-    Point2D(FloatType _x, FloatType _y) : x(_x),y(_y), next(0) {}
-    Point2D(Point2D* n) : x(0),y(0),next(n) {}
+    Point2DTemplate() : x(0),y(0),next(0) {}
+    Point2DTemplate(FloatType _x, FloatType _y) : x(_x),y(_y), next(0) {}
+    Point2DTemplate(Point2DTemplate* n) : x(0),y(0),next(n) {}
     
     // Baaah, how many times will similar code be rewriten ? Thanks boost::operators for easing the task
-    inline Point2D& operator+=(const Point2D& v) {x+=v.x; y+=v.y; return *this;}
-    inline Point2D& operator-=(const Point2D& v) {x-=v.x; y-=v.y; return *this;}
-    inline Point2D& operator*=(const FloatType& f) {x*=f; y*=f; return *this;}
-    inline Point2D& operator/=(const FloatType& f) {x/=f; y/=f; return *this;}
+    inline Point2DTemplate& operator+=(const Point2DTemplate& v) {x+=v.x; y+=v.y; return *this;}
+    inline Point2DTemplate& operator-=(const Point2DTemplate& v) {x-=v.x; y-=v.y; return *this;}
+    inline Point2DTemplate& operator*=(const FloatType& f) {x*=f; y*=f; return *this;}
+    inline Point2DTemplate& operator/=(const FloatType& f) {x/=f; y/=f; return *this;}
     
-    inline FloatType dot(const Point2D& v) {return x*v.x + y*v.y;}
+    inline FloatType dot(const Point2DTemplate& v) {return x*v.x + y*v.y;}
     inline FloatType norm2() {return x*x + y*y;}
     inline FloatType norm() {return sqrt(x*x + y*y);}
-    
-    inline static FloatType dist(const Point2D& a, const Point2D& b) {
-        return sqrt(
-          (a.x-b.x)*(a.x-b.x)
-        + (a.y-b.y)*(a.y-b.y)
-        );
-    }
-    inline static FloatType dist2(const Point2D& a, const Point2D& b) {
-        return (a.x-b.x)*(a.x-b.x)
-        + (a.y-b.y)*(a.y-b.y)
-        ;
-    }
 
     enum {dim = 2};
 };
 
-template<class PointType>
-inline FloatType dist(const PointType& a, const PointType& b) {
-    return PointType::dist(a,b);
+struct EmptyStruct {};
+typedef PointTemplate<EmptyStruct> Point;
+typedef Point2DTemplate<EmptyStruct> Point2D;
+
+template<class PointType1, class PointType2, int Dim>
+struct DistComput {
+    // generates error if the dimension is not supported
+};
+// partial specialisation for dimensions 2 and 3
+template<class PointType1, class PointType2>
+struct DistComput<PointType1,PointType2,2> {
+    inline static FloatType dist2(const PointType1& a, const PointType2& b) {
+        return (a.x-b.x)*(a.x-b.x) + (a.y-b.y)*(a.y-b.y);
+    }
+};
+template<class PointType1, class PointType2>
+struct DistComput<PointType1,PointType2,3> {
+    inline static FloatType dist2(const PointType1& a, const PointType2& b) {
+        return (a.x-b.x)*(a.x-b.x) + (a.y-b.y)*(a.y-b.y) + (a.z-b.z)*(a.z-b.z);
+    }
+};
+
+// user API function, selects the dimension automatically at compile time (no perf impact)
+template<class PointType1, class PointType2>
+inline FloatType dist2(const PointType1& a, const PointType2& b) {
+    return DistComput<PointType1,PointType2,(int)PointType1::dim==(int)PointType2::dim?(int)PointType1::dim:-1>::dist2(a,b);
+}
+template<class PointType1, class PointType2>
+inline FloatType dist(const PointType1& a, const PointType2& b) {
+    return sqrt(dist2(a,b));
 }
 
-template<class PointType>
-inline FloatType dist2(const PointType& a, const PointType& b) {
-    return PointType::dist2(a,b);
-}
 
 // this struct accelerate the management of neighbors
 // the std::multimaps are way too slow
@@ -163,7 +163,7 @@ struct PointCloud {
         ++nextptidx;
     }
 
-    void load_txt(const char* filename) {
+    void load_txt(const char* filename, std::vector<FloatType>* additionalInfo = 0) {
         using namespace std;
         data.clear();
         grid.clear();
@@ -175,20 +175,30 @@ struct PointCloud {
         xmax = -numeric_limits<FloatType>::max();
         ymin = numeric_limits<FloatType>::max();
         ymax = -numeric_limits<FloatType>::max();
+        int linenum = 0;
+        bool use4 = false;
         while (datafile && !datafile.eof()) {
+            ++linenum;
             getline(datafile, line);
-            if (line.empty()) continue;
+            if (line.empty() || boost::starts_with(line,"#") || boost::starts_with(line,";") || boost::starts_with(line,"!") || boost::starts_with(line,"//")) continue;
             stringstream linereader(line);
             PointType point;
             FloatType value;
             int i = 0;
             while (linereader >> value) {
-                point[i] = value;
-                if (++i==PointType::dim) break;
+                if (i<Point::dim) point[i] = value;
+                if (++i==4) break;
             }
-            if (i<PointType::dim) {
-                cerr << "Invalid data file: " << filename << endl;
-                exit(1);
+            if ((use4 && i<4) || (i<3)) {
+                cout << "Warning: ignoring line " << linenum << " with only " << i << " value" << (i>1?"s":"") << " in file " << filename << endl;
+                continue;
+            }
+            if (i==4 && additionalInfo) {
+                if (use4==false && !data.empty()) {
+                    cout << "Warning: 4rth value met at line " << linenum << " but it was not present before, ignoring all data up to that line." << endl;
+                    npts = 0;
+                }
+                use4 = true;
             }
             xmin = min(xmin, point[0]);
             xmax = max(xmax, point[0]);
@@ -198,6 +208,7 @@ struct PointCloud {
         }
         
         prepare(xmin, xmax, ymin, ymax, npts);
+        if (use4) additionalInfo->resize(npts);
         
         // second pass to load the data structure in place
         int ptidx=0;
@@ -205,16 +216,19 @@ struct PointCloud {
         datafile.open(filename);
         while (datafile && !datafile.eof()) {
             getline(datafile, line);
-            if (line.empty()) continue;
+            if (line.empty() || boost::starts_with(line,"#") || boost::starts_with(line,";") || boost::starts_with(line,"!") || boost::starts_with(line,"//")) continue;
             stringstream linereader(line);
             PointType point;
             FloatType value;
             int i = 0;
             while (linereader >> value) {
-                point[i] = value;
-                if (++i==PointType::dim) break;
+                if (i<Point::dim) point[i] = value;
+                if (++i==4) break;
             }
-            insert(point);
+            if (i==3 || (use4 && i==4)) {
+                insert(point);
+                if (use4) (*additionalInfo)[ptidx++] = value;
+            }
         }
         datafile.close();
     }
@@ -222,8 +236,8 @@ struct PointCloud {
 
     // TODO: save_bin / load_bin if txt files take too long to load
     
-    template<typename OutputIterator>
-    void findNeighbors(OutputIterator outit, const PointType& center, FloatType radius) {
+    template<typename OutputIterator, class SomePointType>
+    void findNeighbors(OutputIterator outit, const SomePointType& center, FloatType radius) {
         int cx1 = floor((center.x - radius - xmin) / cellside);
         int cx2 = floor((center.x + radius - xmin) / cellside);
         int cy1 = floor((center.y - radius - ymin) / cellside);
@@ -243,7 +257,8 @@ struct PointCloud {
 
     // returns the index of the nearest point in the cloud from the point given in argument
     // returns -1 iff the cloud is empty
-    int findNearest(const PointType& center) {
+    template<class SomePointType>
+    int findNearest(const SomePointType& center) {
         int cx = floor((center.x - xmin) / cellside);
         int cy = floor((center.y - ymin) / cellside);
         // look for a non-empty cell in increasing distance. Once it is found, the nearest neighbor is necessarily within that radius
@@ -291,7 +306,7 @@ struct PointCloud {
     }
 
 };
-PointCloud<Point> cloud;
+//PointCloud<Point> cloud;
 
 
 #endif

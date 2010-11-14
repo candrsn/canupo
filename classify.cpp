@@ -10,6 +10,7 @@
 #endif
 
 #include "points.hpp"
+#include "linearSVM.hpp"
 
 using namespace std;
 using namespace boost;
@@ -17,12 +18,22 @@ using namespace boost;
 int help(const char* errmsg = 0) {
     if (errmsg) cout << "Error: " << errmsg << endl;
 cout << "\
-classify features.prm scene.xyz scene_core.msc scene_annotated.xyz\n\
+classify features.prm scene.xyz scene_core.msc scene_annotated.xyz [perr_use4]\n\
   input: features.prm         # Features computed by the make_features program\n\
   input: scene.xyz            # Point cloud to classify/annotate with each class\n\
+                              # Text file, lines starting with #,!,;,// or with\n\
+                              # less than 3 numeric values are ignored\n\
+                              # If a 4rth value is present (ex: laser intensity) it will be used\n\
+                              # in order to discriminate points too close to the decision boundary\n\
+                              # See also the dbdist parameter\n\
   input: scene_core.msc       # Multiscale parameters at core points in the scene\n\
                               # This file need only contain the relevant scales for classification\n\
                               # as reported by the make_features program\n\
+  input: perr_use4            # Distance from the decision boundary below which to use the additional\n\
+                              # information (4rth value). The default is 0.05 and the value is expressed\n\
+                              # as the probability to make a mistake in the classification, then internally\n\
+                              # converted to the appropriate distance from the decision boundary\n\
+                              # This parameter has no effect if there is no 4rth value in the provided file\n\
   output: scene_annotated.xyz # Output file containing an extra column with the class of each point\n\
                               # Scene points are labelled with the class of the nearest core point.\n\
 "<<endl;
@@ -223,10 +234,24 @@ struct Classifier {
 };
 
 
+struct ClassifInfo {
+    bool reliable;
+    int classif;
+    ClassifInfo() : reliable(false), classif(-1) {}
+};
+typedef PointTemplate<ClassifInfo> PointClassif;
+
 int main(int argc, char** argv) {
 
     if (argc<5) return help();
 
+    FloatType duse4 = 0.05;
+    if (argc>=6) {
+        FloatType perr_use4 = atof(argv[5]);
+        if (perr_use4<=0 || perr_use4>=0.5) cout << "Invalid perr_use4 argument, ignoring" << endl;
+        else duse4 = -log(1.0/(1.0 - perr_use4) - 1.0);
+    }
+    
     cout << "Loading parameters and core points" << endl;
     
     ifstream classifparamsfile(argv[1], ifstream::binary);
@@ -282,23 +307,38 @@ int main(int argc, char** argv) {
             return 1;
         }
     }
+    int ptnparams;
+    mscfile.read((char*)&ptnparams, sizeof(int));
+    if (ptnparams<3) {
+        cerr << "Internal error: Multiscale file does not contain point coordinates" << endl;
+        return 1;
+    }
+    vector<FloatType> coreAdditionalInfo;
+    if (ptnparams>=4) coreAdditionalInfo.resize(ncorepoints);
 
     // now load the points and multiscale information from the msc file.
     // Put the points in the cloud, keep the multiscale information in a separate vector matched by point index
+    PointCloud<PointClassif> coreCloud;
     vector<FloatType> mscdata(ncorepoints * nscales*2);
-    cloud.data.resize(ncorepoints);
-    cloud.xmin = numeric_limits<FloatType>::max();
-    cloud.xmax = -numeric_limits<FloatType>::max();
-    cloud.ymin = numeric_limits<FloatType>::max();
-    cloud.ymax = -numeric_limits<FloatType>::max();
+    coreCloud.data.resize(ncorepoints);
+    coreCloud.xmin = numeric_limits<FloatType>::max();
+    coreCloud.xmax = -numeric_limits<FloatType>::max();
+    coreCloud.ymin = numeric_limits<FloatType>::max();
+    coreCloud.ymax = -numeric_limits<FloatType>::max();
     for (int pt=0; pt<ncorepoints; ++pt) {
-        mscfile.read((char*)&cloud.data[pt].x, sizeof(FloatType));
-        mscfile.read((char*)&cloud.data[pt].y, sizeof(FloatType));
-        mscfile.read((char*)&cloud.data[pt].z, sizeof(FloatType));
-        cloud.xmin = min(cloud.xmin, cloud.data[pt].x);
-        cloud.xmax = max(cloud.xmax, cloud.data[pt].x);
-        cloud.ymin = min(cloud.ymin, cloud.data[pt].y);
-        cloud.ymax = max(cloud.ymax, cloud.data[pt].y);
+        mscfile.read((char*)&coreCloud.data[pt].x, sizeof(FloatType));
+        mscfile.read((char*)&coreCloud.data[pt].y, sizeof(FloatType));
+        mscfile.read((char*)&coreCloud.data[pt].z, sizeof(FloatType));
+        if (ptnparams>=4) mscfile.read((char*)&coreAdditionalInfo[pt], sizeof(FloatType));
+        // forward-compatibility: we do not care for possibly extra parameters for now
+        for (int i=4; i<ptnparams; ++i) {
+            FloatType param;
+            mscfile.read((char*)&param, sizeof(FloatType));
+        }
+        coreCloud.xmin = min(coreCloud.xmin, coreCloud.data[pt].x);
+        coreCloud.xmax = max(coreCloud.xmax, coreCloud.data[pt].x);
+        coreCloud.ymin = min(coreCloud.ymin, coreCloud.data[pt].y);
+        coreCloud.ymax = max(coreCloud.ymax, coreCloud.data[pt].y);
         for (int s=0; s<nscales_msc; ++s) {
             FloatType a,b;
             mscfile.read((char*)(&a), sizeof(FloatType));
@@ -312,31 +352,30 @@ int main(int argc, char** argv) {
         }
     }
     mscfile.close();
-    // complete the cloud structure by setting the grid
-    FloatType sizex = cloud.xmax - cloud.xmin;
-    FloatType sizey = cloud.ymax - cloud.ymin;
+    // complete the coreCloud structure by setting the grid
+    FloatType sizex = coreCloud.xmax - coreCloud.xmin;
+    FloatType sizey = coreCloud.ymax - coreCloud.ymin;
     
-    cloud.cellside = sqrt(TargetAveragePointDensityPerGridCell * sizex * sizey / ncorepoints);
-    cloud.ncellx = floor(sizex / cloud.cellside) + 1;
-    cloud.ncelly = floor(sizey / cloud.cellside) + 1;
+    coreCloud.cellside = sqrt(TargetAveragePointDensityPerGridCell * sizex * sizey / ncorepoints);
+    coreCloud.ncellx = floor(sizex / coreCloud.cellside) + 1;
+    coreCloud.ncelly = floor(sizey / coreCloud.cellside) + 1;
     
-    cloud.grid.resize(cloud.ncellx * cloud.ncelly);
-    for (int i=0; i<cloud.grid.size(); ++i) cloud.grid[i] = 0;
+    coreCloud.grid.resize(coreCloud.ncellx * coreCloud.ncelly);
+    for (int i=0; i<coreCloud.grid.size(); ++i) coreCloud.grid[i] = 0;
     // setup the grid: list the data points in each cell
     for (int pt=0; pt<ncorepoints; ++pt) {
-        int cellx = floor((cloud.data[pt].x - cloud.xmin) / cloud.cellside);
-        int celly = floor((cloud.data[pt].y - cloud.ymin) / cloud.cellside);
-        cloud.data[pt].next = cloud.grid[celly * cloud.ncellx + cellx];
-        cloud.grid[celly * cloud.ncellx + cellx] = &cloud.data[pt];
+        int cellx = floor((coreCloud.data[pt].x - coreCloud.xmin) / coreCloud.cellside);
+        int celly = floor((coreCloud.data[pt].y - coreCloud.ymin) / coreCloud.cellside);
+        coreCloud.data[pt].next = coreCloud.grid[celly * coreCloud.ncellx + cellx];
+        coreCloud.grid[celly * coreCloud.ncellx + cellx] = &coreCloud.data[pt];
     }
     
-    // store the classes of the core points
-    // - the first time a core point is a neighbor of a scene point its class is computed
-    // - the class is stored for later use
-    // - the core points that are never selected are simply not used.
-    vector<int> coreclasses(ncorepoints, -1); // init with class = -1 as marker
+    cout << "Loading scene data" << endl;
+    PointCloud<Point> sceneCloud;
+    vector<FloatType> sceneAdditionalInfo;
+    sceneCloud.load_txt(argv[2], &sceneAdditionalInfo);
     
-    cout << "Loading and processing scene data" << endl;
+    cout << "Processing scene data" << endl;
     ofstream scene_annotated(argv[4]);
 
 #ifdef CHECK_CLASSIFIER
@@ -350,45 +389,112 @@ int main(int argc, char** argv) {
     cairo_stroke(cr);
     cairo_set_line_width(cr, 1);
 #endif
-    
-    ifstream datafile(argv[2]);
-    string line;
-    while (datafile && !datafile.eof()) {
-        getline(datafile, line);
-        if (line.empty()) continue;
-        stringstream linereader(line);
-        Point point;
-        FloatType value;
-        int i = 0;
-        while (linereader >> value) {
-            point[i] = value;
-            if (++i==3) break;
-        }
-        if (i<3) {
-            cerr << "Invalid data file: " << argv[2] << endl;
-            return 1;
-        }
-        // process this point
-        // first look for the nearest neighbor in core points
-        int neighidx = cloud.findNearest(point);
-        if (neighidx==-1) {
-            cerr << "Invalid core point file: " << argv[3] << endl;
-            return 1;
-        }
-        // if that core point already has a class, fine, otherwise compute it
-        if (coreclasses[neighidx]==-1) {
-            //vector<FloatType> predictions(nclassifiers);
+
+    if (duse4>0 && sceneAdditionalInfo.empty()) {
+        cout << "Warning: perr_use4 argument is ignored as the scene does not have additional information" << endl;
+        duse4 = 0;
+    }
+    if (duse4>0 && coreAdditionalInfo.empty()) {
+        cout << "Warning: perr_use4 argument is ignored as the core point file does not have additional information" << endl;
+        duse4 = 0;
+    }
+
+    // 2-step process:
+    // - 1. set the class of all core points that are geometrically >dist from hyperplane
+    //      note the remaining core points
+    //   - loop while some unclassified core points remain, for each point
+    //      - train local SVM using the scene points extra info, if such scene points are associated with "sure / OK" core points
+    //        - predict the core point using its own extra info. Put it in the "sure/ok" core points and remove from the unclassified list.
+    //      - otherwise (core point in a region where there are only bad core points) keep it for later
+    //   - the unsure regions shall shrink by construction for a completely connected scene,
+    //     but a test to check that the number of remaining points decrease would be nice... otherwise infinite loop
+    // - 2. Now that all core points are OK, classify the scene
+
+    vector<int> idxToSearch(coreCloud.data.size());
+    for (int ptidx=0; ptidx<coreCloud.data.size(); ++ptidx) idxToSearch[ptidx] = ptidx;
+    vector<int> unreliableCoreIdx;
+    // just to check we're not in an infinite loop
+    int nidxtosearch = idxToSearch.size();
+    do {
+        for (int itsi=0; itsi<idxToSearch.size(); ++itsi) {
+            int ptidx = idxToSearch[itsi];
             map<int,int> votes;
             map< pair<int,int>, FloatType > predictions;
+            bool unreliable = false;
             // one-against-one process: apply all classifiers and vote for this point class
             for (int ci=0; ci<nclassifiers; ++ci) {
-                FloatType pred = classifiers[ci].classify(&mscdata[neighidx*nscales*2]);
-                if (pred>=0) ++votes[classifiers[ci].class2];
-                else ++votes[classifiers[ci].class1];
+                FloatType pred = classifiers[ci].classify(&mscdata[ptidx*nscales*2]);
                 // uniformize the order, pred>0 selects the larger class of both
                 if (classifiers[ci].class1 > classifiers[ci].class2) pred = -pred;
-                predictions[make_pair(min(classifiers[ci].class1, classifiers[ci].class2), max(classifiers[ci].class1, classifiers[ci].class2))] = pred;
+                int minclass = min(classifiers[ci].class1, classifiers[ci].class2);
+                int maxclass = max(classifiers[ci].class1, classifiers[ci].class2);
+                // use extra info when too close to the decision boundary
+                if (fabs(pred)<duse4) {
+                    // we've made sure above that both core and scene data have the extra info at this point
+                    // largest scale is the first by construction in canupo, order was preserved by the other programs
+                    FloatType largestScale = scales[0];
+                    vector<DistPoint<Point> > neighbors;
+                    vector<int> class1sceneidx;
+                    vector<int> class2sceneidx;
+                    // find all scene data around that core point
+                    sceneCloud.findNeighbors(back_inserter(neighbors), sceneCloud.data[ptidx], largestScale);
+                    // for each scene data point, find the corresponding core point and check if it is reliable
+                    for (int i=0; i<neighbors.size(); ++i) {
+                        int neighcoreidx = coreCloud.findNearest(*neighbors[i].pt);
+                        if (neighcoreidx==-1) {
+                            cerr << "Invalid core point file" << endl;
+                            return 1;
+                        }
+                        if (coreCloud.data[neighcoreidx].reliable) {
+                            if (coreCloud.data[neighcoreidx].classif == minclass) class1sceneidx.push_back(neighbors[i].pt-&sceneCloud.data[0]);
+                            if (coreCloud.data[neighcoreidx].classif == maxclass) class2sceneidx.push_back(neighbors[i].pt-&sceneCloud.data[0]);
+                            // else the extra info is irrelevant for this classifier pair
+                        }
+                    }
+                    // some local info ? TODO: min size for considering this information is reliable ?
+                    int nsamples = class1sceneidx.size() + class2sceneidx.size();
+                    if (nsamples>0) {
+                        // only one class ?
+                        if (class1sceneidx.size()==0) {
+                            pred = class2sceneidx.size() / (FloatType)neighbors.size();
+                        } else if (class2sceneidx.size()==0) {
+                            pred = -(class1sceneidx.size() / (FloatType)neighbors.size());
+                        }
+                        else {
+                            // build a local classifier from the additional info.
+                            // it is assumed that this additional info is only reliable locally, not globally on the whole scene
+                            LinearSVM::sample_type undefsample;
+                            undefsample.set_size(1,1);
+                            vector<LinearSVM::sample_type> samples(nsamples, undefsample);
+                            vector<FloatType> labels(nsamples);
+                            for (int i=0; i<class1sceneidx.size(); ++i) {
+                                samples[i](0) = sceneAdditionalInfo[class1sceneidx[i]];
+                                labels[i] = -1;
+                            }
+                            for (int i=0; i<class2sceneidx.size(); ++i) {
+                                samples[class1sceneidx.size()+i](0) = sceneAdditionalInfo[class2sceneidx[i]];
+                                labels[class1sceneidx.size()+i] = 1;
+                            }
+                            dlib::randomize_samples(samples, labels);
+                            LinearSVM classifier;
+                            int nfolds = min(10, min((int)class1sceneidx.size(), (int)class2sceneidx.size()));
+                            FloatType nu = classifier.crossValidate(nfolds, samples, labels);
+                            classifier.train(nfolds, nu, samples, labels);
+                            // now predict the class of this core point
+                            LinearSVM::sample_type x; x.set_size(1,1);
+                            x(0) = coreAdditionalInfo[ptidx];
+                            pred = classifier.predict(x);
+                        }
+                    }
+                    else unreliable = true;
+                }
+                if (unreliable) break;
+                if (pred>=0) ++votes[maxclass];
+                else ++votes[minclass];
+                predictions[make_pair(minclass, maxclass)] = pred;
             }
+            if (unreliable) continue; // no classification
+
             // search for max vote
             vector<int> bestclasses;
             int maxvote = -1;
@@ -404,7 +510,7 @@ int main(int argc, char** argv) {
                 }
             }
             // only one class => do not bother with tie breaking
-            if (bestclasses.size()==1) coreclasses[neighidx] = bestclasses[0]; 
+            if (bestclasses.size()==1) coreCloud.data[ptidx].classif = bestclasses[0]; 
             else {
                 // in case equality = use the distances from the decision boundary
                 map<int, FloatType> votepred;
@@ -425,23 +531,50 @@ int main(int argc, char** argv) {
                         selectedclass = it->first;
                     }
                 }
-                coreclasses[neighidx] = selectedclass;
+                coreCloud.data[ptidx].classif = selectedclass;
             }
-        
-#ifdef CHECK_CLASSIFIER
-            FloatType a,b;
-            FloatType scaleFactor = svgSize/2 / classifiers[0].absmaxXY;
-            classifiers[0].project(&mscdata[neighidx*nscales*2],a,b);
-            if (coreclasses[neighidx]==2) cairo_set_source_rgba(cr, 1, 0, 0, 0.75);
-            else cairo_set_source_rgba(cr, 0, 0, 1, 0.75);
-            FloatType x = a*scaleFactor + svgSize/2;
-            FloatType y = svgSize/2 - b*scaleFactor;
-            cairo_arc(cr, x, y, 0.714, 0, 2*M_PI);
-            cairo_stroke(cr);
-#endif
         }
-        // assign the scene point to this core point class
-        scene_annotated << point.x << " " << point.y << " " << point.z << " " << coreclasses[neighidx] << endl;
+        // second phase: mark as reliable all searched points where we could find a classification
+        for (int itsi=0; itsi<idxToSearch.size(); ++itsi) {
+            int ptidx = idxToSearch[itsi];
+            if (coreCloud.data[ptidx].classif!=-1) coreCloud.data[ptidx].reliable = true;
+            else unreliableCoreIdx.push_back(ptidx);
+        }
+        // swap to process still unreliable points
+        idxToSearch.clear();
+        unreliableCoreIdx.swap(idxToSearch);
+        // break infinite loop, some core points and scene data are in unconnected zones we have no info for
+        // => these points won't be classified below, attributed class 0
+        if (nidxtosearch == idxToSearch.size()) {
+            for (int itsi=0; itsi<idxToSearch.size(); ++itsi) coreCloud.data[idxToSearch[itsi]].classif = 0;
+            break;
+        }
+        nidxtosearch = idxToSearch.size(); // for next loop
+    } while (nidxtosearch>0);
+
+    for (int pt=0; pt<sceneCloud.data.size(); ++pt) {
+        Point& point = sceneCloud.data[pt];
+        // process this point
+        // first look for the nearest neighbor in core points
+        int neighidx = coreCloud.findNearest(point);
+        if (neighidx==-1) {
+            cerr << "Invalid core point file." << endl;
+            return 1;
+        }
+        // assign the scene point to this core point class, which was computed before
+        scene_annotated << point.x << " " << point.y << " " << point.z << " " << coreCloud.data[neighidx].classif << endl;
+#ifdef CHECK_CLASSIFIER
+        FloatType a,b;
+        FloatType scaleFactor = svgSize/2 / classifiers[0].absmaxXY;
+        classifiers[0].project(&mscdata[neighidx*nscales*2],a,b);
+        if (coreCloud.data[neighidx].classif==1) cairo_set_source_rgba(cr, 0, 0, 1, 0.75);
+        else if (coreCloud.data[neighidx].classif==2) cairo_set_source_rgba(cr, 1, 0, 0, 0.75);
+        else cairo_set_source_rgba(cr, 0, 1, 0, 0.75);
+        FloatType x = a*scaleFactor + svgSize/2;
+        FloatType y = svgSize/2 - b*scaleFactor;
+        cairo_arc(cr, x, y, 0.714, 0, 2*M_PI);
+        cairo_stroke(cr);
+#endif
     }
 
 #ifdef CHECK_CLASSIFIER

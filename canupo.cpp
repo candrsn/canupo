@@ -18,6 +18,7 @@
 #endif
 
 using namespace std;
+using namespace boost;
 
 int help(const char* errmsg = 0) {
     if (errmsg) cout << "Error: " << errmsg << endl;
@@ -106,23 +107,36 @@ int main(int argc, char** argv) {
     vector<Point> corepoints;
     ifstream corepointsfile(corepointsfilename.c_str());
     string line;
+    vector<FloatType> additionalInfo;
+    bool use4 = false;
+    int linenum = 0;
     while (corepointsfile && !corepointsfile.eof()) {
+        ++linenum;
         getline(corepointsfile, line);
-        if (line.empty()) continue;
+        if (line.empty() || starts_with(line,"#") || starts_with(line,";") || starts_with(line,"!") || starts_with(line,"//")) continue;
         stringstream linereader(line);
         Point point;
         FloatType value;
         int i = 0;
         while (linereader >> value) {
-            point[i] = value;
-            if (++i==3) break;
+            if (i<Point::dim) point[i] = value;
+            if (++i==4) break;
         }
-        if (i<3) {
-            cerr << "Invalid data file: " << corepointsfilename << endl;
-            return 1;
+        if ((use4 && i<4) || (i<3)) {
+            cout << "Warning: ignoring line " << linenum << " with only " << i << " value" << (i>1?"s":"") << " in file " << corepointsfilename << endl;
+            continue;
+        }
+        if (i==4) {
+            if (use4==false && !corepoints.empty()) {
+                cout << "Warning: 4rth value met at line " << linenum << " but it was not present before, discarding all data up to that line." << endl;
+                corepoints.clear();
+            }
+            use4 = true;
+            additionalInfo.push_back(value);
         }
         corepoints.push_back(point);
     }
+    assert(additionalInfo.empty() || additionalInfo.size() == corepoints.size());
 
     ofstream mscfile(mscfilename.c_str(), ofstream::binary);
     
@@ -134,6 +148,8 @@ int main(int argc, char** argv) {
         FloatType scale = *scaleit;
         mscfile.write((char*)&scale, sizeof(scale));
     }
+    int ptnparams = 3 + !additionalInfo.empty();
+    mscfile.write((char*)&ptnparams, sizeof(int));
     // file ready to write data for all points one by one
 
     cout << "Processing \"" << datafilename << "\" using core points from \"" << corepointsfilename << "\"" << endl;
@@ -160,7 +176,7 @@ if (omp_get_thread_num()==0) {
 }
 #endif
 
-        vector<DistPoint> neighbors;
+        vector<DistPoint<Point> > neighbors;
         vector<Point> neighsums; // avoid recomputing cumulated sums at each scale
         
         vector<FloatType> abdata(nscales*2);
@@ -253,6 +269,7 @@ if (omp_get_thread_num()==0) {
             mscfile.write((char*)&corepoints[ptidx].x,sizeof(FloatType));
             mscfile.write((char*)&corepoints[ptidx].y,sizeof(FloatType));
             mscfile.write((char*)&corepoints[ptidx].z,sizeof(FloatType));
+            if (!additionalInfo.empty()) mscfile.write((char*)&additionalInfo[ptidx],sizeof(FloatType));
             for (int i=0; i<abdata.size(); ++i) mscfile.write((char*)&abdata[i], sizeof(FloatType));
         }
     }

@@ -25,7 +25,7 @@ validate_classifier  user_modified_svg  classifier_file.prm  [ class_num_1  clas
     produce biclass prm file\n\
     from SVG, use path (predef path if not changed or user-defined)\n\
     class_num_1  and  class_num_2  can be specified for producing multiclass classifiers\n\
-    otherwise they have value 1 and 2 by default\n\
+    otherwise they have value 1 and 2 by default. Class <=0 is reserved for points that cannot be classified, use class_num>0.\n\
 "<<endl;
         return 0;
 }
@@ -54,7 +54,7 @@ int main(int argc, char** argv) {
     if (argc==5) {
         class_num_1 = atoi(argv[3]);
         class_num_2 = atoi(argv[4]);
-//        if (class_num_1<=0 || class_num_2 <=0) return help();
+        if (class_num_1<=0 || class_num_2 <=0) return help();
     }
     
     string line;

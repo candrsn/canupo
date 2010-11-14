@@ -13,146 +13,11 @@
 
 #include "points.hpp"
 #include "base64.hpp"
-
-#include "dlib/svm.h"
+#include "linearSVM.hpp"
 
 using namespace std;
 
-typedef dlib::matrix<FloatType, 0, 1> sample_type;
-
-struct LinearSVM {
-
-    typedef dlib::linear_kernel<sample_type> kernel_type;
-
-    template <typename sample_type>
-    struct cross_validation_objective {
-        cross_validation_objective (
-            const vector<sample_type>& samples_,
-            const vector<FloatType>& labels_,
-            int _nfolds
-        ) : samples(samples_), labels(labels_), nfolds(_nfolds) {}
-
-        double operator() (FloatType lognu) const {
-            using namespace dlib;
-            // see below for changes from dlib examples
-            const FloatType nu = exp(lognu);
-
-            // Make an SVM trainer and tell it what the parameters are supposed to be.
-            svm_nu_trainer<kernel_type> trainer;
-            trainer.set_kernel(kernel_type());
-            trainer.set_nu(nu);
-
-            // Finally, perform 10-fold cross validation and then print and return the results.
-            matrix<FloatType> result = cross_validate_trainer(trainer, samples, labels, nfolds);
-
-            return sum(result);
-        }
-
-        const vector<sample_type>& samples;
-        const vector<FloatType>& labels;
-        int nfolds;
-    };
-
-
-    FloatType crossValidate(int nfolds, const vector<sample_type>& samples, const vector<FloatType>& labels) {
-        using namespace dlib;
-        // taken from dlib examples
-        
-        // largest allowed nu: strictly below what's returned by maximum_nu
-        FloatType max_nu = 0.999*maximum_nu(labels);
-        FloatType min_nu = 1e-7;
-
-        matrix<FloatType> gridsearchspace = logspace(log10(max_nu), log10(min_nu), 50); // nu parameter
-        matrix<FloatType> best_result(2,1);
-        best_result = 0;
-        FloatType best_nu = 1;
-        for (int col = 0; col < gridsearchspace.nc(); ++col) {
-            const FloatType nu = gridsearchspace(0, col);
-            svm_nu_trainer<kernel_type> trainer;
-            trainer.set_kernel(kernel_type());
-            trainer.set_nu(nu);
-            matrix<FloatType> result = cross_validate_trainer(trainer, samples, labels, nfolds);
-            if (sum(result) > sum(best_result)) {
-                best_result = result;
-                best_nu = nu;
-            }
-        }
-        FloatType lnu = log(best_nu);
-
-//        FloatType lnu = 0.5 * (lmin_nu + lmax_nu);
-
-        FloatType best_score = find_max_single_variable(
-            cross_validation_objective<sample_type>(samples, labels, nfolds), // Function to maximize
-            lnu,              // starting point and result
-            log(min_nu),          // lower bound
-            log(max_nu),          // upper bound
-            1e-2,
-            50
-        );
-        return exp(lnu);
-    }
-    
-    void train(int nfolds, FloatType nu, const vector<sample_type>& samples, const vector<FloatType>& labels) {
-        using namespace dlib;
-        svm_nu_trainer<kernel_type> trainer;
-        trainer.set_nu(nu);
-        trainer.set_kernel(kernel_type());
-        int dim = samples.back().size();
-        // linear kernel: convert the decision function to an hyperplane rather than support vectors
-        // This is equivalent but way more efficient for later scene classification
-        //decision_function<kernel_type> decfun = trainer.train(samples, labels);
-        probabilistic_decision_function<kernel_type> pdecfun = train_probabilistic_decision_function(trainer, samples, labels, nfolds);
-        decision_function<kernel_type>& decfun = pdecfun.decision_funct;
-        
-        weights.clear();
-        weights.resize(dim+1, 0);
-        matrix<FloatType> w(dim,1);
-        w = 0;
-        for (int i=0; i<decfun.alpha.nr(); ++i) {
-            w += decfun.alpha(i) * decfun.basis_vectors(i);
-        }
-        for (int i=0; i<dim; ++i) weights[i] = w(i);
-        weights[dim] = -decfun.b;
-        
-        // p(x) = 1/(1+exp(alpha*d(x)+beta)) 
-        // with d(x) the oriented dist the decision function
-        // linear kernel: equivalently shift and scale the values
-        // d(x) = w.x + w[dim]
-        // So in the final classifier we have d(x)=0 matching the probabilistic decfun
-        for (int i=0; i<=dim; ++i) weights[i] *= pdecfun.alpha;
-        weights[dim] += pdecfun.beta;
-/*
-        // checking for a few samples
-        for (int i=0; i<10; ++i) {
-            cout << pdecfun(samples[i]) << " ";
-            FloatType dx = weights[dim];
-            for (int j=0; j<dim; ++j) dx += weights[j] * samples[i](j);
-            dx = 1 / (1+exp(dx));
-            cout << dx << endl;
-        }
-*/
-        // revert the decision function so we compute proba to be in the -1 class, i.e.
-        // the first class given to the classifier program
-        for (int i=0; i<=dim; ++i) weights[i] = -weights[i];
-        
-        // note: we now have comparable proba for dx and dy
-        //       as 1 / (1+exp(dx)) = 1 / (1+exp(dy)) means same dx and dy
-        //       in this new space
-        // => consistant orthogonal axis
-    }
-    
-    FloatType predict(const sample_type& data) {
-        int dim = weights.size()-1;
-        FloatType ret = weights[dim];
-        for (int d=0; d<dim; ++d) ret += weights[d] * data(d);
-        return ret;
-    }
-    
-    vector<FloatType> weights;
-};
-
-
-
+typedef LinearSVM::sample_type sample_type;
 
 int help(const char* errmsg = 0) {
     if (errmsg) cout << "Error: " << errmsg << endl;
@@ -171,7 +36,7 @@ bool fpeq(FloatType a, FloatType b) {
 
 // if vector is empty, fill it
 // otherwise check the vectors match
-int read_msc_header(ifstream& mscfile, vector<FloatType>& scales) {
+int read_msc_header(ifstream& mscfile, vector<FloatType>& scales, int& ptnparams) {
     int npts;
     mscfile.read((char*)&npts,sizeof(npts));
     if (npts<=0) help("invalid file");
@@ -189,15 +54,20 @@ int read_msc_header(ifstream& mscfile, vector<FloatType>& scales) {
         if (scales.size() != nscales_thisfile) {cerr<<"input file mismatch: "<<endl; return 1;}
         for (int si=0; si<scales.size(); ++si) if (!fpeq(scales[si],scales_thisfile[si])) {cerr<<"input file mismatch: "<<endl; return 1;}
     }
+    
+    // TODO: check consistency of ptnparams
+    mscfile.read((char*)&ptnparams, sizeof(int));
+
     return npts;
 }
 
-void read_msc_data(ifstream& mscfile, int nscales, int npts, sample_type* data) {
+void read_msc_data(ifstream& mscfile, int nscales, int npts, sample_type* data, int ptnparams) {
     for (int pt=0; pt<npts; ++pt) {
-        FloatType coord; // we do not care for the point coordinates
-        mscfile.read((char*)&coord, sizeof(coord));
-        mscfile.read((char*)&coord, sizeof(coord));
-        mscfile.read((char*)&coord, sizeof(coord));
+        // we do not care for the point coordinates and other parameters
+        for (int i=0; i<ptnparams; ++i) {
+            FloatType param;
+            mscfile.read((char*)&param, sizeof(FloatType));
+        }
         for (int s=0; s<nscales; ++s) {
             FloatType a,b;
             mscfile.read((char*)(&a), sizeof(FloatType));
@@ -246,6 +116,7 @@ int main(int argc, char** argv) {
     if (arg_class2>=argc) return help();
     
     sample_type undefsample;
+    int ptnparams;
     
     // neutral files, if any
     int ndata_unlabeled = 0;
@@ -253,7 +124,7 @@ int main(int argc, char** argv) {
     for (int argi = 2; argi<arg_class1-1; ++argi) {
         ifstream mscfile(argv[argi], ifstream::binary);
         // read the file header
-        int npts = read_msc_header(mscfile, scales);
+        int npts = read_msc_header(mscfile, scales, ptnparams);
         mscfile.close();
         ndata_unlabeled += npts;
     }
@@ -266,9 +137,9 @@ int main(int argc, char** argv) {
     for (int argi = 2; argi<arg_class1-1; ++argi) {
         ifstream mscfile(argv[argi], ifstream::binary);
         // read the file header (again)
-        int npts = read_msc_header(mscfile, scales);
+        int npts = read_msc_header(mscfile, scales, ptnparams);
         // read data
-        read_msc_data(mscfile,nscales,npts,&data_unlabeled[base_pt]);
+        read_msc_data(mscfile,nscales,npts,&data_unlabeled[base_pt], ptnparams);
         mscfile.close();
         base_pt += npts;
     }
@@ -277,7 +148,7 @@ int main(int argc, char** argv) {
     int ndata_class1 = 0;
     for (int argi = arg_class1; argi<arg_class2-1; ++argi) {
         ifstream mscfile(argv[argi], ifstream::binary);
-        int npts = read_msc_header(mscfile, scales);
+        int npts = read_msc_header(mscfile, scales, ptnparams);
         mscfile.close();
         ndata_class1 += npts;
     }
@@ -285,7 +156,7 @@ int main(int argc, char** argv) {
     int ndata_class2 = 0;
     for (int argi = arg_class2; argi<argc; ++argi) {
         ifstream mscfile(argv[argi], ifstream::binary);
-        int npts = read_msc_header(mscfile, scales);
+        int npts = read_msc_header(mscfile, scales, ptnparams);
         mscfile.close();
         ndata_class2 += npts;
     }
@@ -301,15 +172,15 @@ int main(int argc, char** argv) {
     base_pt = 0;
     for (int argi = arg_class1; argi<arg_class2-1; ++argi) {
         ifstream mscfile(argv[argi], ifstream::binary);
-        int npts = read_msc_header(mscfile, scales);
-        read_msc_data(mscfile,nscales,npts,&samples[base_pt]);
+        int npts = read_msc_header(mscfile, scales, ptnparams);
+        read_msc_data(mscfile,nscales,npts,&samples[base_pt], ptnparams);
         mscfile.close();
         base_pt += npts;
     }
     for (int argi = arg_class2; argi<argc; ++argi) {
         ifstream mscfile(argv[argi], ifstream::binary);
-        int npts = read_msc_header(mscfile, scales);
-        read_msc_data(mscfile,nscales,npts,&samples[base_pt]);
+        int npts = read_msc_header(mscfile, scales, ptnparams);
+        read_msc_data(mscfile,nscales,npts,&samples[base_pt], ptnparams);
         mscfile.close();
         base_pt += npts;
     }
