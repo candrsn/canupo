@@ -245,10 +245,13 @@ int main(int argc, char** argv) {
 
     if (argc<5) return help();
 
-    FloatType duse4 = 0.05;
+    FloatType duse4 = -log(1.0/(1.0 - 0.05) - 1.0);
     if (argc>=6) {
         FloatType perr_use4 = atof(argv[5]);
-        if (perr_use4<=0 || perr_use4>=0.5) cout << "Invalid perr_use4 argument, ignoring" << endl;
+        if (perr_use4<=0 || perr_use4>=0.5) {
+            cout << "Disabling usage of extra information" << endl;
+            duse4 = 0;
+        }
         else duse4 = -log(1.0/(1.0 - perr_use4) - 1.0);
     }
     
@@ -416,6 +419,7 @@ int main(int argc, char** argv) {
     // just to check we're not in an infinite loop
     int nidxtosearch = idxToSearch.size();
     do {
+#pragma omp parallel for
         for (int itsi=0; itsi<idxToSearch.size(); ++itsi) {
             int ptidx = idxToSearch[itsi];
             map<int,int> votes;
@@ -443,7 +447,7 @@ int main(int argc, char** argv) {
                         int neighcoreidx = coreCloud.findNearest(*neighbors[i].pt);
                         if (neighcoreidx==-1) {
                             cerr << "Invalid core point file" << endl;
-                            return 1;
+                            exit(1);
                         }
                         if (coreCloud.data[neighcoreidx].reliable) {
                             if (coreCloud.data[neighcoreidx].classif == minclass) class1sceneidx.push_back(neighbors[i].pt-&sceneCloud.data[0]);
@@ -490,7 +494,7 @@ int main(int argc, char** argv) {
                                     dichofirst = dichomed;
                                 }
                                 // dichomed is now the last index with info2 below or equal to info1[i],
-                                int nlabove = largestvec->size() -1;
+                                int nlabove = largestvec->size() - 1 - dichomed;
                                 int nsbelow = i;
                                 // or possibly all if info1[i] is too low
                                 if ((*smallestvec)[i]<(*largestvec)[dichomed]) {
@@ -513,14 +517,21 @@ int main(int argc, char** argv) {
                                     bestSplitDir.push_back((int)(c1<=c2));
                                 }
                             }
-                            
-                            // take median best split
-                            int bsi = bestSplit.size()/2;
-                            pred = coreAdditionalInfo[ptidx] - bestSplit[bsi];
-                            // reverse if necessary
-                            if (bestSplitDir[bsi]==1) pred = -pred;
-                            // back to original vectors
-                            if (class1sceneidx.size()>=class2sceneidx.size()) pred = -pred;
+                            bestclassif *= 0.5;
+                            // see if we're improving estimated probability or not
+                            FloatType oriprob = 1 / (1+exp(-fabs(pred)));
+// TODO: sometimes (rarely) there are mistakes in the reference core points and we're dealing with similar classes
+// => put back these core points in the unreliable pool
+cout << (oriprob < bestclassif?"OK: ":"NO: ") << bestclassif << " vs " << oriprob << endl;
+                            if (oriprob < bestclassif) {
+                                // take median best split
+                                int bsi = bestSplit.size()/2;
+                                pred = coreAdditionalInfo[ptidx] - bestSplit[bsi];
+                                // reverse if necessary
+                                if (bestSplitDir[bsi]==1) pred = -pred;
+                                // back to original vectors
+                                if (class1sceneidx.size()>=class2sceneidx.size()) pred = -pred;
+                            }
                         }
                     }
                     else unreliable = true;
