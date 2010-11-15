@@ -461,29 +461,66 @@ int main(int argc, char** argv) {
                             pred = -(class1sceneidx.size() / (FloatType)neighbors.size());
                         }
                         else {
-                            // build a local classifier from the additional info.
-                            // it is assumed that this additional info is only reliable locally, not globally on the whole scene
-                            LinearSVM::sample_type undefsample;
-                            undefsample.set_size(1,1);
-                            vector<LinearSVM::sample_type> samples(nsamples, undefsample);
-                            vector<FloatType> labels(nsamples);
-                            for (int i=0; i<class1sceneidx.size(); ++i) {
-                                samples[i](0) = sceneAdditionalInfo[class1sceneidx[i]];
-                                labels[i] = -1;
+                            vector<FloatType> info1(class1sceneidx.size());
+                            for (int i=0; i<class1sceneidx.size(); ++i) info1[i] = sceneAdditionalInfo[class1sceneidx[i]];
+                            vector<FloatType> info2(class2sceneidx.size());
+                            for (int i=0; i<class2sceneidx.size(); ++i) info2[i] = sceneAdditionalInfo[class2sceneidx[i]];
+                            sort(info1.begin(), info1.end());
+                            sort(info2.begin(), info2.end());
+                            vector<FloatType>* smallestvec, * largestvec;
+                            if (class1sceneidx.size()<class2sceneidx.size()) {
+                                smallestvec = &info1;
+                                largestvec = &info2;
+                            } else {
+                                smallestvec = &info2;
+                                largestvec = &info1;
                             }
-                            for (int i=0; i<class2sceneidx.size(); ++i) {
-                                samples[class1sceneidx.size()+i](0) = sceneAdditionalInfo[class2sceneidx[i]];
-                                labels[class1sceneidx.size()+i] = 1;
+                            vector<FloatType> bestSplit;
+                            vector<int> bestSplitDir;
+                            FloatType bestclassif = -1;
+                            for (int i=0; i<smallestvec->size(); ++i) {
+                                int dichofirst = 0;
+                                int dicholast = largestvec->size();
+                                int dichomed;
+                                while (true) {
+                                    dichomed = (dichofirst + dicholast) / 2;
+                                    if (dichomed==dichofirst) break;
+                                    if (info1[i]==info2[dichomed]) break;
+                                    if (info1[i]<info2[dichomed]) { dicholast = dichomed; continue;}
+                                    dichofirst = dichomed;
+                                }
+                                // dichomed is now the last index with info2 below or equal to info1[i],
+                                int nlabove = largestvec->size() -1;
+                                int nsbelow = i;
+                                // or possibly all if info1[i] is too low
+                                if ((*smallestvec)[i]<(*largestvec)[dichomed]) {
+                                    // shall happen only if dichomed==0, sorted vecs
+                                    assert(dichomed==0);
+                                    nlabove = largestvec->size();
+                                    nsbelow = i+1;
+                                }
+                                // classification on either side, take largest and reverse roles if necessary
+                                FloatType c1 = nlabove / (FloatType)largestvec->size() + nsbelow / (FloatType)smallestvec->size();
+                                FloatType c2 = (largestvec->size()-nlabove) / (FloatType)largestvec->size() + (smallestvec->size()-nsbelow)/ (FloatType)smallestvec->size();
+                                FloatType classif = max(c1,c2);
+                                // no need to average for comparison purpose
+                                if (bestclassif < classif) {
+                                    bestSplit.clear(); bestSplitDir.clear();
+                                    bestclassif = classif;
+                                }
+                                if (fpeq(bestclassif,classif)) {
+                                    bestSplit.push_back(((*smallestvec)[i]+(*largestvec)[dichomed])*0.5);
+                                    bestSplitDir.push_back((int)(c1<=c2));
+                                }
                             }
-                            dlib::randomize_samples(samples, labels);
-                            LinearSVM classifier;
-                            int nfolds = min(10, min((int)class1sceneidx.size(), (int)class2sceneidx.size()));
-                            FloatType nu = classifier.crossValidate(nfolds, samples, labels);
-                            classifier.train(nfolds, nu, samples, labels);
-                            // now predict the class of this core point
-                            LinearSVM::sample_type x; x.set_size(1,1);
-                            x(0) = coreAdditionalInfo[ptidx];
-                            pred = classifier.predict(x);
+                            
+                            // take median best split
+                            int bsi = bestSplit.size()/2;
+                            pred = coreAdditionalInfo[ptidx] - bestSplit[bsi];
+                            // reverse if necessary
+                            if (bestSplitDir[bsi]==1) pred = -pred;
+                            // back to original vectors
+                            if (class1sceneidx.size()>=class2sceneidx.size()) pred = -pred;
                         }
                     }
                     else unreliable = true;
@@ -534,6 +571,7 @@ int main(int argc, char** argv) {
                 coreCloud.data[ptidx].classif = selectedclass;
             }
         }
+        
         // second phase: mark as reliable all searched points where we could find a classification
         for (int itsi=0; itsi<idxToSearch.size(); ++itsi) {
             int ptidx = idxToSearch[itsi];
@@ -549,9 +587,12 @@ int main(int argc, char** argv) {
             for (int itsi=0; itsi<idxToSearch.size(); ++itsi) coreCloud.data[idxToSearch[itsi]].classif = 0;
             break;
         }
+        cout << (coreCloud.data.size()-idxToSearch.size()) << " data classified"<< (nidxtosearch==coreCloud.data.size()?" geometrically":"") <<", " << idxToSearch.size() << " remaining" << (nidxtosearch==coreCloud.data.size()?" using extra information":"") << endl;
         nidxtosearch = idxToSearch.size(); // for next loop
     } while (nidxtosearch>0);
 
+    cout << "Core points classified, labelling scene data" << endl;
+    
     for (int pt=0; pt<sceneCloud.data.size(); ++pt) {
         Point& point = sceneCloud.data[pt];
         // process this point
