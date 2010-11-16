@@ -30,7 +30,8 @@ classify features.prm scene.xyz scene_core.msc scene_annotated.xyz [perr_use4]\n
                               # This file need only contain the relevant scales for classification\n\
                               # as reported by the make_features program\n\
   input: perr_use4            # Distance from the decision boundary below which to use the additional\n\
-                              # information (4rth value). The default is 0.05 and the value is expressed\n\
+                              # information (4rth value). The default is 0 (disable the usage\n\
+                              # of extra info) and the value is expressed\n\
                               # as the probability to make a mistake in the classification, then internally\n\
                               # converted to the appropriate distance from the decision boundary\n\
                               # This parameter has no effect if there is no 4rth value in the provided file\n\
@@ -245,7 +246,7 @@ int main(int argc, char** argv) {
 
     if (argc<5) return help();
 
-    FloatType duse4 = -log(1.0/(1.0 - 0.05) - 1.0);
+    FloatType duse4 = 0;
     if (argc>=6) {
         FloatType perr_use4 = atof(argv[5]);
         if (perr_use4<=0 || perr_use4>=0.5) {
@@ -400,6 +401,12 @@ int main(int argc, char** argv) {
     if (duse4>0 && coreAdditionalInfo.empty()) {
         cout << "Warning: perr_use4 argument is ignored as the core point file does not have additional information" << endl;
         duse4 = 0;
+    }
+    if (duse4<=0 && !sceneAdditionalInfo.empty()) {
+        cout << "Warning: ignoring extra information in the scene" << endl;
+    }
+    if (duse4<=0 && coreAdditionalInfo.empty()) {
+        cout << "Warning: ignoring extra information at the core points" << endl;
     }
 
     // 2-step process:
