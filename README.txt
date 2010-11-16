@@ -96,4 +96,5 @@ combine_classifiers: any number of prm classifiers (incl. multiclass files)
     produce multiclass prm file
     auto from class nums that were specified
 
+classify features.prm scene.xyz scene_core.msc scene_annotated.xyz
 

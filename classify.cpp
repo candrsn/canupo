@@ -288,7 +288,7 @@ int main(int argc, char** argv) {
         classifiers[ci].prepare();
     }
     classifparamsfile.close();
-    
+
     // reversed situation here compared to canupo:
     // - we load the core points in the cloud so as to perform neighbor searches
     // - the data itself is unstructured, not even loaded whole in memory
@@ -460,11 +460,36 @@ int main(int argc, char** argv) {
                     if (nsamples>0) {
                         // only one class ?
                         if (class1sceneidx.size()==0) {
-                            pred = class2sceneidx.size() / (FloatType)neighbors.size();
+                            if (class2sceneidx.size() * 2 > neighbors.size())
+                                pred = class2sceneidx.size() / (FloatType)nsamples;
+                            else unreliable = true;
+//cout << "only class 2" << endl;
                         } else if (class2sceneidx.size()==0) {
-                            pred = -(class1sceneidx.size() / (FloatType)neighbors.size());
+                            if (class1sceneidx.size() * 2 > neighbors.size())
+                                pred = -(class1sceneidx.size() / (FloatType)nsamples);
+                            else unreliable = true;
+//cout << "only class 1" << endl;
                         }
                         else {
+/*
+                            // nearest neighbor in either class
+                            FloatType x = coreAdditionalInfo[ptidx];
+                            FloatType dmin = numeric_limits<FloatType>::max();
+                            for (int i=0; i<class1sceneidx.size(); ++i) {
+                                FloatType d = fabs(sceneAdditionalInfo[class1sceneidx[i]]-x);
+                                if (d<dmin) d=dmin;
+                            }
+                            bool isClass1 = true;
+                            for (int i=0; i<class2sceneidx.size(); ++i) {
+                                FloatType d = fabs(sceneAdditionalInfo[class2sceneidx[i]]-x);
+                                if (d<dmin) {
+                                    d=dmin; isClass1 = false;
+                                    break; // closer points would only improve the decision, now class2
+                                }
+                            }
+                            if (isClass1) pred = -class1sceneidx.size() / (FloatType)nsamples;
+                            else pred = class2sceneidx.size() / (FloatType)nsamples;
+*/
                             vector<FloatType> info1(class1sceneidx.size());
                             for (int i=0; i<class1sceneidx.size(); ++i) info1[i] = sceneAdditionalInfo[class1sceneidx[i]];
                             vector<FloatType> info2(class2sceneidx.size());
@@ -522,7 +547,7 @@ int main(int argc, char** argv) {
                             FloatType oriprob = 1 / (1+exp(-fabs(pred)));
 // TODO: sometimes (rarely) there are mistakes in the reference core points and we're dealing with similar classes
 // => put back these core points in the unreliable pool
-cout << (oriprob < bestclassif?"OK: ":"NO: ") << bestclassif << " vs " << oriprob << endl;
+//cout << (oriprob < bestclassif?"OK: ":"NO: ") << bestclassif << " vs " << oriprob << endl;
                             if (oriprob < bestclassif) {
                                 // take median best split
                                 int bsi = bestSplit.size()/2;
@@ -531,7 +556,8 @@ cout << (oriprob < bestclassif?"OK: ":"NO: ") << bestclassif << " vs " << oripro
                                 if (bestSplitDir[bsi]==1) pred = -pred;
                                 // back to original vectors
                                 if (class1sceneidx.size()>=class2sceneidx.size()) pred = -pred;
-                            }
+                            } else unreliable = true;
+                            
                         }
                     }
                     else unreliable = true;
