@@ -18,7 +18,7 @@ using namespace boost;
 int help(const char* errmsg = 0) {
     if (errmsg) cout << "Error: " << errmsg << endl;
 cout << "\
-classify features.prm scene.xyz scene_core.msc scene_annotated.xyz [perr_use4]\n\
+classify features.prm scene.xyz scene_core.msc scene_annotated.xyz [pok [usage_flag]]\n\
   input: features.prm         # Features computed by the make_features program\n\
   input: scene.xyz            # Point cloud to classify/annotate with each class\n\
                               # Text file, lines starting with #,!,;,// or with\n\
@@ -29,15 +29,29 @@ classify features.prm scene.xyz scene_core.msc scene_annotated.xyz [perr_use4]\n
   input: scene_core.msc       # Multiscale parameters at core points in the scene\n\
                               # This file need only contain the relevant scales for classification\n\
                               # as reported by the make_features program\n\
-  input: perr_use4            # Distance from the decision boundary below which to use the additional\n\
-                              # information (4rth value). The default is 0 (disable the usage\n\
-                              # of extra info) and the value is expressed\n\
-                              # as the probability to make a mistake in the classification, then internally\n\
-                              # converted to the appropriate distance from the decision boundary\n\
-                              # This parameter has no effect if there is no 4rth value in the provided file\n\
+  input: pok                  # Some threshold, expressed as a probability to make\n\
+                              # a correct classification (0.5<pok<1). Use 0\n\
+                              # to disable the threshold, which is also the default\n\
+                              # Internally this is converted to a distance from\n\
+                              # the decision boundary matching that probability\n\
+                              # See the usage_flag argument for what pok means.\n\
+  input: usage_flag           # What to do with the perr argument if it is valid.\n\
+                              # The default is 0:\n\
+                              # - 0: mark as unclassified all points with confidence < pok\n\
+                              #      or equivalently too close to the decision boundary\n\
+                              # - 1: use the 4rth column in the data file as extra information\n\
+                              #      and train a local classifier to complement the confidence\n\
+                              #      for points < pok\n\
+                              #      This parameter has no effect if there is no 4rth value\n\
+                              #      in the provided file\n\
   output: scene_annotated.xyz # Output file containing an extra column with the class of each point\n\
                               # Scene points are labelled with the class of the nearest core point.\n\
 "<<endl;
+#ifdef CHECK_CLASSIFIER
+cout << "\n\
+  # Note: A file named \"classification.png\" will display the result of the first classifier\n\
+"<<endl;
+#endif
         return 0;
 }
 
@@ -246,14 +260,18 @@ int main(int argc, char** argv) {
 
     if (argc<5) return help();
 
-    FloatType duse4 = 0;
+    FloatType dist_to_decision_boundary = 0;
+    int usage_flag = 0;
     if (argc>=6) {
-        FloatType perr_use4 = atof(argv[5]);
-        if (perr_use4<=0 || perr_use4>=0.5) {
-            cout << "Disabling usage of extra information" << endl;
-            duse4 = 0;
+        FloatType pok = atof(argv[5]);
+        if (pok<0.5 || pok>=1) {
+            cout << "Invalid pok argument" << endl;
+            dist_to_decision_boundary = 0;
         }
-        else duse4 = -log(1.0/(1.0 - perr_use4) - 1.0);
+        else if (pok!=0) dist_to_decision_boundary = -log(1.0/pok - 1.0);
+        if (argc>=7) {
+            usage_flag = atoi(argv[6]);
+        }
     }
     
     cout << "Loading parameters and core points" << endl;
@@ -365,13 +383,15 @@ int main(int argc, char** argv) {
     coreCloud.ncelly = floor(sizey / coreCloud.cellside) + 1;
     
     coreCloud.grid.resize(coreCloud.ncellx * coreCloud.ncelly);
-    for (int i=0; i<coreCloud.grid.size(); ++i) coreCloud.grid[i] = 0;
+    coreCloud.links.resize(ncorepoints);
+    for (int i=0; i<ncorepoints; ++i) coreCloud.links[i] = IndexType(-1);
+    for (int i=0; i<coreCloud.grid.size(); ++i) coreCloud.grid[i] = IndexType(-1);
     // setup the grid: list the data points in each cell
     for (int pt=0; pt<ncorepoints; ++pt) {
         int cellx = floor((coreCloud.data[pt].x - coreCloud.xmin) / coreCloud.cellside);
         int celly = floor((coreCloud.data[pt].y - coreCloud.ymin) / coreCloud.cellside);
-        coreCloud.data[pt].next = coreCloud.grid[celly * coreCloud.ncellx + cellx];
-        coreCloud.grid[celly * coreCloud.ncellx + cellx] = &coreCloud.data[pt];
+        coreCloud.links[pt] = coreCloud.grid[celly * coreCloud.ncellx + cellx];
+        coreCloud.grid[celly * coreCloud.ncellx + cellx] = pt;
     }
     
     cout << "Loading scene data" << endl;
@@ -394,18 +414,18 @@ int main(int argc, char** argv) {
     cairo_set_line_width(cr, 1);
 #endif
 
-    if (duse4>0 && sceneAdditionalInfo.empty()) {
+    if (dist_to_decision_boundary>0 && sceneAdditionalInfo.empty()) {
         cout << "Warning: perr_use4 argument is ignored as the scene does not have additional information" << endl;
-        duse4 = 0;
+        dist_to_decision_boundary = 0;
     }
-    if (duse4>0 && coreAdditionalInfo.empty()) {
+    if (dist_to_decision_boundary>0 && coreAdditionalInfo.empty()) {
         cout << "Warning: perr_use4 argument is ignored as the core point file does not have additional information" << endl;
-        duse4 = 0;
+        dist_to_decision_boundary = 0;
     }
-    if (duse4<=0 && !sceneAdditionalInfo.empty()) {
+    if (dist_to_decision_boundary<=0 && !sceneAdditionalInfo.empty()) {
         cout << "Warning: ignoring extra information in the scene" << endl;
     }
-    if (duse4<=0 && coreAdditionalInfo.empty()) {
+    if (dist_to_decision_boundary<=0 && coreAdditionalInfo.empty()) {
         cout << "Warning: ignoring extra information at the core points" << endl;
     }
 
@@ -440,7 +460,10 @@ int main(int argc, char** argv) {
                 int minclass = min(classifiers[ci].class1, classifiers[ci].class2);
                 int maxclass = max(classifiers[ci].class1, classifiers[ci].class2);
                 // use extra info when too close to the decision boundary
-                if (fabs(pred)<duse4) {
+                if (fabs(pred)<dist_to_decision_boundary && usage_flag==0) {
+                    unreliable = true;
+                }
+                else if (fabs(pred)<dist_to_decision_boundary && usage_flag==1) {
                     // we've made sure above that both core and scene data have the extra info at this point
                     // largest scale is the first by construction in canupo, order was preserved by the other programs
                     FloatType largestScale = scales[0];
@@ -627,7 +650,8 @@ int main(int argc, char** argv) {
         unreliableCoreIdx.swap(idxToSearch);
         // break infinite loop, some core points and scene data are in unconnected zones we have no info for
         // => these points won't be classified below, attributed class 0
-        if (nidxtosearch == idxToSearch.size()) {
+        // also break when explicitly marking close points are unreliable
+        if (nidxtosearch == idxToSearch.size() || usage_flag==0) {
             for (int itsi=0; itsi<idxToSearch.size(); ++itsi) coreCloud.data[idxToSearch[itsi]].classif = 0;
             break;
         }
@@ -682,7 +706,7 @@ int main(int argc, char** argv) {
     cairo_move_to(cr, halfSvgSize,0);
     cairo_line_to(cr, halfSvgSize,svgSize);
     cairo_stroke(cr);
-    cairo_surface_write_to_png (surface, "test.png");
+    cairo_surface_write_to_png (surface, "classification.png");
 #endif
 
     return 0;

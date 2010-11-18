@@ -42,7 +42,7 @@ canupo scales... : data.xyz data_core.xyz data_core.msc\n\
 
 
 int main(int argc, char** argv) {
-
+    
     if (argc<3) return help();
 
     int separator = 0;
@@ -102,14 +102,25 @@ int main(int argc, char** argv) {
 
     cout << "Loading data files" << endl;
     
+    PointCloud<Point> cloud;
     cloud.load_txt(datafilename);
     
-    vector<Point> corepoints;
     ifstream corepointsfile(corepointsfilename.c_str());
     string line;
-    vector<FloatType> additionalInfo;
     bool use4 = false;
     int linenum = 0;
+    while (corepointsfile && !corepointsfile.eof()) {
+        ++linenum;
+        getline(corepointsfile, line);
+    }
+    corepointsfile.close();
+    // much better to reserve the memory than to let push_back double it!
+    vector<Point> corepoints;
+    corepoints.reserve(linenum);
+    vector<FloatType> additionalInfo;
+    additionalInfo.reserve(linenum);
+    corepointsfile.open(corepointsfilename.c_str());
+    linenum = 0;
     while (corepointsfile && !corepointsfile.eof()) {
         ++linenum;
         getline(corepointsfile, line);
@@ -200,7 +211,7 @@ if (omp_get_thread_num()==0) {
                 // pre-compute cumulated sums. The total is needed anyway at the larger scale
                 // so we might as well share the intermediates to lower levels
                 neighsums.resize(neighbors.size());
-                neighsums[0] = *neighbors[0].pt;
+                if (!neighbors.empty()) neighsums[0] = *neighbors[0].pt;
                 for (int i=1; i<neighbors.size(); ++i) neighsums[i] = neighsums[i-1] + *neighbors[i].pt;
             }
             // lower scale : restrict previously found neighbors to the new distance

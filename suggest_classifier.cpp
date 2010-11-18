@@ -310,26 +310,30 @@ int main(int argc, char** argv) {
     // and look for the lowest overall density along the boundary
     int nsearchdir = 720; // each quarter degree, as we swipe from 0 to 180 (unoriented lines)
     FloatType incr = max(xmaxg-xming, ymaxg-yming) / nsearchdir;
-    int minsumd = numeric_limits<int>::max();
-    FloatType minvx = 0, minvy = 0;
+    vector<FloatType> sumds(nsearchdir);
+#pragma omp parallel for
     for(int sd = 0; sd < nsearchdir; ++sd) {
         // use the parametric P = P0 + alpha*V formulation of a line
         // unit vector in the direction of the line
         FloatType vx = cos(M_PI * sd / nsearchdir);
         FloatType vy = sin(M_PI * sd / nsearchdir);
-        int sumd = 0;
+        sumds[sd] = 0;
         for(int sp = -nsearchpointm1/2; sp < nsearchpointm1/2; ++sp) {
             int s = sp * incr;
             FloatType x = vx * s;
             FloatType y = vy * s;
             vector<DistPoint<Point2D> > neighbors;
             cloud2D.findNeighbors(back_inserter(neighbors), Point2D(x,y), radius);
-            sumd += neighbors.size();
+            sumds[sd] += neighbors.size();
         }
-        if (sumd<minsumd) {
-            minsumd = sumd;
-            minvx = vx;
-            minvy = vy;
+    }
+    int minsumd = numeric_limits<int>::max();
+    FloatType minvx = 0, minvy = 0;
+    for(int sd = 0; sd < nsearchdir; ++sd) {
+        if (sumds[sd]<minsumd) {
+            minsumd = sumds[sd];
+            minvx = cos(M_PI * sd / nsearchdir);
+            minvy = sin(M_PI * sd / nsearchdir);
         }
     }
     
@@ -486,21 +490,21 @@ int main(int argc, char** argv) {
     cairo_set_font_size (cr, 12);
     cairo_text_extents_t extents;
     FloatType dprob = -log(1.0/0.99 - 1.0) * scaleFactor;
-    const char* text = ">d eq. p(err)<1%";
+    const char* text = "p(classif)>99%";
     cairo_text_extents(cr, text, &extents);
     cairo_move_to(cr, svgSize - dprob - 20 - extents.width - extents.x_bearing, svgSize - 15 - extents.height/2 - extents.y_bearing);
     cairo_show_text(cr, text);
     cairo_move_to(cr, svgSize - dprob - 10, svgSize - 15);
     cairo_line_to(cr, svgSize - 10, svgSize - 15);
     dprob = -log(1.0/0.95 - 1.0) * scaleFactor;
-    text = ">d eq. p(err)<5%";
+    text = "p(classif)>95%";
     cairo_text_extents(cr, text, &extents);
     cairo_move_to(cr, svgSize - dprob - 20 - extents.width - extents.x_bearing, svgSize - 35 - extents.height/2 - extents.y_bearing);
     cairo_show_text(cr, text);
     cairo_move_to(cr, svgSize - dprob - 10, svgSize - 35);
     cairo_line_to(cr, svgSize - 10, svgSize - 35);
     dprob = -log(1.0/0.9 - 1.0) * scaleFactor;
-    text = ">d eq. p(err)<10%";
+    text = "p(classif)>90%";
     cairo_text_extents(cr, text, &extents);
     cairo_move_to(cr, svgSize - dprob - 20 - extents.width - extents.x_bearing, svgSize - 55 - extents.height/2 - extents.y_bearing);
     cairo_show_text(cr, text);

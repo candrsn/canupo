@@ -14,13 +14,19 @@
 
 #include <math.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <assert.h>
 
 /// SOME USER-ADAPTABLE PARAMETERS
 
-typedef double FloatType;
+typedef float FloatType;
 
 static const int TargetAveragePointDensityPerGridCell = 10;
+
+// scenes are limited to 4G number of points, increase that to uint64_t if you need more
+// using uint32_t indices into arrays saves a lot of memory
+// compared to (memory-aligned, 8-bytes) pointers on 64-bit architectures
+typedef uint32_t IndexType;
 
 /// /// /// ///
 
@@ -28,16 +34,15 @@ template<class Base>
 struct PointTemplate : public Base, boost::addable<PointTemplate<Base>, boost::subtractable<PointTemplate<Base>, boost::multipliable2<PointTemplate<Base>, FloatType, boost::dividable2<PointTemplate<Base>, FloatType> > > > {
     
     FloatType x,y,z;
-    PointTemplate* next; // for the cell/grid structure
 
     // convenient but slow : avoid it !
     inline FloatType& operator[](int idx) {
         assert(idx>=0 && idx<3);
         return idx==0?x:(idx==1?y:z);
     }
-    PointTemplate() : x(0),y(0),z(0),next(0) {}
-    PointTemplate(FloatType _x, FloatType _y, FloatType _z) : x(_x),y(_y),z(_z), next(0) {}
-    PointTemplate(PointTemplate* n) : x(0),y(0),z(0),next(n) {}
+    PointTemplate() : x(0),y(0),z(0) {}
+    PointTemplate(FloatType _x, FloatType _y, FloatType _z) : x(_x),y(_y),z(_z) {}
+    PointTemplate(PointTemplate* n) : x(0),y(0),z(0) {}
     
     // Baaah, how many times will similar code be rewriten ? Thanks boost::operators for easing the task
     inline PointTemplate& operator+=(const PointTemplate& v) {x+=v.x; y+=v.y; z+=v.z; return *this;}
@@ -54,16 +59,15 @@ template<class Base>
 struct Point2DTemplate : public Base, boost::addable<Point2DTemplate<Base>, boost::subtractable<Point2DTemplate<Base>, boost::multipliable2<Point2DTemplate<Base>, FloatType, boost::dividable2<Point2DTemplate<Base>, FloatType> > > > {
     
     FloatType x,y;
-    Point2DTemplate* next; // for the cell/grid structure
 
     // convenient but slow : avoid it !
     inline FloatType& operator[](int idx) {
         assert(idx>=0 && idx<2);
         return idx==0?x:y;
     }
-    Point2DTemplate() : x(0),y(0),next(0) {}
-    Point2DTemplate(FloatType _x, FloatType _y) : x(_x),y(_y), next(0) {}
-    Point2DTemplate(Point2DTemplate* n) : x(0),y(0),next(n) {}
+    Point2DTemplate() : x(0),y(0) {}
+    Point2DTemplate(FloatType _x, FloatType _y) : x(_x),y(_y) {}
+    Point2DTemplate(Point2DTemplate* n) : x(0),y(0) {}
     
     // Baaah, how many times will similar code be rewriten ? Thanks boost::operators for easing the task
     inline Point2DTemplate& operator+=(const Point2DTemplate& v) {x+=v.x; y+=v.y; return *this;}
@@ -131,8 +135,16 @@ struct PointCloud {
     FloatType cellside;
     int ncellx;
     int ncelly;
-    std::vector<PointType*> grid; // cell lists are embedded in the points vector
-    int nextptidx;
+    // external linkage, using uint32_t indices instead of PointType*
+    // on 64-bit systems where pointers need to be aligned this can make a huge difference!
+    // prev version: each point had an internal PointType* pointer to the next point in
+    // the same grid cell
+    // current version: external links, links[i] is the index into data giving the point
+    // that would previously be pointed by the pointer at data[i]
+    // however now 0 is a valid index => use IndexType(-1) as the invalid index marker
+    std::vector<IndexType> links;
+    std::vector<IndexType> grid; // cell lists are embedded in the points vector
+    IndexType nextptidx;
 
     void prepare(FloatType _xmin, FloatType _xmax, FloatType _ymin, FloatType _ymax, int npts) {
         xmin = _xmin; xmax = _xmax;
@@ -146,8 +158,10 @@ struct PointCloud {
         
         // instanciate the points
         data.resize(npts);
+        links.resize(npts);
         grid.resize(ncellx * ncelly);
-        for (int i=0; i<grid.size(); ++i) grid[i] = 0;
+        for (int i=0; i<npts; ++i) links[i] = IndexType(-1);
+        for (int i=0; i<grid.size(); ++i) grid[i] = IndexType(-1);
         nextptidx = 0;
     }
 
@@ -158,8 +172,11 @@ struct PointCloud {
         // add this point to the cell grid list
         int cellx = floor((data[nextptidx].x - xmin) / cellside);
         int celly = floor((data[nextptidx].y - ymin) / cellside);
-        data[nextptidx].next = grid[celly * ncellx + cellx];
-        grid[celly * ncellx + cellx] = &data[nextptidx];
+        
+        //data[nextptidx].next = grid[celly * ncellx + cellx];
+        //grid[celly * ncellx + cellx] = &data[nextptidx];
+        links[nextptidx] = grid[celly * ncellx + cellx];
+        grid[celly * ncellx + cellx] = nextptidx;
         ++nextptidx;
     }
 
@@ -225,7 +242,7 @@ struct PointCloud {
                 if (i<Point::dim) point[i] = value;
                 if (++i==4) break;
             }
-            if (i==3 || (use4 && i==4)) {
+            if (i>=Point::dim+use4) {
                 insert(point);
                 if (use4) (*additionalInfo)[ptidx++] = value;
             }
@@ -248,9 +265,9 @@ struct PointCloud {
         if (cy2>=ncelly) cy2=ncelly-1;
         double r2 = radius * radius;
         for (int cy = cy1; cy <= cy2; ++cy) for (int cx = cx1; cx <= cx2; ++cx) {
-            for (PointType* p = grid[cy * ncellx + cx]; p!=0; p=p->next) {
-                FloatType d2 = dist2(center,*p);
-                if (d2<=r2) (*outit++) = DistPoint<PointType>(d2,p);
+            for (IndexType p = grid[cy * ncellx + cx]; p!=IndexType(-1); p=links[p]) {
+                FloatType d2 = dist2(center,data[p]);
+                if (d2<=r2) (*outit++) = DistPoint<PointType>(d2,&data[p]);
             }
         }
     }
@@ -267,23 +284,28 @@ struct PointCloud {
             // loop only in the square at dcell distance from the center cell
             for (int cxi = cx-dcell; cxi <= cx + dcell; ++cxi) {
                 // top
-                if (cxi>=0 && cxi<ncellx && cy-dcell>=0 && cy-dcell<ncelly && grid[(cy-dcell) * ncellx + cxi]!=0) {found_dcell = dcell; break;}
+                if (cxi>=0 && cxi<ncellx && cy-dcell>=0 && cy-dcell<ncelly && grid[(cy-dcell) * ncellx + cxi]!=IndexType(-1)) {found_dcell = dcell; break;}
                 // bottom
-                if (cxi>=0 && cxi<ncellx && cy+dcell>=0 && cy+dcell<ncelly && grid[(cy+dcell) * ncellx + cxi]!=0) {found_dcell = dcell; break;}
+                if (cxi>=0 && cxi<ncellx && cy+dcell>=0 && cy+dcell<ncelly && grid[(cy+dcell) * ncellx + cxi]!=IndexType(-1)) {found_dcell = dcell; break;}
             }
             if (found_dcell!=-1) break;
             // left and right, omitting the corners
             for (int cyi = cy-dcell+1; cyi <= cy + dcell - 1; ++cyi) {
                 // left
-                if (cx-dcell>=0 && cx-dcell<ncellx && cyi>=0 && cyi<ncelly && grid[cyi * ncellx + cx - dcell]!=0) {found_dcell = dcell; break;}
+                if (cx-dcell>=0 && cx-dcell<ncellx && cyi>=0 && cyi<ncelly && grid[cyi * ncellx + cx - dcell]!=IndexType(-1)) {found_dcell = dcell; break;}
                 // right
-                if (cx+dcell>=0 && cx+dcell<ncellx && cyi>=0 && cyi<ncelly && grid[cyi * ncellx + cx + dcell]!=0) {found_dcell = dcell; break;}
+                if (cx+dcell>=0 && cx+dcell<ncellx && cyi>=0 && cyi<ncelly && grid[cyi * ncellx + cx + dcell]!=IndexType(-1)) {found_dcell = dcell; break;}
             }
             if (found_dcell!=-1) break;
         }
-        if (found_dcell==-1) return -1;
+        if (found_dcell==-1) {
+#ifndef NDEBUG
+            std::cerr << "Could not find dcell: cx=" << cx << ", cy=" << cy << ", ncellx=" << ncellx << ", ncelly=" << ncelly << ", center.x=" << center.x << ", center.y=" << center.y << ", xmin=" << xmin << ", xmax=" << xmax << ", ymin=" << ymin << ", ymax=" << ymax << std::endl;
+#endif
+            return -1;
+        }
         // neighbor necessarily within dcell+1 distance, limit case if we are very close to a cell edge
-        int idx = -1;
+        IndexType idx = IndexType(-1);
         int cx1 = cx - found_dcell;
         int cx2 = cx + found_dcell;
         int cy1 = cy - found_dcell;
@@ -294,13 +316,19 @@ struct PointCloud {
         if (cy2>=ncelly) cy2=ncelly-1;
         FloatType mind2 = std::numeric_limits<FloatType>::max();
         for (int cy = cy1; cy <= cy2; ++cy) for (int cx = cx1; cx <= cx2; ++cx) {
-            for (PointType* p = grid[cy * ncellx + cx]; p!=0; p=p->next) {
-                FloatType d2 = dist2(center,*p);
+            for (IndexType p = grid[cy * ncellx + cx]; p!=IndexType(-1); p=links[p]) {
+                FloatType d2 = dist2(center,data[p]);
                 if (d2<=mind2) {
                     mind2 = d2;
-                    idx = p - &data[0];
+                    idx = p;
                 }
             }
+        }
+        if (idx==IndexType(-1)) {
+#ifndef NDEBUG
+            std::cerr << "Could not find index: found_dcell=" << found_dcell << ", cx=" << cx << ", cy=" << cy << ", ncellx=" << ncellx << ", ncelly=" << ncelly << ", center.x=" << center.x << ", center.y=" << center.y << ", xmin=" << xmin << ", xmax=" << xmax << ", ymin=" << ymin << ", ymax=" << ymax << std::endl;
+#endif
+            return -1;
         }
         return idx;
     }
