@@ -203,7 +203,8 @@ if (omp_get_thread_num()==0) {
             // Neighborhood search only on max radius
             if (scaleit == scales.begin()) {
                 // we have all neighbors, unsorted, but with distances computed already
-                cloud.findNeighbors(back_inserter(neighbors), corepoints[ptidx], *scaleit);
+                // use scales = diameters, not radius
+                cloud.findNeighbors(back_inserter(neighbors), corepoints[ptidx], (*scaleit) * 0.5);
 
                 // Sort the neighbors from closest to farthest, so we can process all lower scales easily
                 sort(neighbors.begin(), neighbors.end());
@@ -216,7 +217,7 @@ if (omp_get_thread_num()==0) {
             }
             // lower scale : restrict previously found neighbors to the new distance
             else {
-                FloatType radiussq = *scaleit * *scaleit;
+                FloatType radiussq = *scaleit * *scaleit * 0.25;
                 // dicho search might be faster than sequencially from the vector end if there are many points
                 int dichofirst = 0;
                 int dicholast = neighbors.size();

@@ -471,7 +471,7 @@ int main(int argc, char** argv) {
                     vector<int> class1sceneidx;
                     vector<int> class2sceneidx;
                     // find all scene data around that core point
-                    sceneCloud.findNeighbors(back_inserter(neighbors), sceneCloud.data[ptidx], largestScale);
+                    sceneCloud.findNeighbors(back_inserter(neighbors), sceneCloud.data[ptidx], largestScale * 0.5); // take radius, not diameter
                     // for each scene data point, find the corresponding core point and check if it is reliable
                     for (int i=0; i<neighbors.size(); ++i) {
                         int neighcoreidx = coreCloud.findNearest(*neighbors[i].pt);
