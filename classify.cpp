@@ -319,6 +319,15 @@ int main(int argc, char** argv) {
     mscfile.read((char*)&nscales_msc, sizeof(int));
     if (nscales_msc!=nscales) {
         cerr << "Inconsistent combination of multiscale file and classifier parameters (wrong number of scales)" << endl;
+        cerr << "Scales in the classifier file:";
+        for (int si=0; si<nscales; ++si) cerr << " " << scales[si];
+        cerr << endl << "Scales in the multiscale file:";
+        for (int si=0; si<nscales_msc; ++si) {
+            FloatType scale_msc;
+            mscfile.read((char*)&scale_msc, sizeof(FloatType));
+            cerr << " " << scale_msc;
+        }
+        cerr << endl;
         return 1;
     }
     for (int si=0; si<nscales; ++si) {
@@ -342,6 +351,9 @@ int main(int argc, char** argv) {
     // Put the points in the cloud, keep the multiscale information in a separate vector matched by point index
     PointCloud<PointClassif> coreCloud;
     vector<FloatType> mscdata(ncorepoints * nscales*2);
+    // extract only largest scale neighbor stats for output file
+    vector<int> nneigh_max_scale(ncorepoints);
+    //vector<FloatType> avg_ndist_max_scale(ncorepoints);
     coreCloud.data.resize(ncorepoints);
     coreCloud.xmin = numeric_limits<FloatType>::max();
     coreCloud.xmax = -numeric_limits<FloatType>::max();
@@ -372,6 +384,14 @@ int main(int argc, char** argv) {
             mscdata[pt * nscales_msc*2 + s*2  ] = x;
             mscdata[pt * nscales_msc*2 + s*2+1] = y;
         }
+        // we care only for number of neighbors and average dist between nearest
+        // neighbors at max scale
+        int fooi;
+        mscfile.read((char*)&nneigh_max_scale[pt], sizeof(int));
+        for (int i=1; i<nscales; ++i) mscfile.read((char*)&fooi, sizeof(int));
+/*        FloatType foof;
+        mscfile.read((char*)&avg_ndist_max_scale[pt], sizeof(FloatType));
+        for (int i=1; i<nscales; ++i) mscfile.read((char*)&foof, sizeof(FloatType));*/
     }
     mscfile.close();
     // complete the coreCloud structure by setting the grid
@@ -413,21 +433,6 @@ int main(int argc, char** argv) {
     cairo_stroke(cr);
     cairo_set_line_width(cr, 1);
 #endif
-
-    if (dist_to_decision_boundary>0 && sceneAdditionalInfo.empty()) {
-        cout << "Warning: perr_use4 argument is ignored as the scene does not have additional information" << endl;
-        dist_to_decision_boundary = 0;
-    }
-    if (dist_to_decision_boundary>0 && coreAdditionalInfo.empty()) {
-        cout << "Warning: perr_use4 argument is ignored as the core point file does not have additional information" << endl;
-        dist_to_decision_boundary = 0;
-    }
-    if (dist_to_decision_boundary<=0 && !sceneAdditionalInfo.empty()) {
-        cout << "Warning: ignoring extra information in the scene" << endl;
-    }
-    if (dist_to_decision_boundary<=0 && coreAdditionalInfo.empty()) {
-        cout << "Warning: ignoring extra information at the core points" << endl;
-    }
 
     // 2-step process:
     // - 1. set the class of all core points that are geometrically >dist from hyperplane
@@ -660,7 +665,12 @@ int main(int argc, char** argv) {
     } while (nidxtosearch>0);
 
     cout << "Core points classified, labelling scene data" << endl;
-    
+    cout << "Output file contains for each point a line with the following values:" << endl;
+    cout << "x  y  z  class  num_neighbors_max_scale ";// avg_dist_nearest_neighbors_max_scale";
+    if (!coreAdditionalInfo.empty()) cout << " extra_info";
+    cout << endl;
+    cout << "The first 3 values are those of the scene point (x,y,z), the other values are taken from the nearest core point to this scene point" << endl;
+
     for (int pt=0; pt<sceneCloud.data.size(); ++pt) {
         Point& point = sceneCloud.data[pt];
         // process this point
@@ -671,7 +681,12 @@ int main(int argc, char** argv) {
             return 1;
         }
         // assign the scene point to this core point class, which was computed before
-        scene_annotated << point.x << " " << point.y << " " << point.z << " " << coreCloud.data[neighidx].classif << endl;
+        scene_annotated << point.x << " " << point.y << " " << point.z << " ";
+        scene_annotated << coreCloud.data[neighidx].classif;
+        scene_annotated << " " << nneigh_max_scale[neighidx];
+        //scene_annotated << " " << avg_ndist_max_scale[neighidx];
+        if (!coreAdditionalInfo.empty()) scene_annotated << " " << coreAdditionalInfo[neighidx];
+        scene_annotated << endl;
 #ifdef CHECK_CLASSIFIER
         FloatType a,b;
         FloatType scaleFactor = svgSize/2 / classifiers[0].absmaxXY;
@@ -685,6 +700,7 @@ int main(int argc, char** argv) {
         cairo_stroke(cr);
 #endif
     }
+    scene_annotated.close();
 
 #ifdef CHECK_CLASSIFIER
     FloatType scaleFactor = svgSize/2 / classifiers[0].absmaxXY;

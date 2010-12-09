@@ -83,6 +83,12 @@ void read_msc_data(ifstream& mscfile, int nscales, int npts, sample_type* data, 
             (*data)(s*2) = x;
             (*data)(s*2+1) = y;
         }
+        // we do not care for number of neighbors and average dist between nearest neighbors
+        // TODO: take this info into account to weight the samples and improve the classifier
+        int fooi;
+        for (int i=0; i<nscales; ++i) mscfile.read((char*)&fooi, sizeof(int));
+/*        FloatType foof;
+        for (int i=0; i<nscales; ++i) mscfile.read((char*)&foof, sizeof(FloatType));*/
         ++data;
     }
 }
@@ -117,6 +123,8 @@ int main(int argc, char** argv) {
     
     sample_type undefsample;
     int ptnparams;
+
+    cout << "Loading unlabelled files" << endl;
     
     // neutral files, if any
     int ndata_unlabeled = 0;
@@ -143,6 +151,8 @@ int main(int argc, char** argv) {
         mscfile.close();
         base_pt += npts;
     }
+    
+    cout << "Loading class files" << endl;
     
     // class1 files
     int ndata_class1 = 0;
@@ -184,7 +194,8 @@ int main(int argc, char** argv) {
         mscfile.close();
         base_pt += npts;
     }
-
+    
+    cout << "Computing the two best projection directions" << endl;
 
     LinearSVM classifier;
 
@@ -291,133 +302,6 @@ int main(int argc, char** argv) {
     yming = min(yming, yminc);
     ymaxg = max(ymaxg, ymaxc);
     
-    PointCloud<Point2D> cloud2D;
-    cloud2D.prepare(xming,xmaxg,yming,ymaxg,nsamples+data_unlabeled.size());
-    for (int i=0; i<data_unlabeled.size(); ++i) cloud2D.insert(Point2D(
-        classifier.predict(data_unlabeled[i]),
-        ortho_classifier.predict(data_unlabeled[i])
-    ));
-    for (int i=0; i<nsamples; ++i) {
-        cloud2D.insert(Point2D(proj1[i],proj2[i]));
-    }
-    
-    FloatType absxymax = fabs(max(max(max(-xming,xmaxg),-yming),ymaxg));
-    int nsearchpointm1 = 1000;
-    // TODO: radius from probabilistic SVM and region of bad classif proba
-    FloatType radius = absxymax / 100;
-    
-    // now we swipe a decision boundary in each direction around the origin
-    // and look for the lowest overall density along the boundary
-    int nsearchdir = 720; // each quarter degree, as we swipe from 0 to 180 (unoriented lines)
-    FloatType incr = max(xmaxg-xming, ymaxg-yming) / nsearchdir;
-    vector<FloatType> sumds(nsearchdir);
-#pragma omp parallel for
-    for(int sd = 0; sd < nsearchdir; ++sd) {
-        // use the parametric P = P0 + alpha*V formulation of a line
-        // unit vector in the direction of the line
-        FloatType vx = cos(M_PI * sd / nsearchdir);
-        FloatType vy = sin(M_PI * sd / nsearchdir);
-        sumds[sd] = 0;
-        for(int sp = -nsearchpointm1/2; sp < nsearchpointm1/2; ++sp) {
-            int s = sp * incr;
-            FloatType x = vx * s;
-            FloatType y = vy * s;
-            vector<DistPoint<Point2D> > neighbors;
-            cloud2D.findNeighbors(back_inserter(neighbors), Point2D(x,y), radius);
-            sumds[sd] += neighbors.size();
-        }
-    }
-    int minsumd = numeric_limits<int>::max();
-    FloatType minvx = 0, minvy = 0;
-    for(int sd = 0; sd < nsearchdir; ++sd) {
-        if (sumds[sd]<minsumd) {
-            minsumd = sumds[sd];
-            minvx = cos(M_PI * sd / nsearchdir);
-            minvy = sin(M_PI * sd / nsearchdir);
-        }
-    }
-    
-    // so we finally have the decision boundary in this 2D space
-    // P = P0 + alpha * V : px = alpha * vx  and  py = alpha * vy, P0=origin
-    // alpha = px / vx; // if vx is null see below
-    // py = px / vx * vy
-    // py = px * vy/vx
-    // px * vy/vx - py = 0
-    // equa: wx * px + wy * py + c = 0
-    // with: wx = vy/vx; wy = -1; c = 0
-    // null vx just reverse roles as vy is then !=0 (v is unit vec)
-    FloatType wx = 0, wy = 0;
-    if (minvx!=0) { wx = minvy / minvx; wy = -1; }
-    else {wx = -1; wy = minvx / minvy; }
-    
-    // Convert that in original space
-    // find normal vector and homogeneous plane equation:
-    // equa: wx * px + wy * py = 0  as it passes through the origin
-    FloatType normvec2d = sqrt(wx*wx+wy*wy);
-    Point2D vecn2d(wx/normvec2d,wy/normvec2d);
-    // orient it so it points toward class +1. Dot product with (1,1) shall be >0
-    if (vecn2d.x+vecn2d.y < 0) {vecn2d *= -1.0; wx = -wx; wy = -wy;}
-    
-    
-    // Xproj = X - (N . (X - S)) * N  with S shift vector
-    // second hyperplane equa in original space : 
-    // N_ortho . (Xproj - S_ortho) = 0
-    // N_ortho . (X - (N . (X - S)) * N - S_ortho) = 0
-    // But N_ortho . N = 0 by def
-    // N_ortho . (X - S_ortho) = 0   // ok, equa directly applicable in original space
-    
-    // In the original space, we have the relation
-    // N_final = vecn2d.x * N + vecn2d.y * N_ortho
-    vector<FloatType> weights(fdim+1);
-    for (int i=0; i<fdim; ++i) weights[i] = vecn2d.x * nvec[i] + vecn2d.y * nvec_ortho[i];
-
-    // now the shift vector...
-    
-    // plane goes through (0,0) in 2D space
-    // but x2d = N . (X - S)
-    // and y2d = N_ortho . (Xproj - S_ortho)
-    //     y2d = N_ortho . (X - (N . (X - S)) * N - S_ortho)
-    //     y2d = N_ortho . (X - S_ortho)  as N_ortho . N = 0 
-    
-    // x2d + N.S  =  N.X
-    // y2d + No.So = No.X  and x2d=y2d=0 here for one X in the decision boundary
-    
-    // if we have an orthonormal basis starting from N=N1, then N2, ...
-    // X = s1.N1 + s2.N2 + ... satisfies the constraints
-    //   all vectors are orthogonal : N1.X = s1, N2.X = s2, and so on
-    
-    // => simply continue the orthogonal decomposition using the SVM ?
-    // No need ?
-    // decision boundary is an hyperplane, of the form
-    // N_dec . (X - S_dec) = 0
-    // N_dec . X - N_dec . S_dec = 0
-    // we seek here the bias term of the equa , b_dec = - N_dec . S_dec
-    // b_dec = - N_dec . X
-    // But X = s1.N1 + s2.N2 + Y  and N_dec = vecn2d.x * N1 + vecn2d.y * N2
-    // N_dec . X = vecn2d.x * s1 + vecn2d.y * s2 + 0
-    // we know s1 and s2 for the point at the origin in 2D space, also in the hyperplane
-    // => s1 = sndot, s2 = sndot_ortho
-    weights[fdim] = - (sndot * vecn2d.x + sndot_ortho * vecn2d.y);
-
-    // Now that we have the weights for the linear classifier, compute some stats on the scales
-    // the scales 2D planes are the basis vectors of the original space
-    // => project the normal vector of the decision hyperplane on each 2D subspace
-    // Then we know if that space contributes or not, given the norm of the projection
-    // if null, then that 2D subspace is orthogonal to the normal vector
-    // => within the hyperplane => no contribution
-    // if 1, then that 2D subspace is fully contributing
-    cout << "For the default classifier:" << endl;
-    for (int s=0; s<nscales; ++s) {
-        FloatType contrib = sqrt(
-            weights[s*2]*weights[s*2]
-          + weights[s*2+1]*weights[s*2+1]
-        );
-        // from dot-prod = cos to and angle between 0 and pi/2 => rescale in 0..1
-        contrib = min(1.0, max(0.0, acos(contrib) / M_PI_2));
-        cout << "Scale " << scales[s] << " has a contribution coefficient of " << contrib << endl;
-    }
-    
-    
     static const int svgSize = 800;
     static const int halfSvgSize = svgSize / 2;
     FloatType minX = numeric_limits<FloatType>::max();
@@ -432,6 +316,80 @@ int main(int argc, char** argv) {
     }
     FloatType absmaxXY = fabs(max(max(max(-minX,maxX),-minY),maxY));
     FloatType scaleFactor = halfSvgSize / absmaxXY;
+    
+    PointCloud<Point2D> cloud2D;
+    cloud2D.prepare(xming,xmaxg,yming,ymaxg,nsamples+data_unlabeled.size());
+    for (int i=0; i<data_unlabeled.size(); ++i) cloud2D.insert(Point2D(
+        classifier.predict(data_unlabeled[i]),
+        ortho_classifier.predict(data_unlabeled[i])
+    ));
+    for (int i=0; i<nsamples; ++i) {
+        cloud2D.insert(Point2D(proj1[i],proj2[i]));
+    }
+    
+    FloatType absxymax = fabs(max(max(max(-xming,xmaxg),-yming),ymaxg));
+    int nsearchpointm1 = 25;
+    // radius from probabilistic SVM, diameter = 90% chance of correct classif
+    FloatType radius = -log(1.0/0.9 - 1.0) / 2;
+    
+    int minsumd = numeric_limits<int>::max();
+    FloatType minvx = 0, minvy = 0, minspcx = 0, minspcy = 0;
+    
+    cout << "Finding the line with least density" << flush;
+    
+    for (int spci = 0; spci <= nsearchpointm1; ++spci) {
+        cout << "." << flush;
+        
+        FloatType spcx = refpt_neg.x + spci * (refpt_pos.x - refpt_neg.x) / nsearchpointm1;
+        FloatType spcy = refpt_neg.y + spci * (refpt_pos.y - refpt_neg.y) / nsearchpointm1;
+    
+        // now we swipe a decision boundary in each direction around the point
+        // and look for the lowest overall density along the boundary
+        int nsearchdir = 90; // each 2 degree, as we swipe from 0 to 180 (unoriented lines)
+        FloatType incr = max(xmaxg-xming, ymaxg-yming) / nsearchpointm1;
+        vector<FloatType> sumds(nsearchdir);
+#pragma omp parallel for
+        for(int sd = 0; sd < nsearchdir; ++sd) {
+            // use the parametric P = P0 + alpha*V formulation of a line
+            // unit vector in the direction of the line
+            FloatType vx = cos(M_PI * sd / nsearchdir);
+            FloatType vy = sin(M_PI * sd / nsearchdir);
+            sumds[sd] = 0;
+            for(int sp = -nsearchpointm1/2; sp < nsearchpointm1/2; ++sp) {
+                int s = sp * incr;
+                FloatType x = vx * s + spcx;
+                FloatType y = vy * s + spcy;
+                vector<DistPoint<Point2D> > neighbors;
+                cloud2D.findNeighbors(back_inserter(neighbors), Point2D(x,y), radius);
+                sumds[sd] += neighbors.size();
+            }
+        }
+        for(int sd = 0; sd < nsearchdir; ++sd) {
+            if (sumds[sd]<minsumd) {
+                minsumd = sumds[sd];
+                minvx = cos(M_PI * sd / nsearchdir);
+                minvy = sin(M_PI * sd / nsearchdir);
+                minspcx = spcx;
+                minspcy = spcy;
+            }
+        }
+    }
+    cout << endl;
+    
+    // so we finally have the decision boundary in this 2D space
+    // P = P0 + alpha * V : px-p0x = alpha * vx  and  py-p0y = alpha * vy,
+    // alpha = (px-p0x) / vx; // if vx is null see below
+    // py-p0y = (px-p0x) * vy / vx
+    // py = px * vy/vx + p0y - p0x * vy / vx
+    // px * vy/vx - py + p0y - p0x * vy / vx = 0
+    // equa: wx * px + wy * py + c = 0
+    // with: wx = vy/vx; wy = -1; c = p0y - p0x * vy / vx
+    // null vx just reverse roles as vy is then !=0 (v is unit vec)
+    FloatType wx = 0, wy = 0, wc = 0;
+    if (minvx!=0) { wx = minvy / minvx; wy = -1; wc = minspcy - minspcx * wx;}
+    else {wx = -1; wy = minvx / minvy; wc = minspcx - minspcy * wy;}
+
+    cout << "Drawing image" << endl;
 
     cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, svgSize, svgSize);
     cairo_t *cr = cairo_create(surface);
@@ -536,6 +494,8 @@ int main(int argc, char** argv) {
     std::vector<char> base64pngdata(codec.get_max_encoded_size(pngdata.size()));
     int nbytes = codec.encode(&pngdata[0], pngdata.size(), &base64pngdata[0]);
     nbytes += codec.encode_end(&base64pngdata[nbytes]);
+
+    cout << "Writing the svg file" << endl;
     
     // output the svg file
     svgfile << "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\""<< svgSize << "\" height=\""<< svgSize <<"\" >" << endl;
@@ -552,10 +512,18 @@ int main(int argc, char** argv) {
     // xy space in plane => scale and then reverse
     // first find homogeneous equa in the 2D space
     // convert the decision boundary to SVG space
+    // ori: wx * x + wy * y + wc = 0
+    // xsvg = x * scaleFactor + halfSvgSize; => x = (xsvg - halfSvgSize)  / scaleFactor
+    // ysvg = halfSvgSize - y * scaleFactor; => y = (halfSvgSize - ysvg)  / scaleFactor
+    // wxsvg * xsvg + wysvg * ysvg + csvg = 0
+    // wx * x + wy * y + wc = 0
+    // wx * (xsvg - halfSvgSize)  / scaleFactor + wy * (halfSvgSize - ysvg)  / scaleFactor + wc = 0
+    // wx * (xsvg - halfSvgSize) + wy * (halfSvgSize - ysvg) + wc * scaleFactor = 0
     FloatType wxsvg = wx;
     FloatType wysvg = -wy;
-    FloatType csvg = (wy-wx)*halfSvgSize;
-    // wxsvg * xsvg + wysvg * ysvg + csvg = 0
+    FloatType csvg = (wy-wx)*halfSvgSize + wc * scaleFactor;
+    FloatType minspcxsvg = minspcx * scaleFactor + halfSvgSize;
+    FloatType minspcysvg = halfSvgSize - minspcy * scaleFactor;
     // now intersect to find xminsvg, yminsvg, and so on
     // some may be NaN
     FloatType xsvgy0 = -csvg / wxsvg; // at ysvg = 0
@@ -569,30 +537,21 @@ int main(int argc, char** argv) {
     bool useBottom = (xsvgymax >= 0) && (xsvgymax <= svgSize);
     int sidescount = useLeft + useRight + useTop + useBottom;
     vector<Point2D> path;
-    if (sidescount==2) {
+//    if (sidescount==2) {
         svgfile << "<path style=\"fill:none;stroke:#000000;stroke-width:1px;z-index:1;\" d=\"M ";
-        // in each case we add a point at the origin to ease user edition of the line
-        // in this config only left/right or top/bottom would be useful as we
-        // pass through the origin, but we keep this older more generic code just in case
         if (useLeft) {
-            svgfile << 0 << "," << ysvgx0 << " L " << halfSvgSize<<","<<halfSvgSize<<" L ";
+            svgfile << 0 << "," << ysvgx0 << " L " << minspcxsvg<<","<<minspcysvg<<" L ";
             if (useTop) svgfile << xsvgy0 << "," << 0 << " ";
             if (useRight) svgfile << svgSize << "," << ysvgxmax << " ";
             if (useBottom) svgfile << xsvgymax << "," << svgSize << " ";
         }
         if (useTop) {
-            svgfile << xsvgy0 << "," << 0 << " L " << halfSvgSize<<","<<halfSvgSize<<" L ";
+            svgfile << xsvgy0 << "," << 0 << " L " << minspcxsvg<<","<<minspcysvg<<" L ";
             if (useRight) svgfile << svgSize << "," << ysvgxmax << " ";
             if (useBottom) svgfile << xsvgymax << "," << svgSize << " ";
         }
-/*        if (useBottom) {
-            svgfile << xsvgymax << "," << svgSize << " L " << halfSvgSize<<","<<halfSvgSize<<" L ";
-            if (useRight) svgfile << svgSize << "," << ysvgxmax << " ";
-            // else internal error
-        }
-*/
         svgfile << "\" />" << endl;
-    }
+//    }
     
     // Save the classifier parameters as an SVG comment so we can find them back later on
     // Use base64 encoded binary to preserve full precision

@@ -273,9 +273,12 @@ struct PointCloud {
     }
 
     // returns the index of the nearest point in the cloud from the point given in argument
+    // The center point may be excluded from the search or included
+    // The exclusion squared distance fixes the threshold at which points are considered the same
+    // set it to 0 to include the search point (default)
     // returns -1 iff the cloud is empty
     template<class SomePointType>
-    int findNearest(const SomePointType& center) {
+    int findNearest(const SomePointType& center, FloatType exclusionDistSq = 0) {
         int cx = floor((center.x - xmin) / cellside);
         int cy = floor((center.y - ymin) / cellside);
         // look for a non-empty cell in increasing distance. Once it is found, the nearest neighbor is necessarily within that radius
@@ -284,17 +287,45 @@ struct PointCloud {
             // loop only in the square at dcell distance from the center cell
             for (int cxi = cx-dcell; cxi <= cx + dcell; ++cxi) {
                 // top
-                if (cxi>=0 && cxi<ncellx && cy-dcell>=0 && cy-dcell<ncelly && grid[(cy-dcell) * ncellx + cxi]!=IndexType(-1)) {found_dcell = dcell; break;}
+                if (cxi>=0 && cxi<ncellx && cy-dcell>=0 && cy-dcell<ncelly && grid[(cy-dcell) * ncellx + cxi]!=IndexType(-1)) {
+                    bool otherThanCenter = false;
+                    for (IndexType pidx = grid[(cy-dcell) * ncellx + cxi]; pidx != IndexType(-1); pidx=links[pidx]) if (dist2(center,data[pidx])>=exclusionDistSq) {
+                        otherThanCenter = true;
+                        break;
+                    }
+                    if (otherThanCenter) {found_dcell = dcell; break;}
+                }
                 // bottom
-                if (cxi>=0 && cxi<ncellx && cy+dcell>=0 && cy+dcell<ncelly && grid[(cy+dcell) * ncellx + cxi]!=IndexType(-1)) {found_dcell = dcell; break;}
+                if (cxi>=0 && cxi<ncellx && cy+dcell>=0 && cy+dcell<ncelly && grid[(cy+dcell) * ncellx + cxi]!=IndexType(-1)) {
+                    bool otherThanCenter = false;
+                    for (IndexType pidx = grid[(cy+dcell) * ncellx + cxi]; pidx != IndexType(-1); pidx=links[pidx]) if (dist2(center,data[pidx])>=exclusionDistSq) {
+                        otherThanCenter = true;
+                        break;
+                    }
+                    if (otherThanCenter) {found_dcell = dcell; break;}
+                }
             }
             if (found_dcell!=-1) break;
             // left and right, omitting the corners
             for (int cyi = cy-dcell+1; cyi <= cy + dcell - 1; ++cyi) {
                 // left
-                if (cx-dcell>=0 && cx-dcell<ncellx && cyi>=0 && cyi<ncelly && grid[cyi * ncellx + cx - dcell]!=IndexType(-1)) {found_dcell = dcell; break;}
+                if (cx-dcell>=0 && cx-dcell<ncellx && cyi>=0 && cyi<ncelly && grid[cyi * ncellx + cx - dcell]!=IndexType(-1)) {
+                    bool otherThanCenter = false;
+                    for (IndexType pidx = grid[cyi * ncellx + cx - dcell]; pidx != IndexType(-1); pidx=links[pidx]) if (dist2(center,data[pidx])>=exclusionDistSq) {
+                        otherThanCenter = true;
+                        break;
+                    }
+                    if (otherThanCenter) {found_dcell = dcell; break;}
+                }
                 // right
-                if (cx+dcell>=0 && cx+dcell<ncellx && cyi>=0 && cyi<ncelly && grid[cyi * ncellx + cx + dcell]!=IndexType(-1)) {found_dcell = dcell; break;}
+                if (cx+dcell>=0 && cx+dcell<ncellx && cyi>=0 && cyi<ncelly && grid[cyi * ncellx + cx + dcell]!=IndexType(-1)) {
+                    bool otherThanCenter = false;
+                    for (IndexType pidx = grid[cyi * ncellx + cx + dcell]; pidx != IndexType(-1); pidx=links[pidx]) if (dist2(center,data[pidx])>=exclusionDistSq) {
+                        otherThanCenter = true;
+                        break;
+                    }
+                    if (otherThanCenter) {found_dcell = dcell; break;}
+                }
             }
             if (found_dcell!=-1) break;
         }
@@ -318,6 +349,7 @@ struct PointCloud {
         for (int cy = cy1; cy <= cy2; ++cy) for (int cx = cx1; cx <= cx2; ++cx) {
             for (IndexType p = grid[cy * ncellx + cx]; p!=IndexType(-1); p=links[p]) {
                 FloatType d2 = dist2(center,data[p]);
+                if (d2<exclusionDistSq) continue;
                 if (d2<=mind2) {
                     mind2 = d2;
                     idx = p;

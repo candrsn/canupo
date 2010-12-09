@@ -36,11 +36,14 @@ suggest_classifier:
 validate_classifier:
 	$(CXX) $(CXXFLAGS) validate_classifier.cpp -o validate_classifier
 
+combine_classifier:
+	$(CXX) $(CXXFLAGS) combine_classifier.cpp -o combine_classifier
+
 classify:
 	$(CXX) $(CXXFLAGS) classify.cpp -o classify
 
 clean:
 	rm -f canupo density annotate make_features classify suggest_classifier 
 
-.PHONY: canupo density annotate classify clean features_least_squares features_linear_svm features_gaussian_svm features_user_define suggest_classifier validate_classifier
+.PHONY: canupo density annotate classify clean features_least_squares features_linear_svm features_gaussian_svm features_user_define suggest_classifier validate_classifier combine_classifier
 

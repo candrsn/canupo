@@ -6,6 +6,7 @@
 #include <set>
 #include <map>
 #include <functional>
+#include <limits>
 
 #include "points.hpp"
 #include "svd.hpp"
@@ -27,6 +28,7 @@ canupo scales... : data.xyz data_core.xyz data_core.msc\n\
   inputs: scales         # list of scales at which to perform the analysis\n\
                          # The syntax minscale:increment:maxscale is also accepted\n\
                          # Use : to indicate the end of the list of scales\n\
+                         # A scale correspond to a diameter for neighbor research.\n\
   input: data.xyz        # whole raw point cloud to process\n\
   input: data_core.xyz   # points at which to do the computation. It is not necessary that these\n\
                          # points match entries in data.xyz: This means data_core.xyz need not be\n\
@@ -191,9 +193,10 @@ if (omp_get_thread_num()==0) {
         vector<Point> neighsums; // avoid recomputing cumulated sums at each scale
         
         vector<FloatType> abdata(nscales*2);
+//        vector<FloatType> avgndist(nscales);
+        vector<int> nneigh(nscales);
         int abdataidx = 0;
         
-        static const int min_neighbors = 10;
         // ab values implicitly reused from higher scale if there are not enough neighbors
         // TODO: nearest neighbors of ab at higher scales and get average of the neighbors ab at low scale
         FloatType a = 1.0/3.0, b = 1.0/3.0;
@@ -235,11 +238,11 @@ if (omp_get_thread_num()==0) {
             }
             
             // In any case we now have a vector of neighbors at the current scale
-            if (neighbors.size()>=min_neighbors) {
+            if (neighbors.size()>=3) {
                 FloatType svalues[3];
                 // use the pre-computed sums to get the average point
                 Point avg = neighsums.back() / neighsums.size();
-                // compute PCA on the neighbors at this radius
+                // compute PCA on the neighbors at this scale
                 // a copy is needed as LAPACK destroys the matrix, and the center changes anyway
                 // => cannot keep the points from one scale to the lower, need to rebuild the matrix
                 vector<FloatType> A(neighbors.size() * 3);
@@ -274,6 +277,27 @@ if (omp_get_thread_num()==0) {
             
             abdata[abdataidx++] = a;
             abdata[abdataidx++] = b;
+                        
+            nneigh[abdataidx/2-1] = neighbors.size();
+            
+            // compute average distance between nearest neighbors
+#if 0
+            FloatType avgnd = 0;
+            for (int i=0; i<neighbors.size(); ++i) {
+                // use min sq dist threshold to eliminate the same point
+                int nidx = cloud.findNearest(*neighbors[i].pt, 1e-12);
+                avgnd += dist(*neighbors[i].pt, cloud.data[nidx]);
+                /*FloatType dmin2 = numeric_limits<FloatType>::max();
+                for (int j=0; j<neighbors.size(); ++j) {
+                    if (j==i) continue;
+                    FloatType d2 = dist2(*neighbors[i].pt, *neighbors[j].pt);
+                    if (d2<dmin2) dmin2 = d2;
+                }
+                avgnd += sqrt(dmin2);*/
+            }
+            avgnd /= neighbors.size();
+            avgndist[abdataidx/2] = avgnd;            
+#endif
         }
         // need to write full blocks sequencially for each point
 #pragma omp critical
@@ -283,6 +307,8 @@ if (omp_get_thread_num()==0) {
             mscfile.write((char*)&corepoints[ptidx].z,sizeof(FloatType));
             if (!additionalInfo.empty()) mscfile.write((char*)&additionalInfo[ptidx],sizeof(FloatType));
             for (int i=0; i<abdata.size(); ++i) mscfile.write((char*)&abdata[i], sizeof(FloatType));
+            for (int i=0; i<nscales; ++i) mscfile.write((char*)&nneigh[i], sizeof(int));
+//            for (int i=0; i<nscales; ++i) mscfile.write((char*)&avgndist[i], sizeof(FloatType));
         }
     }
     cout << endl;
