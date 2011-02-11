@@ -10,6 +10,7 @@
 
 #include "points.hpp"
 #include "svd.hpp"
+//#include "leastSquares.hpp"
 
 #include <string.h>
 #include <stdlib.h>
@@ -24,11 +25,12 @@ using namespace boost;
 int help(const char* errmsg = 0) {
     if (errmsg) cout << "Error: " << errmsg << endl;
 cout << "\
-normals scales... : data.xyz data_core.xyz data_core_normals.xyz\n\
+normals scales... : refx refy data.xyz data_core.xyz data_core_normals.xyz\n\
   inputs: scales         # list of scales at which to perform the analysis\n\
                          # The syntax minscale:increment:maxscale is also accepted\n\
                          # Use : to indicate the end of the list of scales\n\
                          # A scale correspond to a diameter for neighbor research.\n\
+  input: refx refy       # A reference point for orienting horizontal normals toward it\n\
   input: data.xyz        # whole raw point cloud to process\n\
   input: data_core.xyz   # points at which to do the computation. It is not necessary that these\n\
                          # points match entries in data.xyz: This means data_core.xyz need not be\n\
@@ -58,6 +60,8 @@ int main(int argc, char** argv) {
         break;
     }
     if (!separator) return help();
+
+    Point normalrefpoint(25000, 18000, 0);
 
     // get all unique scales from large to small, for later processing of neighborhoods
     typedef set<FloatType, greater<FloatType> > ScaleSet;
@@ -101,11 +105,14 @@ int main(int argc, char** argv) {
     cout << endl;
 
     // whole data file, core points, msc file
-    if (separator+3>=argc) return help();
+    if (separator+5>=argc) return help();
     
-    string datafilename = argv[separator+1];
-    string corepointsfilename = argv[separator+2];
-    string normfilename = argv[separator+3];
+    normalrefpoint.x = atof(argv[separator+1]);
+    normalrefpoint.y = atof(argv[separator+2]);
+    
+    string datafilename = argv[separator+3];
+    string corepointsfilename = argv[separator+4];
+    string normfilename = argv[separator+5];
 
     cout << "Loading data files" << endl;
     
@@ -159,24 +166,24 @@ int main(int argc, char** argv) {
     }
     assert(additionalInfo.empty() || additionalInfo.size() == corepoints.size());
     
-    // HACK: maintain scene center to orient normals
+    // HACK: maintain scene center to orient normals - does not work
     core_center /= corepoints.size();
 
     ofstream normfile(normfilename.c_str());
     
     cout << "Processing \"" << datafilename << "\" using core points from \"" << corepointsfilename << "\"" << endl;
     cout << "Percent complete: 0" << flush;
+
+    vector<Point> normals(corepoints.size());
+    vector<FloatType> bestscales(corepoints.size());
+    vector<Point> avgcore(corepoints.size());
+    Point avgnormal;
+    int ncount = 0;
     
     // for each core point
     int nextpercentcomplete = 5;
-#pragma omp parallel for schedule(static)
     for (int ptidx = 0; ptidx < corepoints.size(); ++ptidx) {
-#ifdef _OPENMP
-if (omp_get_thread_num()==0) {
-        int percentcomplete = ((ptidx+1) * 100 * omp_get_num_threads()) / corepoints.size();
-#else
         int percentcomplete = ((ptidx+1) * 100) / corepoints.size();
-#endif
         if (percentcomplete>=nextpercentcomplete) {
             if (percentcomplete>=nextpercentcomplete) {
                 nextpercentcomplete+=5;
@@ -184,21 +191,16 @@ if (omp_get_thread_num()==0) {
                 else if (percentcomplete % 5 == 0) cout << "." << flush;
             }
         }
-#ifdef _OPENMP
-}
-#endif
 
         vector<DistPoint<Point> > neighbors;
         vector<Point> neighsums; // avoid recomputing cumulated sums at each scale
         
-        // maintain the normal at the scale for which the cloud is the most "2D"
+        // maintain the normal at the scale for which the projected cloud on the horizontal plane
+        // has a line fit with the least squared error
         Point best_scale_normal;
+        Point best_scale_avg;
         FloatType best_scale;
-        FloatType best_bidim_value = -1; // the parameter b
-        
-        // ab values implicitly reused from higher scale if there are not enough neighbors
-        // TODO: nearest neighbors of ab at higher scales and get average of the neighbors ab at low scale
-        FloatType a = 1.0/3.0, b = 1.0/3.0;
+        FloatType best_residue = numeric_limits<FloatType>::max();
         
         // Scales shall be sorted from max to lowest 
         for (ScaleSet::iterator scaleit = scales.begin(); scaleit != scales.end(); ++scaleit) {
@@ -236,81 +238,115 @@ if (omp_get_thread_num()==0) {
                 neighsums.resize(dichomed+1);
             }
             
-            Point normal;
             // In any case we now have a vector of neighbors at the current scale
+            Point normal;
+            FloatType fit = numeric_limits<FloatType>::max();
+            Point avg = corepoints[ptidx];
             if (neighbors.size()>=3) {
-                FloatType svalues[3];
-                // use the pre-computed sums to get the average point
-                Point avg = neighsums.back() / neighsums.size();
-                // compute PCA on the neighbors at this scale
+
+                FloatType svalues[2];
+                
+                // Project the points on the horizontal plane and compute
+                // the Total Least Square fit (i.e. line with least orthogonal residues)
+                // Solution is given by SVD, see: http://arxiv.org/pdf/math.RA/9805076/
                 // a copy is needed as LAPACK destroys the matrix, and the center changes anyway
                 // => cannot keep the points from one scale to the lower, need to rebuild the matrix
-                vector<FloatType> A(neighbors.size() * 3);
+                avg = neighsums.back() / neighsums.size();
+                vector<FloatType> A(neighbors.size() * 2);
                 for (int i=0; i<neighbors.size(); ++i) {
                     // A is column-major
                     A[i] = neighbors[i].pt->x - avg.x;
                     A[i+neighbors.size()] = neighbors[i].pt->y - avg.y;
-                    A[i+neighbors.size()+neighbors.size()] = neighbors[i].pt->z - avg.z;
                 }
-                // column-major matrix of the 3 eigenvectors
-                vector<FloatType> eigenvectors(9);
+
+                // column-major matrix of the 2 eigenvectors returned as rows...
+                vector<FloatType> eigenvectors(4);
                 // SVD decomposition handled by LAPACK
-                svd(neighbors.size(), 3, &A[0], &svalues[0], false, &eigenvectors[0]);
-                // convert to percent variance explained by each dim
-                FloatType totalvar = 0;
-                for (int i=0; i<3; ++i) {
-                    // singular values are squared roots of eigenvalues
-                    svalues[i] = svalues[i] * svalues[i]; // / (neighbors.size() - 1);
-                    totalvar += svalues[i];
-                }
-                for (int i=0; i<3; ++i) svalues[i] /= totalvar;
-                // Use barycentric coordinates : a for 1D, b for 2D and c for 3D
-                // Formula on wikipedia page for barycentric coordinates
-                // using directly the triangle in %variance space, they simplify a lot
-                //FloatType c = 1 - a - b; // they sum to 1
-                a = svalues[0] - svalues[1];
-                b = 2 * svalues[0] + 4 * svalues[1] - 2;
+                svd(neighbors.size(), 2, &A[0], &svalues[0], false, &eigenvectors[0]);
                 
-                // normals are computed as cross-product of the 2 first eigenvectors
-                // column-major, but vectors are stored in rows...
-                // shall be the same as e3, except if e3 is very badly conditionned = perfectly 2D !
-                // => we want the normal vector even in the perfect case!
-                Point e1(eigenvectors[0],eigenvectors[3],eigenvectors[6]);
-                Point e2(eigenvectors[1],eigenvectors[4],eigenvectors[7]);
-                Point e3(eigenvectors[2],eigenvectors[5],eigenvectors[8]);
-                Point n = e2.cross(e1);
-//cout << "a=" << a << ", b=" << b << ", e1 × e2 = " << n << ", e3 = " << e3 << endl;
-// Orient on the vertical is a bad idea
-//                // orient n toward the vertical so n.(0,0,1)>0...
-//                if (n.z<0) n = n * (-1.0);
+                // total least squares solution is given by the singular vector with
+                // minimal singular value
+                int mins = 0; if (svalues[1]<svalues[0]) mins = 1;
+                // line given by
+                // a.(x-xavg) + b.(y-yavg) = 0
+                // normal to that line is given by (-b,a,0) or (b,-a,0) in 3D
+                normal = Point(eigenvectors[mins], eigenvectors[2+mins], 0);
 
-// HACK: orient toward the scene center
-                if (n.dot(core_center-corepoints[ptidx])<0) n = (-1.0) * n;
+//cout << normal[0] << ", " << normal[1] << " -- " << svalues[mins] << ", " << svalues[1 - mins] << endl;
 
-                normal = n;
+                // HACK: orient it so that dot toward scene center is >0
+                // if (normal.dot(core_center-corepoints[ptidx]) < 0) normal *= -1;
+                // Does not work
+                // Orient it so that at +scale in that direction there is max distance to the nearest neighbors
+                // normal /= normal.norm();  eigenvectors are already unit length
+                Point pt1 = corepoints[ptidx] + normal * *scaleit *2;
+                Point pt2 = corepoints[ptidx] - normal * *scaleit *2;
+                FloatType avg_dir1 = numeric_limits<FloatType>::max();
+                FloatType avg_dir2 = numeric_limits<FloatType>::max();
+                for (int i=0; i<neighbors.size(); ++i) {
+                    FloatType d1 = (pt1 - neighbors[i].pt).norm();
+                    if (d1 < avg_dir1) d1 = avg_dir1;
+                    FloatType d2 = (pt2 - neighbors[i].pt).norm();
+                    if (d2 < avg_dir2) d2 = avg_dir2;
+                }
+                if (avg_dir2 > avg_dir1) normal *= -1;
+                
+/*                // orient it so that density along the line from cloud center point in that direction is highest
+                // Does not work either
+                FloatType densitypos = 0;
+                FloatType densityneg = 0;
+                for (int i=0; i<neighbors.size(); ++i) {
+                    FloatType dotprod = normal.dot(neighbors[i].pt - avg);
+                    if (dotprod<0) densityneg += -dotprod;
+                    else densitypos += dotprod;
+                }
+                if (densityneg>densitypos) normal *= -1;
+*/
+                
+                // compute the fit quality
+                fit = 0;
+                for (int i=0; i<neighbors.size(); ++i) {
+                    FloatType x = neighbors[i].pt->x - avg.x;
+                    FloatType y = neighbors[i].pt->y - avg.y;
+                    FloatType r = normal[1] * x - normal[0] * y;
+                    fit += r*r;
+                }
             }
-
-            // negative values shall not happen, but there may be rounding errors and -1e25 is still <0
-            if (b<0) b=0; if (b>1) b=1;
             // new best scale found
-            if (b>best_bidim_value) {
-                best_bidim_value = b;
+            if (fit<best_residue) {
+                best_residue = fit;
                 best_scale = *scaleit;
                 best_scale_normal = normal;
+                best_scale_avg = avg;
             }
+            
         }
-
-        // need to write full blocks sequencially for each point
-#pragma omp critical
-        {
-        // select the most 2D scale
-        best_scale_normal /= best_scale_normal.norm();
-        normfile << corepoints[ptidx].x << " " << corepoints[ptidx].y << " " << corepoints[ptidx].z << " " << best_scale_normal.x << " " << best_scale_normal.y << " " << best_scale_normal.z << " " << best_scale << endl;
-        }
+        bestscales[ptidx] = best_scale;
+        normals[ptidx] = best_scale_normal;
+        avgnormal += best_scale_normal;
+        avgcore[ptidx] = best_scale_avg;
+        if (best_scale_normal.norm2()>0) ++ncount;
     }
     cout << endl;
-    
-    
+
+    avgnormal /= ncount;
+
+    for (int ptidx = 0; ptidx < corepoints.size(); ++ptidx) {
+         Point& normal = normals[ptidx];
+         
+        // orientation HACK: does not work :(
+        // if (normal.dot(avgnormal)<0) normal *= -1;
+        
+        // Orientation HACK toward given fixed point : OK with correct point !
+        if (normal.dot(normalrefpoint)<0) normal *= -1;
+        
+        // Using average core points do NOT work, too jaggy
+        // normfile << avgcore[ptidx].x << " " << avgcore[ptidx].y << " " << avgcore[ptidx].z << " " << normal.x << " " << normal.y << " " << normal.z << " " << bestscales[ptidx] << endl;
+        
+        // try projecting the average onto the core+normal
+        Point shiftedcore = normal.dot(avgcore[ptidx] - corepoints[ptidx]) * normal + corepoints[ptidx];
+        normfile << shiftedcore.x << " " << shiftedcore.y << " " << shiftedcore.z << " " << normal.x << " " << normal.y << " " << normal.z << " " << bestscales[ptidx] << endl;
+    }
     
     normfile.close();
     

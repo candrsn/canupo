@@ -35,10 +35,8 @@ struct PointTemplate : public Base, boost::addable<PointTemplate<Base>, boost::s
     
     FloatType x,y,z;
 
-    // convenient but slow : avoid it !
     inline FloatType& operator[](int idx) {
-        assert(idx>=0 && idx<3);
-        return idx==0?x:(idx==1?y:z);
+        return reinterpret_cast<FloatType*>(this)[idx];
     }
     PointTemplate() : x(0),y(0),z(0) {}
     PointTemplate(FloatType _x, FloatType _y, FloatType _z) : x(_x),y(_y),z(_z) {}
@@ -50,8 +48,8 @@ struct PointTemplate : public Base, boost::addable<PointTemplate<Base>, boost::s
     inline PointTemplate& operator*=(const FloatType& f) {x*=f; y*=f; z*=f; return *this;}
     inline PointTemplate& operator/=(const FloatType& f) {x/=f; y/=f; z/=f; return *this;}
     
-    inline FloatType norm2() {return x*x + y*y + z*z;}
-    inline FloatType norm() {return sqrt(norm2());}
+    inline FloatType norm2() const {return x*x + y*y + z*z;}
+    inline FloatType norm() const {return sqrt(norm2());}
     inline FloatType dot(const PointTemplate& v) const {return x*v.x + y*v.y + z*v.z;}
     inline PointTemplate cross(const PointTemplate& v) const {return PointTemplate(y*v.z-z*v.y, z*v.x-x*v.z, x*v.y-y*v.x);}
 
