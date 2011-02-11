@@ -50,7 +50,10 @@ struct PointTemplate : public Base, boost::addable<PointTemplate<Base>, boost::s
     inline PointTemplate& operator*=(const FloatType& f) {x*=f; y*=f; z*=f; return *this;}
     inline PointTemplate& operator/=(const FloatType& f) {x/=f; y/=f; z/=f; return *this;}
     
-    inline FloatType dot(const PointTemplate& v) {return x*v.x + y*v.y + z*v.z;}
+    inline FloatType norm2() {return x*x + y*y + z*z;}
+    inline FloatType norm() {return sqrt(norm2());}
+    inline FloatType dot(const PointTemplate& v) const {return x*v.x + y*v.y + z*v.z;}
+    inline PointTemplate cross(const PointTemplate& v) const {return PointTemplate(y*v.z-z*v.y, z*v.x-x*v.z, x*v.y-y*v.x);}
 
     enum {dim = 3};
 };
@@ -81,6 +84,17 @@ struct Point2DTemplate : public Base, boost::addable<Point2DTemplate<Base>, boos
 
     enum {dim = 2};
 };
+
+template<class Base>
+std::ostream& operator<<(std::ostream &out, const PointTemplate<Base> &p){
+    out << "(" << p.x << ", " << p.y << ", " << p.z << ")";
+    return out;
+}
+template<class Base>
+std::ostream& operator<<(std::ostream &out, const Point2DTemplate<Base> &p){
+    out << "(" << p.x << ", " << p.y << ")";
+    return out;
+}
 
 struct EmptyStruct {};
 typedef PointTemplate<EmptyStruct> Point;

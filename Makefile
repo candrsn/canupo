@@ -7,7 +7,13 @@ LAPACK=-llapack
 all: canupo density annotate
 
 canupo:
-	$(CXX) $(CXXFLAGS) -Iboost-numeric-bindings canupo.cpp $(LAPACK) -o canupo
+	$(CXX) $(CXXFLAGS) canupo.cpp $(LAPACK) -o canupo
+
+normals:
+	$(CXX) $(CXXFLAGS) normals.cpp $(LAPACK) -o normals
+
+display_normals:
+	$(CXX) $(CXXFLAGS) display_normals.cpp -losg -losgViewer -losgGA -o display_normals
 
 density:
 	$(CXX) $(CXXFLAGS) density.cpp -o density
@@ -45,5 +51,5 @@ classify:
 clean:
 	rm -f canupo density annotate make_features classify suggest_classifier 
 
-.PHONY: canupo density annotate classify clean features_least_squares features_linear_svm features_gaussian_svm features_user_define suggest_classifier validate_classifier combine_classifier
+.PHONY: canupo density annotate classify clean features_least_squares features_linear_svm features_gaussian_svm features_user_define suggest_classifier validate_classifier combine_classifier normals display_normals
 

@@ -10,6 +10,13 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
+
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/fcntl.h>
+#include <sys/unistd.h>
+#include <sys/mman.h>
 
 #include "points.hpp"
 #include "predictors.hpp"
@@ -51,9 +58,9 @@ string hueToRGBstring(FloatType hue) {
     return ret;
 }
 
-string scaleColorMap(const vector<int>& density, const vector<FloatType>& lmind, const vector<FloatType>& lmaxd) {
+string scaleColorMap(const int* density, const vector<FloatType>& lmind, const vector<FloatType>& lmaxd, bool hasUnlabelled) {
     // log transform. min>=0 by construction, so add 1 to take log
-    if (density.size()==1) {
+    if (lmind.size()==1) {
         // single class : from blue to red
         FloatType d = (log(density[0]+1) - lmind[0]) / (lmaxd[0] - lmind[0]);
         // low value = blue(hue=4/6), high = red(hue=0)
@@ -64,15 +71,16 @@ string scaleColorMap(const vector<int>& density, const vector<FloatType>& lmind,
     // pb: null density would be black: better if it is white for graphs in papers
     //     => interpolate in complement space, then take complement again
     static const FloatType classColors[] = {
+        0.5f, 0.5f, 0.5f, // unlabeled data
         1,1,0,  // class 0 = blue complement
         0,1,1,  // class 1 = red complement
         1,0,1,  // class 2 = green complement
         0,1,0,  // class 3 = magenta complement
         0,0,1,  // class 4 = yellow complement
-        1,0,0   // class 5 = cyan complement
+        1,0,0  // class 5 = cyan complement
     };
-    int nclasses = density.size();
-    if (nclasses>6) {
+    int nclasses = lmind.size();
+    if (nclasses>6+(int)hasUnlabelled) {
         cerr << "Sorry, displaying more than 6 classes is not supported for now" << endl;
         exit(1);
     }
@@ -80,20 +88,19 @@ string scaleColorMap(const vector<int>& density, const vector<FloatType>& lmind,
     // convert the densities to log space and between 0 and 1 for each class first
     for (int i=0; i<nclasses; ++i) {
         FloatType coef = (log(density[i]+1) - lmind[i]) / (lmaxd[i] - lmind[i]);
-        for (int j=0; j<3; ++j) color[j] += coef * classColors[i*3+j];
+        for (int j=0; j<3; ++j) color[j] += coef * classColors[i*3+j + (1-hasUnlabelled)];
     }
     // bound check and take complement
-    for (int j=0; j<3; ++j) color[j] = 1 - min(1.0, max(color[j], 0.0));
+    for (int j=0; j<3; ++j) color[j] = 1 - min(1.0, max((double)color[j], 0.0));
     char ret[8];
     snprintf(ret,8,"#%02X%02X%02X",(int)(color[0]*255.99),(int)(color[1]*255.99),(int)(color[2]*255.99));
     return ret;
 }
 
-
 int help(const char* errmsg = 0) {
     if (errmsg) cout << "Error: " << errmsg << endl;
 cout << "\
-density nsubdiv nametag [some scales] : [features.prm : ] data.msc [ - data2.msc ...]\n\
+density nsubdiv nametag [some scales] [: unlabeled.msc] : data.msc [ - data2.msc ...]\n\
   input: nsubdiv               # Number of subdivisions on each side of the triangle\n\
   input: nametag               # The base name for the output files. One density plot is\n\
                                # generated per selected scale, named \"nametag_scale.svg\"\n\
@@ -103,8 +110,7 @@ density nsubdiv nametag [some scales] : [features.prm : ] data.msc [ - data2.msc
                                # Use - to separate classes. Multiple files per class are allowed.\n\
                                # If no classes are specified (ex: whole scene file) the density is color-coded from blue to red.\n\
                                # If multiple classes are specified the density is coded from light to bright colors with one color per class.\n\
-  input: features.prm          # An optional classifier definition file. If it is specified the decision\n\
-                               # boundaries at each scale will be displayed in the generated graphs.\n\
+  input: unlabeled.msc         # like the other data, but will be displayed in grey.\n\
 "<<endl;
         return 0;
 }
@@ -115,6 +121,92 @@ bool fpeq(FloatType a, FloatType b) {
     FloatType ratio = a/b;
     return ratio>1-epsilon && ratio<1+epsilon;
 }
+
+#ifdef NO_MMAP
+struct InputFile {
+    ifstream realfile;
+    InputFile(const char* name) {
+        realfile.open(name, ifstream::binary);
+    }
+    ~InputFile() {realfile.close();}
+    template<typename T> void read(T& value) {
+        realfile.read((char*)&value, sizeof(T));
+    }
+};
+#else
+struct InputFile {
+    int fd;
+    char* memzone;
+    off_t zone_size;
+    off_t offset;
+    InputFile(const char* name) {
+        fd = open(name, O_RDONLY);
+        struct stat file_stats;
+        fstat(fd, &file_stats);
+        zone_size = file_stats.st_size;
+        memzone = (char*)mmap(0,zone_size,PROT_READ,MAP_SHARED,fd,0);
+        if (memzone==(char*)(-1)) {
+            close(fd);
+            perror("Error with mmap");
+            exit(1);
+        }
+        offset = 0;
+    }
+    ~InputFile() {
+        munmap(memzone, zone_size); close(fd);
+    }
+    template<typename T> void read(T& value) {
+        value = *reinterpret_cast<T*>(&memzone[offset]);
+        offset += sizeof(T);
+    }
+};
+#endif
+
+
+// if vector is empty, fill it
+// otherwise check the vectors match
+int read_msc_header(InputFile& mscfile, vector<FloatType>& scales, int& ptnparams) {
+    int npts;
+    mscfile.read(npts);
+    if (npts<=0) help("invalid file");
+    
+    int nscales_thisfile;
+    mscfile.read(nscales_thisfile);
+    vector<FloatType> scales_thisfile(nscales_thisfile);
+    for (int si=0; si<nscales_thisfile; ++si) mscfile.read(scales_thisfile[si]);
+    if (nscales_thisfile<=0) help("invalid file");
+    
+    // all files must be consistant
+    if (scales.size() == 0) {
+        scales = scales_thisfile;
+    } else {
+        if (scales.size() != nscales_thisfile) {cerr<<"input file mismatch: "<<endl; return 1;}
+        for (int si=0; si<scales.size(); ++si) if (!fpeq(scales[si],scales_thisfile[si])) {cerr<<"input file mismatch: "<<endl; return 1;}
+    }
+    
+    mscfile.read(ptnparams);
+
+    return npts;
+}
+
+void read_msc_data(InputFile& mscfile, int nscales, int npts, FloatType* data, int ptnparams) {
+    for (int pt=0; pt<npts; ++pt) {
+        FloatType param;
+        // we do not care for the point coordinates and other parameters
+        for (int i=0; i<ptnparams; ++i) {
+            mscfile.read(param);
+        }
+        for (int s=0; s<nscales; ++s) {
+            mscfile.read(data[s*2]);
+            mscfile.read(data[s*2+1]);
+        }
+        // we do not care for number of neighbors and average dist between nearest neighbors
+        int fooi;
+        for (int i=0; i<nscales; ++i) mscfile.read(fooi);
+        data += nscales*2;
+    }
+}
+
 
 int main(int argc, char** argv) {
 
@@ -166,152 +258,71 @@ int main(int argc, char** argv) {
         }
     }
     
-    if (scalesSet.empty()) return help();
+    //if (scalesSet.empty()) return help();
     vector<FloatType> scales(scalesSet.begin(), scalesSet.end());
-    int nscales = scales.size();
-
-    cout << "Selected scales:";
-    for (int i=0; i<nscales; ++i) cout << " " << scales[i];
-    cout << endl;
-
-    // Is there another separator and a feature file in between ?
-    int separator2 = 0;
+    if (scalesSet.empty()) cout << "Selecting all scales in the multiscale files" << endl;
+    else {
+        cout << "Selected scales:";
+        for (int i=0; i<(int)scales.size(); ++i) cout << " " << scales[i];
+        cout << endl;
+    }
+    
+    // Is there another separator and an unlabelled file in between ?
+    bool hasUnlabelled = false;
     for (int i=separator+1; i<argc; ++i) if (!strcmp(":",argv[i])) {
-        separator2 = i;
+        hasUnlabelled = true; // and this is actually the first class
         break;
     }
-    string classifierfilename;
-    if (separator2) {
-        if (separator2 - separator != 2) return help();
-        classifierfilename = argv[separator+1];
-        separator = separator2;        
-    }
-
+    
     // now process the multiscale files and possibly multiple classes
     int nclasses = 1;
     vector<int> classboundaries(1,0);
     int total_pts = 0;
+    int ptnparams;
 
+    cout << "reading file headers" << endl;
+    
     // read headers and ensures all files are consistent
     for (int argi = separator+1; argi<argc; ++argi) {
-        if (!strcmp("-",argv[argi])) {
+        if (!strcmp("-",argv[argi]) || !strcmp(":",argv[argi])) {
             ++nclasses;
             classboundaries.push_back(total_pts);
             continue;
         }
-        ifstream mscfile(argv[argi], ifstream::binary);
+        
+        InputFile mscfile(argv[argi]);
         // read the file header
-        int npts;
-        mscfile.read((char*)&npts,sizeof(npts));
-        if (npts<=0) help("invalid file");
-        
-        int nscales_thisfile;
-        mscfile.read((char*)&nscales_thisfile, sizeof(nscales_thisfile));
-        vector<FloatType> scales_thisfile(nscales_thisfile);
-        for (int si=0; si<nscales_thisfile; ++si) mscfile.read((char*)&scales_thisfile[si], sizeof(FloatType));
-        if (nscales_thisfile<=0) help("invalid file");
-        
-        // all files must be contain at least the selected scales
-        for (int si=0; si<nscales; ++si) {
-            bool scalefound = false;
-            for (int sitf=0; sitf<nscales_thisfile; ++sitf) if (fpeq(scales[si],scales_thisfile[sitf])) {
-                scalefound = true;
-                break;
-            }
-            if (!scalefound) {
-                cerr<<"input file mismatch: "<<argv[argi]<< " does not contain the selected scale " << scales[si] << endl; 
-                return 1;
-            }
-        }
-        mscfile.close();
+        int npts = read_msc_header(mscfile, scales, ptnparams);
         total_pts += npts;
     }
     classboundaries.push_back(total_pts);
     
+    int nscales = scales.size();
+    
     // number of features
     int fdim = nscales * 2;
-
-    // if a classifier was specified, load it and ensure it is consistent
-    int nclassifiers = 0;
-    vector<vector<FloatType> > classifierscales;
-    vector<shared_ptr<Predictor> > predictors;
     
-    if (!classifierfilename.empty()) {
-        ifstream classifparamsfile(classifierfilename.c_str(), ifstream::binary);
-        int nuniqueScales;
-        classifparamsfile.read((char*)&nuniqueScales, sizeof(nuniqueScales));
-        vector<FloatType> uniquescales(nuniqueScales);
-        for (int s=0; s<nuniqueScales; ++s) classifparamsfile.read((char*)&uniquescales[s], sizeof(FloatType));
-        int nclasses_classifier_file;
-        classifparamsfile.read((char*)&nclasses_classifier_file, sizeof(nclasses));
-        if (nclasses_classifier_file != nclasses) {
-            cerr << "The classifier file was designed to handle " << nclasses_classifier_file << " classes, but " << nclasses << " classes were provided." << endl;
-            return 1;
-        }
-        nclassifiers = nclasses * (nclasses-1) / 2;
-        int classifierID;
-        classifparamsfile.read((char*)&classifierID, sizeof(classifierID));        
-        classifierscales.resize(nclassifiers);
-        predictors.resize(nclassifiers);
-        for (int i=0; i<nclassifiers; ++i) {
-            int numscales;
-            classifparamsfile.read((char*)&numscales, sizeof(numscales));
-            classifierscales[i].resize(numscales);
-            for (int j=0; j<numscales; ++j) classifparamsfile.read((char*)&classifierscales[i][j], sizeof(FloatType));
-            predictors[i] = getPredictorFromClassifierID(classifierID);
-            predictors[i]->load(classifparamsfile);
-        }
-    }
+    cout << "reading data in memory" << endl;
     
     // Second pass: store all selected scale data in memory
     vector<FloatType> data(total_pts * fdim);
     int base_pt = 0;
     // and then fill data from the files
     for (int argi = separator+1; argi<argc; ++argi) {
-        if (!strcmp("-",argv[argi])) continue;
-        ifstream mscfile(argv[argi], ifstream::binary);
-        // read the file header (again)
-        int npts;
-        mscfile.read((char*)&npts,sizeof(npts));
-        int nscales_thisfile;
-        mscfile.read((char*)&nscales_thisfile, sizeof(nscales_thisfile));
-        vector<FloatType> scales_thisfile(nscales_thisfile);
-        for (int si=0; si<nscales_thisfile; ++si) mscfile.read((char*)&scales_thisfile[si], sizeof(FloatType));
-        
-        // now fill in the big data storage with the points
-        for (int pt=0; pt<npts; ++pt) {
-            FloatType coord; // we do not care for the point coordinates
-            mscfile.read((char*)&coord, sizeof(coord));
-            mscfile.read((char*)&coord, sizeof(coord));
-            mscfile.read((char*)&coord, sizeof(coord));
-            // must read all scales contained in the file
-            vector<FloatType> mscdata(nscales_thisfile*2);
-            for (int s=0; s<nscales_thisfile; ++s) {
-                FloatType a,b;
-                mscfile.read((char*)(&a), sizeof(FloatType));
-                mscfile.read((char*)(&b), sizeof(FloatType));
-                mscdata[s*2] = a;
-                mscdata[s*2+1] = b;
-            }
-            // now retain only selected scales
-            for (int si=0; si<nscales; ++si) {
-                int scalefound = -1;
-                for (int sitf=0; sitf<nscales_thisfile; ++sitf) if (fpeq(scales[si],scales_thisfile[sitf])) {
-                    scalefound = sitf;
-                    break;
-                }
-                //assert(scalefound!=-1);
-                data[(base_pt+pt)*fdim + si*2] = mscdata[scalefound*2];
-                data[(base_pt+pt)*fdim + si*2+1] = mscdata[scalefound*2+1];
-            }
-        }
-        mscfile.close();
+        if (!strcmp("-",argv[argi]) || !strcmp(":",argv[argi])) continue;
+        InputFile mscfile(argv[argi]);
+        // read the file header again
+        int npts = read_msc_header(mscfile, scales, ptnparams);
+        // read data
+        read_msc_data(mscfile,nscales,npts,&data[base_pt * fdim], ptnparams);
         base_pt += npts;
     }
     
-
     // one density entry per selected scale per class - init all counts to 0
-    vector<vector<vector<int> > > density(nscales, vector<vector<int> >(nsubdiv*(nsubdiv+1), vector<int>(nclasses,0) ));
+    int ncells = nsubdiv*(nsubdiv+1);
+    vector<int> density(nscales * ncells * nclasses, 0);
+    
+    cout << "building the density map" << endl;
     
     for (int ci = 0; ci<nclasses; ++ci) for (int pt=classboundaries[ci]; pt<classboundaries[ci+1]; ++pt) {
         FloatType* mscdata = &data[pt*fdim];
@@ -330,20 +341,22 @@ int main(int argc, char** argv) {
             if (celly>=nsubdiv) {celly=nsubdiv-1; lower = 1;} // upper triangle cell = lower one
             if (celly<0) {celly=0; lower = 1;}
             if (celly>cellx) {celly=cellx; lower = 1;}
-            ++density[si][((cellx * (cellx+1) / 2) + celly) * 2 + lower][ci];
+            int cellidx = ((cellx * (cellx+1) / 2) + celly) * 2 + lower;
+            ++density[si * (ncells * nclasses) + cellidx * nclasses + ci];
         }
         
     }
-
     
+    cout << "outputting result files" << endl;
     for (int si=0; si<nscales; ++si) {
         vector<int> minDensity(nclasses, numeric_limits<int>::max());
         vector<int> maxDensity(nclasses, 0);
     
-        for (vector<vector<int> >::iterator it = density[si].begin(); it != density[si].end(); ++it) {
+        for (int cellidx = 0; cellidx < ncells; ++cellidx) {
             for (int ci = 0; ci < nclasses; ++ci) {
-                minDensity[ci] = min(minDensity[ci], (*it)[ci]);
-                maxDensity[ci] = max(maxDensity[ci], (*it)[ci]);
+                int d = density[si * (ncells * nclasses) + cellidx * nclasses + ci];
+                minDensity[ci] = min(minDensity[ci], d);
+                maxDensity[ci] = max(maxDensity[ci], d);
             }
         }
         
@@ -372,7 +385,8 @@ int main(int argc, char** argv) {
             densityfile << " " << (x - 0.5*y)*scaleFactor << "," << top-(0.866025403784439 * y)*scaleFactor;
             densityfile << " " << (x+1 - 0.5*y)*scaleFactor << "," << top-(0.866025403784439 * y)*scaleFactor;
             densityfile << " " << (x+1 - 0.5*(y+1))*scaleFactor << "," << top-(0.866025403784439 * (y+1))*scaleFactor;
-            string color = scaleColorMap(density[si][(x*(x+1)/2+ y)*2],logMinDensity,logMaxDensity);
+            int cellidx = (x*(x+1)/2+ y)*2;
+            string color = scaleColorMap(&density[si * (ncells * nclasses) + cellidx * nclasses],logMinDensity,logMaxDensity,hasUnlabelled);
             densityfile << "\" style=\"fill:" << color << "; stroke:none;\"/>" << endl;
             if (y<x) { // upper cell
                 densityfile << "<polygon points=\"";
@@ -380,128 +394,12 @@ int main(int argc, char** argv) {
                 densityfile << " " << (x+1 - 0.5*(y+1))*scaleFactor << "," << top-(0.866025403784439 * (y+1))*scaleFactor;
                 densityfile << " " << (x - 0.5*(y+1)
                 )*scaleFactor << "," << top-(0.866025403784439 * (y+1))*scaleFactor;
-                color = scaleColorMap(density[si][(x*(x+1)/2+ y)*2+1],logMinDensity,logMaxDensity);
+                int cellidx = (x*(x+1)/2+ y)*2+1;
+                color = scaleColorMap(&density[si * (ncells * nclasses) + cellidx * nclasses],logMinDensity,logMaxDensity,hasUnlabelled);
                 densityfile << "\" style=\"fill:" << color << "; stroke:none;\"/>" << endl;
             }
         }
         densityfile << "<polygon points=\" 0,"<<top<<" "<<scaleFactor*nsubdiv*0.5<<",0 " << scaleFactor*nsubdiv<<","<<top<<" \" style=\"fill:none;stroke:#000000;stroke-width:1px;\"/>" << endl;
-        
-        // plot classifiers decision boundaries, if any
-        if (nclassifiers!=0) for (int class2=1; class2<nclasses; ++class2) for (int class1=0; class1<class2; ++class1) {
-            int cli = class2*(class2-1)/2 + class1;
-            int cliscaleidx = -1;
-            for (int i=0; i<classifierscales[cli].size(); ++i) if (fpeq(scales[si],classifierscales[cli][i])) cliscaleidx = i;
-            if (cliscaleidx==-1) continue; // scale not used for this classifier
-            const FloatType sf = scaleFactor*nsubdiv;
-            LinearPredictor* lp = dynamic_cast<LinearPredictor*>(predictors[cli].get());
-            if (lp) {
-                FloatType bias = lp->weights[lp->dim];
-                FloatType xw = lp->weights[cliscaleidx*2];
-                FloatType yw = lp->weights[cliscaleidx*2+1];
-                // Compute first the intersections in xy space, then scale and reverse top/down
-                // Intersection with triangle bottom line (1D-2D axis)
-                FloatType x12 = numeric_limits<FloatType>::max();
-                FloatType y12 = 0;
-                if (xw!=0) x12 = -bias / xw;
-                bool use12 = x12>=0 && x12<=1;
-                FloatType x13 = numeric_limits<FloatType>::max();
-                FloatType y13 = numeric_limits<FloatType>::max();
-                FloatType tmp = xw + sqrt3 * yw;
-                if (tmp!=0) {
-                    x13 = -bias / tmp;
-                    y13 = sqrt3 * x13;
-                }
-                bool use13 = x13>=0 && x13<=0.5 && y13>=0 && y13<=sqrt3*0.5;
-                FloatType x23 = numeric_limits<FloatType>::max();
-                FloatType y23 = numeric_limits<FloatType>::max();
-                tmp = sqrt3 * yw - xw;
-                if (tmp!=0) {
-                    x23 = (bias + sqrt3 * yw) / tmp;
-                    y23 = sqrt3 - sqrt3 * x23;
-                }
-                bool use23 = x23>=0.5 && x23<=1 && y23>=0 && y23<=sqrt3*0.5;
-                // the coordinates of the line we'll retain
-                FloatType xl1, yl1, xl2, yl2;
-                if (use12 && use23) {xl1 = x12; yl1 = y12; xl2 = x23; yl2 = y23; cout << "12-23" << endl;}
-                else if (use13 && use23) {xl1 = x13; yl1 = y13; xl2 = x23; yl2 = y23; cout << "13-23" << endl;}
-                else if (use12 && use13) {xl1 = x12; yl1 = y12; xl2 = x13; yl2 = y13; cout << "12-13" << endl;}
-                else {
-                    cout << "hyperplane not intersecting scale " << scales[si] << " relevant discriminant area" << endl;
-                    continue;
-                }
-                // TODO: color per classifier
-                densityfile << "<path style=\"fill:none;stroke:#000000;stroke-width:1px;\" ";
-                densityfile << "d=\"M " << sf*xl1 << "," << top - sf*yl1;
-                densityfile << " L " << sf*xl2 << "," << top - sf*yl2;
-                densityfile << "\" id=\"classif-" << (class1+1) << "-" << (class2+1) << "\" />";
-                continue;
-            }
-            // TODO: user-defined, piecewise-linear, classifiers
-            
-            // generic classifier type (including gaussian)
-            // interpolate between cells
-            // choose a better resolution than the cells
-            int segres = nsubdiv * 4; // 16 times more elements in 2D
-            vector<FloatType> mscdata(classifierscales[cli].size()*2, 0);
-            bool scaleUsed = false;
-            for (int segi = 1; segi <= segres; ++segi) {
-                vector<FloatType> preds(segi+1);
-                vector<FloatType> x(segi+1);
-                vector<FloatType> y(segi+1);
-                for (int segj = 0; segj <= segi; ++segj) {
-                    // horizontal, start from (1/2, sqrt3/2) down to (0,0)
-                    mscdata[cliscaleidx*2] = x[segj] = 0.5 - 0.5 * segi / (FloatType) segres + segj / (FloatType) segres;
-                    mscdata[cliscaleidx*2+1] = y[segj] = 0.5 * sqrt3 - 0.5 * sqrt3 * segi / (FloatType) segres;
-                    preds[segj] = predictors[cli]->predict(&mscdata[0]);
-                }
-                for (int segj = 0; segj < segi; ++segj) {
-                    // changing sign indicates this segment crosses the decision boundary
-                    if (preds[segj] * preds[segj+1] < 0) {
-                        scaleUsed = true;
-                        densityfile << "<path style=\"fill:none;stroke:#000000;stroke-width:1px;\" ";
-                        densityfile << "d=\"M " << sf*x[segj] << "," << top - sf*y[segj];
-                        densityfile << " L " << sf*x[segj+1] << "," << top - sf*y[segj+1];
-                        densityfile << "\" id=\"classif-" << (class1+1) << "-" << (class2+1) << "-h" << segi<<"-"<<segj<<"\" />";
-                    }
-                }
-                for (int segj = 0; segj <= segi; ++segj) {
-                    // slanted right, start from (1,0) to (0,0) then up-right-wards
-                    mscdata[cliscaleidx*2] = x[segj] = 1 - segi / (FloatType) segres + segj * 0.5 / (FloatType) segres;
-                    mscdata[cliscaleidx*2+1] = y[segj] = 0.5 * sqrt3 * segj / (FloatType) segres;
-                    preds[segj] = predictors[cli]->predict(&mscdata[0]);
-                }
-                for (int segj = 0; segj < segi; ++segj) {
-                    // changing sign indicates this segment crosses the decision boundary
-                    if (preds[segj] * preds[segj+1] < 0) {
-                        scaleUsed = true;
-                        densityfile << "<path style=\"fill:none;stroke:#000000;stroke-width:1px;\" ";
-                        densityfile << "d=\"M " << sf*x[segj] << "," << top - sf*y[segj];
-                        densityfile << " L " << sf*x[segj+1] << "," << top - sf*y[segj+1];
-                        densityfile << "\" id=\"classif-" << (class1+1) << "-" << (class2+1) << "-sr" << segi<<"-"<<segj<<"\" />";
-                    }
-                }
-                for (int segj = 0; segj <= segi; ++segj) {
-                    // slanted left, start from (0,0) to (1,0) then up-left-wards
-                    mscdata[cliscaleidx*2] = x[segj] = segi / (FloatType) segres - segj * 0.5 / (FloatType) segres;
-                    mscdata[cliscaleidx*2+1] = y[segj] = 0.5 * sqrt3 * segj / (FloatType) segres;
-                    preds[segj] = predictors[cli]->predict(&mscdata[0]);
-                }
-                for (int segj = 0; segj < segi; ++segj) {
-                    // changing sign indicates this segment crosses the decision boundary
-                    if (preds[segj] * preds[segj+1] < 0) {
-                        scaleUsed = true;
-                        densityfile << "<path style=\"fill:none;stroke:#000000;stroke-width:1px;\" ";
-                        densityfile << "d=\"M " << sf*x[segj] << "," << top - sf*y[segj];
-                        densityfile << " L " << sf*x[segj+1] << "," << top - sf*y[segj+1];
-                        densityfile << "\" id=\"classif-" << (class1+1) << "-" << (class2+1) << "-sl" << segi<<"-"<<segj<<"\" />";
-                    }
-                }
-            }
-            if (!scaleUsed) {
-                cout << "scale " << scales[si] << " is not a relevant discriminant scale for the given classifier" << endl;
-                continue;
-            }
-        }
         
         densityfile << "</svg>" << endl;
         densityfile.close();
