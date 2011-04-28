@@ -1,4 +1,4 @@
-CXXFLAGS=-O3 -DNDEBUG -fopenmp
+CXXFLAGS=-O3 -g -DNDEBUG -fopenmp
 #CXXFLAGS=-g
 CXX=g++
 #LAPACK=./lapack_LINUX.a ./blas_LINUX.a
@@ -38,6 +38,9 @@ features: features_least_squares features_linear_svm features_gaussian_svm featu
 
 suggest_classifier:
 	$(CXX) $(CXXFLAGS) suggest_classifier.cpp -lcairo -o suggest_classifier
+
+suggest_classifier_fast:
+	$(CXX) $(CXXFLAGS) -DSVM_FAST_MODE suggest_classifier.cpp -lcairo -o suggest_classifier_fast
 
 validate_classifier:
 	$(CXX) $(CXXFLAGS) validate_classifier.cpp -o validate_classifier

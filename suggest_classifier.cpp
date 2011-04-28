@@ -202,6 +202,7 @@ int main(int argc, char** argv) {
     // shuffle before cross-validating to spread instances of each class
     dlib::randomize_samples(samples, labels);
     FloatType nu = classifier.crossValidate(10, samples, labels);
+    cout << "Training" << endl;
     classifier.train(10, nu, samples, labels);
     
     // get the projections of each sample on the first classifier direction
