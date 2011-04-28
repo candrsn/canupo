@@ -93,6 +93,21 @@ void read_msc_data(ifstream& mscfile, int nscales, int npts, sample_type* data, 
     }
 }
 
+int ppmwrite(cairo_surface_t *surface, const char* filename) {
+    int height = cairo_image_surface_get_height(surface);
+    int width = cairo_image_surface_get_width(surface);
+    int stride = cairo_image_surface_get_stride(surface);
+    unsigned char* data = cairo_image_surface_get_data(surface);
+    ofstream ppmfile(filename);
+    ppmfile << "P3 " << width << " " << height << " " << 255 << endl;
+    for (int row = 0; row<height; ++row) {
+        for (int col = 0; col<width*4; col+=4) {
+            ppmfile << (int)data[col+2] << " " << (int)data[col+1] << " " << (int)data[col+0] << " ";
+        }
+        data += stride;
+    }
+}
+
 cairo_status_t png_copier(void *closure, const unsigned char *data, unsigned int length) {
     std::vector<char>* pngdata = (std::vector<char>*)closure;
     int cursize = pngdata->size();
@@ -394,7 +409,7 @@ int main(int argc, char** argv) {
 
     cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, svgSize, svgSize);
     cairo_t *cr = cairo_create(surface);
-    
+
     cairo_set_source_rgb(cr, 1, 1, 1);
     cairo_set_line_width(cr, 0);
     cairo_rectangle(cr, 0, 0, svgSize, svgSize);
@@ -481,29 +496,35 @@ int main(int argc, char** argv) {
     cairo_move_to(cr, halfSvgSize,0);
     cairo_line_to(cr, halfSvgSize,svgSize);
     cairo_stroke(cr);
-    
+
+    cout << "Writing the svg file" << endl;
+
+    // output the svg file
+    svgfile << "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\""<< svgSize << "\" height=\""<< svgSize <<"\" >" << endl;
+
+    base64 codec;
+    int nbytes;
+
+#ifdef CANUPO_NO_PNG
+    string filename = argv[1];
+    filename.replace(filename.size()-3,3,"ppm");
+    ppmwrite(surface,filename.c_str());
+    svgfile << "<image xlink:href=\""<< filename << "\" width=\""<<svgSize<<"\" height=\""<<svgSize<<"\" x=\"0\" y=\"0\" style=\"z-index:0\" />" << endl;
+#else
     //cairo_surface_write_to_png (surface, argv[1]);
     std::vector<char> pngdata;
     pngdata.reserve(800*800*3); // need only large enough init size
     cairo_surface_write_to_png_stream(surface, png_copier, &pngdata);
 
-    cairo_surface_destroy(surface);
-    cairo_destroy(cr);
-    
     // encode the png data into base64
-    base64 codec;
     std::vector<char> base64pngdata(codec.get_max_encoded_size(pngdata.size()));
-    int nbytes = codec.encode(&pngdata[0], pngdata.size(), &base64pngdata[0]);
+    nbytes = codec.encode(&pngdata[0], pngdata.size(), &base64pngdata[0]);
     nbytes += codec.encode_end(&base64pngdata[nbytes]);
-
-    cout << "Writing the svg file" << endl;
-    
-    // output the svg file
-    svgfile << "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\""<< svgSize << "\" height=\""<< svgSize <<"\" >" << endl;
     
     // include the image inline    
     svgfile << "<image xlink:href=\"data:image/png;base64,"<< &base64pngdata[0]
             << "\" width=\""<<svgSize<<"\" height=\""<<svgSize<<"\" x=\"0\" y=\"0\" style=\"z-index:0\" />" << endl;
+#endif
     
     // include the reference points
     svgfile << "<circle cx=\""<< (refpt_pos.x*scaleFactor+halfSvgSize) <<"\" cy=\""<< (halfSvgSize-refpt_pos.y*scaleFactor) <<"\" r=\"2\" style=\"fill:none;stroke:#000000;stroke-width:1px;z-index:1;\" />" << endl;
@@ -592,10 +613,13 @@ int main(int argc, char** argv) {
     nbytes = codec.encode(&binary_parameters[0], binary_parameters.size(), &base64commentdata[0]);
     nbytes += codec.encode_end(&base64commentdata[nbytes]);
     
-    svgfile << "<!-- params " << &base64commentdata[0] << " -->\n" << endl;    
+    svgfile << "<!-- params " << &base64commentdata[0] << " -->" << endl;
 
     svgfile << "</svg>" << endl;
     svgfile.close();
+
+    cairo_surface_destroy(surface);
+    cairo_destroy(cr);
 
     return 0;
 }
