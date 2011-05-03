@@ -501,9 +501,54 @@ int main(int argc, char** argv) {
 
     // output the svg file
     svgfile << "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\""<< svgSize << "\" height=\""<< svgSize <<"\" >" << endl;
+    
+    // Save the classifier parameters as an SVG comment so we can find them back later on
+    // Use base64 encoded binary to preserve full precision
+    
+    vector<char> binary_parameters(
+        sizeof(int)
+      + nscales*sizeof(FloatType)
+      + (fdim+1)*sizeof(FloatType)
+      + (fdim+1)*sizeof(FloatType)
+      + sizeof(FloatType)
+      + sizeof(FloatType)
+      + sizeof(int)
+    );
+    int bpidx = 0;
+    memcpy(&binary_parameters[bpidx],&nscales,sizeof(int)); bpidx += sizeof(int);
+    for (int i=0; i<nscales; ++i) {
+        memcpy(&binary_parameters[bpidx],&scales[i],sizeof(FloatType));
+        bpidx += sizeof(FloatType);
+    }
+    // Projections on the two 2D axis
+    for (int i=0; i<=fdim; ++i) {
+        memcpy(&binary_parameters[bpidx],&classifier.weights[i],sizeof(FloatType));
+        bpidx += sizeof(FloatType);
+    }
+    for (int i=0; i<=fdim; ++i) {
+        memcpy(&binary_parameters[bpidx],&ortho_classifier.weights[i],sizeof(FloatType));
+        bpidx += sizeof(FloatType);
+    }
+    // boundaries
+    memcpy(&binary_parameters[bpidx],&absmaxXY,sizeof(FloatType)); bpidx += sizeof(FloatType);
+    // conversion from svg to 2D space
+    memcpy(&binary_parameters[bpidx],&scaleFactor,sizeof(FloatType)); bpidx += sizeof(FloatType);
+    memcpy(&binary_parameters[bpidx],&halfSvgSize,sizeof(int)); bpidx += sizeof(int);
 
     base64 codec;
     int nbytes;
+    
+    std::vector<char> base64commentdata(codec.get_max_encoded_size(binary_parameters.size()));
+    nbytes = codec.encode(&binary_parameters[0], binary_parameters.size(), &base64commentdata[0]);
+    nbytes += codec.encode_end(&base64commentdata[nbytes]);
+    
+    // comments work well and do not introduce any artifact in the resulting SVG
+    // but sometimes they are not preserved... use a hidden text then as workaround
+#ifdef CANUPO_NO_SVG_COMMENT
+    svgfile << "<text style=\"font-size:1px;fill:#ffffff;fill-opacity:0;stroke:none\" x=\"20\" y=\"20\">params=" << &base64commentdata[0] << "</text>" << endl;
+#else
+    svgfile << "<!-- params " << &base64commentdata[0] << " -->" << endl;
+#endif
 
 #ifdef CANUPO_NO_PNG
     string filename = argv[1];
@@ -518,6 +563,7 @@ int main(int argc, char** argv) {
 
     // encode the png data into base64
     std::vector<char> base64pngdata(codec.get_max_encoded_size(pngdata.size()));
+    codec.reset_encoder();
     nbytes = codec.encode(&pngdata[0], pngdata.size(), &base64pngdata[0]);
     nbytes += codec.encode_end(&base64pngdata[nbytes]);
     
@@ -574,46 +620,6 @@ int main(int argc, char** argv) {
         }
         svgfile << "\" />" << endl;
 //    }
-    
-    // Save the classifier parameters as an SVG comment so we can find them back later on
-    // Use base64 encoded binary to preserve full precision
-    
-    vector<char> binary_parameters(
-        sizeof(int)
-      + nscales*sizeof(FloatType)
-      + (fdim+1)*sizeof(FloatType)
-      + (fdim+1)*sizeof(FloatType)
-      + sizeof(FloatType)
-      + sizeof(FloatType)
-      + sizeof(int)
-    );
-    int bpidx = 0;
-    memcpy(&binary_parameters[bpidx],&nscales,sizeof(int)); bpidx += sizeof(int);
-    for (int i=0; i<nscales; ++i) {
-        memcpy(&binary_parameters[bpidx],&scales[i],sizeof(FloatType));
-        bpidx += sizeof(FloatType);
-    }
-    // Projections on the two 2D axis
-    for (int i=0; i<=fdim; ++i) {
-        memcpy(&binary_parameters[bpidx],&classifier.weights[i],sizeof(FloatType));
-        bpidx += sizeof(FloatType);
-    }
-    for (int i=0; i<=fdim; ++i) {
-        memcpy(&binary_parameters[bpidx],&ortho_classifier.weights[i],sizeof(FloatType));
-        bpidx += sizeof(FloatType);
-    }
-    // boundaries
-    memcpy(&binary_parameters[bpidx],&absmaxXY,sizeof(FloatType)); bpidx += sizeof(FloatType);
-    // conversion from svg to 2D space
-    memcpy(&binary_parameters[bpidx],&scaleFactor,sizeof(FloatType)); bpidx += sizeof(FloatType);
-    memcpy(&binary_parameters[bpidx],&halfSvgSize,sizeof(int)); bpidx += sizeof(int);
-    
-    codec.reset_encoder();
-    std::vector<char> base64commentdata(codec.get_max_encoded_size(binary_parameters.size()));
-    nbytes = codec.encode(&binary_parameters[0], binary_parameters.size(), &base64commentdata[0]);
-    nbytes += codec.encode_end(&base64commentdata[nbytes]);
-    
-    svgfile << "<!-- params " << &base64commentdata[0] << " -->" << endl;
 
     svgfile << "</svg>" << endl;
     svgfile.close();

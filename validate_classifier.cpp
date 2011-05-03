@@ -59,7 +59,9 @@ int main(int argc, char** argv) {
     
     string line;
     bool incomment = false, inparams = false, inpath = false, inpathdef = false;
-    bool incircle = false, hasrefpt1 = false;
+    bool incircle = false, hasrefpt1 = false, relative_path = false;
+    bool intext = false;
+    bool insubparams=false;
     string params;
     vector<Point2D> path;
     Point2D refpt1, refpt2;
@@ -75,15 +77,32 @@ int main(int argc, char** argv) {
             if (token == "-->") {incomment = false; inparams = false; continue;}
             if (inparams) params += token;
             if (token == "params" && incomment) {inparams = true; continue;}
+            if (token == "<text") {intext = true; continue;}
             if (token == "<path") {inpath = true; continue;}
             if (token=="/>") {
                 if (incircle) {hasrefpt1 = true; incircle=false;}
                 if (inpath) {inpath=false; inpathdef=false;}
+                if (intext) {intext=false;}
                 continue;
             }
-            if (inpath && token=="d=\"M") { inpathdef = true; path.clear(); continue;}
+            if (intext && ((token.find("params=")!=-1) || insubparams)) {
+                vector<string> subtokens;
+                split(subtokens, token, is_any_of("< \t>"));
+                for (vector<string>::iterator subit = subtokens.begin(); subit!=subtokens.end(); ++subit) {
+                    string& subtoken = *subit;
+                    if (subtoken.find("params=")==0) {
+                        params+=subtoken.substr(7);
+                        insubparams = true;
+                        continue;
+                    }
+                    if (subtoken=="/text") {intext=false; continue;}
+                    if (insubparams) params+=subtoken;
+                }
+            }
+            if (inpath && (token=="d=\"M" || token=="d=\"m")) { inpathdef = true; path.clear(); relative_path = (token=="d=\"m"); continue;}
             if (inpathdef) {
-                if (token=="L") continue;
+                if (token=="L") {relative_path = false; continue;}
+                if (token=="l") {relative_path = true; continue;}
                 if (token=="\"") {inpathdef = false; continue;}
                 if (ends_with(token, "\"")) {
                     token = token.substr(0, token.length()-1);
@@ -91,7 +110,7 @@ int main(int argc, char** argv) {
                 }
                 int commapos = token.find(',');
                 if (commapos==-1) {
-                    cerr << "invalid path definition in svg (invalid token)" << endl;
+                    cerr << "unsupported path definition in svg (no comma in the token other than L or l)" << endl;
                     return 0;
                 }
                 try {
@@ -99,9 +118,10 @@ int main(int argc, char** argv) {
                         lexical_cast<FloatType>(token.substr(0,commapos)),
                         lexical_cast<FloatType>(token.substr(commapos+1))
                     );
+                    if (relative_path && path.size()>0) point += path.back();
                     path.push_back(point);
                 } catch(bad_lexical_cast) {
-                    cerr << "invalid path definition in svg (bad value)" << endl;
+                    cerr << "unsupported path definition in svg (bad numeric value)" << endl;
                     return 1;
                 }
             }
@@ -132,10 +152,15 @@ int main(int argc, char** argv) {
 
     if (path.size()<2) {
         cerr << "invalid path definition in svg (less than 2 nodes)" << endl;
-        return 0;
+        return 1;
     }
 
-//    cout << params << endl;
+    if (params.empty()) {
+        cout << "Invalid SVG file: initial parameters were not preserved" << endl;
+        return 2;
+    }
+    
+    //cout << params << endl; return 0;
 
     base64 codec;
     vector<char> binary_params(codec.get_max_decoded_size(params.size()));
