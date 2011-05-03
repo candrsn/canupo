@@ -16,7 +16,10 @@
 #include <sys/stat.h>
 #include <sys/fcntl.h>
 #include <sys/unistd.h>
+
+#ifndef NO_MMAP
 #include <sys/mman.h>
+#endif
 
 #include "points.hpp"
 #include "predictors.hpp"
