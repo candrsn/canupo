@@ -11,7 +11,7 @@
 
 #include <stdint.h>
 
-#include "points.hpp"
+#include "classifier.hpp"
 
 #include "base64.hpp"
 
@@ -19,7 +19,6 @@ using namespace std;
 using namespace boost;
 
 int help(const char* errmsg = 0) {
-    if (errmsg) cout << "Error: " << errmsg << endl;
 cout << "\
 validate_classifier  user_modified.svg  classifier_file.prm  [ class_num_1  class_num_2 ] [: class1.msc ... - class2.msc ...] \n\
     input: user_modified.svg      # a svg file produced by suggest_classifier, possibly updated by the user\n\
@@ -31,6 +30,8 @@ validate_classifier  user_modified.svg  classifier_file.prm  [ class_num_1  clas
                                               # Class <=0 is reserved for points that cannot be classified.\n\
     input(optional): class1.msc ... - class2.msc ...  # If these are given the classifier performance can be estimated\n\
 "<<endl;
+
+    if (errmsg) cout << "Error: " << errmsg << endl;
         return 0;
 }
 
@@ -45,14 +46,63 @@ struct LineDef {
     FloatType wx, wy, c;
 };
 
-int main(int argc, char** argv) {
+typedef vector<FloatType> sample_type;
+
+// if vector is empty, fill it
+// otherwise check the vectors match
+int read_msc_header(ifstream& mscfile, vector<FloatType>& scales, int& ptnparams) {
+    int npts;
+    mscfile.read((char*)&npts,sizeof(npts));
+    if (npts<=0) help("invalid file");
     
-    if (argc!=3 && argc!=5) return help();
+    int nscales_thisfile;
+    mscfile.read((char*)&nscales_thisfile, sizeof(nscales_thisfile));
+    vector<FloatType> scales_thisfile(nscales_thisfile);
+    for (int si=0; si<nscales_thisfile; ++si) mscfile.read((char*)&scales_thisfile[si], sizeof(FloatType));
+    if (nscales_thisfile<=0) help("invalid file");
+    
+    // all files must be consistant
+    if (scales.size() == 0) {
+        scales = scales_thisfile;
+    } else {
+        if (scales.size() != nscales_thisfile) {cerr<<"input file mismatch: "<<endl; return 1;}
+        for (int si=0; si<scales.size(); ++si) if (!fpeq(scales[si],scales_thisfile[si])) {cerr<<"input file mismatch: "<<endl; return 1;}
+    }
+    mscfile.read((char*)&ptnparams, sizeof(int));
+
+    return npts;
+}
+
+void read_msc_data(ifstream& mscfile, int nscales, int npts, sample_type* data, int ptnparams) {
+    for (int pt=0; pt<npts; ++pt) {
+        for (int i=0; i<ptnparams; ++i) {
+            FloatType param;
+            mscfile.read((char*)&param, sizeof(FloatType));
+        }
+        for (int s=0; s<nscales; ++s) {
+            FloatType a,b;
+            mscfile.read((char*)(&a), sizeof(FloatType));
+            mscfile.read((char*)(&b), sizeof(FloatType));
+            FloatType c = 1 - a - b;
+            FloatType x = b + c / 2;
+            FloatType y = c * sqrt(3)/2;
+            (*data)[s*2] = x;
+            (*data)[s*2+1] = y;
+        }
+        int fooi;
+        for (int i=0; i<nscales; ++i) mscfile.read((char*)&fooi, sizeof(int));
+        ++data;
+    }
+}
+
+int main(int argc, char** argv) {
+
+    if (argc<7 && argc!=3 && argc!=5) return help();
 
     ifstream svgfile(argv[1]);
-    
+
     ofstream classifierfile(argv[2], ofstream::binary);
-    
+
     int class_num_1 = 1;
     int class_num_2 = 2;
     if (argc==5) {
@@ -246,5 +296,94 @@ int main(int argc, char** argv) {
     classifierfile.write((char*)&absmaxXY,sizeof(FloatType));
     classifierfile.close();
 
+    int arg_class1 = argc;
+    for (int argi = 3; argi<argc; ++argi) if (!strcmp(argv[argi],":")) {
+        arg_class1 = argi+1;
+        break;
+    }
+    if (arg_class1>=argc) return 0; // done, no estimation required
+    
+    int arg_class2 = argc;
+    for (int argi = arg_class1+1; argi<argc; ++argi) if (!strcmp(argv[argi],"-")) {
+        arg_class2 = argi+1;
+        break;
+    }
+    if (arg_class2>=argc) {
+        return help("Classifier parameters were computed, but we cannot estimate the performance with only one class !");
+    }
+
+    // estimate the performance of the classifier if required
+    sample_type undefsample;
+    int ptnparams;
+    // class1 files
+    int ndata_class1 = 0;
+    for (int argi = arg_class1; argi<arg_class2-1; ++argi) {
+        ifstream mscfile(argv[argi], ifstream::binary);
+        int npts = read_msc_header(mscfile, scales, ptnparams);
+        mscfile.close();
+        ndata_class1 += npts;
+    }
+    // class2 files
+    int ndata_class2 = 0;
+    for (int argi = arg_class2; argi<argc; ++argi) {
+        ifstream mscfile(argv[argi], ifstream::binary);
+        int npts = read_msc_header(mscfile, scales, ptnparams);
+        mscfile.close();
+        ndata_class2 += npts;
+    }
+    undefsample.resize(fdim,FloatType(0));
+    int nsamples = ndata_class1+ndata_class2;
+    vector<sample_type> samples(nsamples, undefsample);
+
+    int base_pt = 0;
+    for (int argi = arg_class1; argi<arg_class2-1; ++argi) {
+        ifstream mscfile(argv[argi], ifstream::binary);
+        int npts = read_msc_header(mscfile, scales, ptnparams);
+        read_msc_data(mscfile,nscales,npts,&samples[base_pt], ptnparams);
+        mscfile.close();
+        base_pt += npts;
+    }
+    for (int argi = arg_class2; argi<argc; ++argi) {
+        ifstream mscfile(argv[argi], ifstream::binary);
+        int npts = read_msc_header(mscfile, scales, ptnparams);
+        read_msc_data(mscfile,nscales,npts,&samples[base_pt], ptnparams);
+        mscfile.close();
+        base_pt += npts;
+    }
+
+    Classifier classifier;
+    classifier.weights_axis1 = weights_axis1;
+    classifier.weights_axis2 = weights_axis2;
+    classifier.path = path;
+    classifier.refpt_pos = refpt1;
+    classifier.refpt_neg = refpt2;
+    classifier.absmaxXY = absmaxXY;
+    classifier.prepare();
+
+    // true/false positive/negative counts
+    int TP=0, TN=0, FP=0, FN=0;
+    for (int i=0; i<ndata_class1; ++i) {
+        FloatType pred = classifier.classify(&samples[i][0]);
+        if (pred<0) ++TP;
+        else ++FN;
+    }
+    for (int i=ndata_class1; i<nsamples; ++i) {
+        FloatType pred = classifier.classify(&samples[i][0]);
+        if (pred>0) ++TN;
+        else ++FP;
+    }
+    
+    // display scores, at last...
+    // http://en.wikipedia.org/wiki/Binary_classification
+    // http://en.wikipedia.org/wiki/Matthews_correlation_coefficient
+    cout << "True/False Positive/Negative counts: TP=" << TP << ", FN=" << FN << ", TN=" << TN << ", FP=" << FP << endl;
+    cout << "Class 1 count (=TP+FN): " << ndata_class1 << ", " << "Class 2 count (=TN+FP): " << ndata_class2 << endl;
+    cout << "Accuracy: " << FloatType(TP+TN) / FloatType(nsamples) << endl;
+    cout << "Sensitivity (true positive rate): " << FloatType(TP) / FloatType(ndata_class1) << endl;
+    cout << "Specificity (true negative rate): " << FloatType(TN) / FloatType(ndata_class2) << endl;
+    FloatType mcc = FloatType(TP+FP)*FloatType(TP+FN)*FloatType(TN+FP)*FloatType(TN+FN);
+    if (mcc<=0) mcc = 1;
+    else mcc = (FloatType(TP*TN) - FloatType(FP*FN)) / sqrt(mcc);
+    cout << "Matthews correlation coefficient: " << mcc << endl;
     return 0;
 }
