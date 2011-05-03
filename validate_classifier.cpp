@@ -21,11 +21,15 @@ using namespace boost;
 int help(const char* errmsg = 0) {
     if (errmsg) cout << "Error: " << errmsg << endl;
 cout << "\
-validate_classifier  user_modified_svg  classifier_file.prm  [ class_num_1  class_num_2 ] \n\
-    produce biclass prm file\n\
-    from SVG, use path (predef path if not changed or user-defined)\n\
-    class_num_1  and  class_num_2  can be specified for producing multiclass classifiers\n\
-    otherwise they have value 1 and 2 by default. Class <=0 is reserved for points that cannot be classified, use class_num>0.\n\
+validate_classifier  user_modified.svg  classifier_file.prm  [ class_num_1  class_num_2 ] [: class1.msc ... - class2.msc ...] \n\
+    input: user_modified.svg      # a svg file produced by suggest_classifier, possibly updated by the user\n\
+    output: classifier_file.prm   # produces a two-class classifier parameter file for use by \"classify\"\n\
+    \n\
+    input(optional): class_num_1 class_num_2  # the class number of the first and second classes of this binary classifier\n\
+                                              # These can be specified for producing multiclass classifiers by \"combine_classifier\"\n\
+                                              # otherwise they have value 1 and 2 by default.\n\
+                                              # Class <=0 is reserved for points that cannot be classified.\n\
+    input(optional): class1.msc ... - class2.msc ...  # If these are given the classifier performance can be estimated\n\
 "<<endl;
         return 0;
 }
