@@ -47,11 +47,7 @@ struct LinearSVM {
             svm_pegasos<kernel_type> trainer;
             trainer.set_kernel(kernel_type());
             trainer.set_lambda(nu);
-#ifdef _OPENMP
-            matrix<FloatType> result = cross_validate_trainer_threaded(batch_cached(trainer,lsvm->trainer_batch_rate), samples, labels, nfolds, omp_get_num_threads());
-#else
             matrix<FloatType> result = cross_validate_trainer(batch_cached(trainer,->trainer_batch_rate), samples, labels, nfolds);
-#endif
 #else
             svm_nu_trainer<kernel_type> trainer;
             trainer.set_kernel(kernel_type());
@@ -188,6 +184,7 @@ cout << "best_nu after find_max_single_variable = " << (FloatType)exp(lnu) << ",
         int num_grid_lambda = 25;
         double lmin = log(1e-6);
         double lmax = log(1e-2);
+        #pragma omp parallel for
         for (int gidx = 0; gidx<num_grid_lambda; ++gidx) {
             cout << "." << flush;
             // batch rate from 0.05 to 0.12
@@ -201,6 +198,7 @@ cout << "best_nu after find_max_single_variable = " << (FloatType)exp(lnu) << ",
                 1e-3,
                 50
             );
+            #pragma omp critical
             if (score > best_score) {
                 best_score = score;
                 best_llambda = llambda;
