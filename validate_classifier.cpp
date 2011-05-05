@@ -361,7 +361,7 @@ int main(int argc, char** argv) {
     classifier.prepare();
 
     // true/false positive/negative counts
-    int TP=0, TN=0, FP=0, FN=0;
+    FloatType TP=0, TN=0, FP=0, FN=0;
     for (int i=0; i<ndata_class1; ++i) {
         FloatType pred = classifier.classify(&samples[i][0]);
         if (pred<0) ++TP;
@@ -378,13 +378,13 @@ int main(int argc, char** argv) {
     // http://en.wikipedia.org/wiki/Matthews_correlation_coefficient
     cout << "True/False Positive/Negative counts: TP=" << TP << ", FN=" << FN << ", TN=" << TN << ", FP=" << FP << endl;
     cout << "Class 1 count (=TP+FN): " << ndata_class1 << ", " << "Class 2 count (=TN+FP): " << ndata_class2 << endl;
-    cout << "Sensitivity (true positive rate): " << FloatType(TP) / FloatType(ndata_class1) << endl;
-    cout << "Specificity (true negative rate): " << FloatType(TN) / FloatType(ndata_class2) << endl;
-    FloatType mcc = FloatType(TP+FP)*FloatType(TP+FN)*FloatType(TN+FP)*FloatType(TN+FN);
+    cout << "Sensitivity (true positive rate): " << TP / ndata_class1 << endl;
+    cout << "Specificity (true negative rate): " << TN / ndata_class2 << endl;
+    FloatType mcc = (TP+FP)*(TP+FN)*(TN+FP)*(TN+FN);
     if (mcc<=0) mcc = 0;
-    else mcc = (FloatType(TP*TN) - FloatType(FP*FN)) / sqrt(mcc);
+    else mcc = ((TP*TN) - (FP*FN)) / sqrt(mcc);
     cout << "Matthews correlation coefficient (note: -1 ≤ mcc ≤ 1): " << mcc << endl;
-    cout << "Accuracy: " << FloatType(TP+TN) / FloatType(nsamples) << endl;
-    cout << "Balanced Accuracy: " << 0.5 * (FloatType(TP) / FloatType(ndata_class1) + FloatType(TN) / FloatType(ndata_class2)) << endl;
+    cout << "Accuracy: " << (TP+TN) / nsamples << endl;
+    cout << "Balanced Accuracy: " << 0.5 * (TP / ndata_class1 + TN / ndata_class2) << endl;
     return 0;
 }

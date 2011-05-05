@@ -178,7 +178,7 @@ cout << "best_nu = " << best_nu << endl;
             1e-3,
             50
         );
-cout << "best_nu after find_max_single_variable = " << (FloatType)exp(lnu) << endl;
+cout << "best_nu after find_max_single_variable = " << (FloatType)exp(lnu) << ", result=" << best_score << endl;
         return (FloatType)exp(lnu);
 
 #if 0 //else // SVM_FAST_MODE
