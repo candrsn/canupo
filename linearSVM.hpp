@@ -77,7 +77,7 @@ struct LinearSVM {
         using namespace dlib;
         using namespace std;
         // taken from dlib examples
-//#ifndef SVM_FAST_MODE
+#ifndef SVM_FAST_MODE
 
 #ifdef SVM_FAST_MODE
         trainer_batch_rate = 0.1;//05 + tbri * 0.007;
@@ -181,29 +181,33 @@ cout << "best_nu = " << best_nu << endl;
 cout << "best_nu after find_max_single_variable = " << (FloatType)exp(lnu) << ", result=" << best_score << endl;
         return (FloatType)exp(lnu);
 
-#if 0 //else // SVM_FAST_MODE
+#else // SVM_FAST_MODE
         double best_score = -1;
-        double best_llambda = -4;
+        double best_llambda = log(1e-4);
         cout << "Optimising the lambda parameter (SVM-pegasos algorithm) " << flush;
-        //for (int tbri = 0; tbri <= 10; ++tbri) {
+        int num_grid_lambda = 25;
+        double lmin = log(1e-6);
+        double lmax = log(1e-2);
+        for (int gidx = 0; gidx<num_grid_lambda; ++gidx) {
             cout << "." << flush;
             // batch rate from 0.05 to 0.12
             trainer_batch_rate = 0.1;//05 + tbri * 0.007;
-            double llambda = -4;
+            double llambda = log(1e-4); //lmin + (lmax - lmin) * gidx / (num_grid_lambda - 1.0);
             double score = find_max_single_variable(
                 cross_validation_objective(samples, labels, nfolds, this), // Function to maximize
                 llambda,              // starting point and result
-                -6,          // lower bound, log(1e-6)
-                -2,          // upper bound
-                1e-4,
-                100
+                lmin,          // lower bound, log(1e-6)
+                lmax,          // upper bound
+                1e-3,
+                50
             );
             if (score > best_score) {
                 best_score = score;
                 best_llambda = llambda;
             }
-        //}
+        }
         cout << endl;
+cout << "best_lambda after find_max_single_variable = " << (FloatType)exp(best_llambda) << ", result=" << best_score << endl;
         return (FloatType)exp(best_llambda);
 
 #endif
