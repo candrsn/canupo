@@ -25,9 +25,10 @@ struct LinearSVM {
     typedef dlib::matrix<FloatType, 0, 1> sample_type;
     typedef dlib::linear_kernel<sample_type> kernel_type;
 
-#ifdef SVM_FAST_MODE
+    int grid_size;
     FloatType trainer_batch_rate;
-#endif
+    
+    LinearSVM(int _grid_size) : grid_size(_grid_size), trainer_batch_rate(0.1) {}
 
     struct cross_validation_objective {
         cross_validation_objective (
@@ -37,28 +38,40 @@ struct LinearSVM {
             LinearSVM* _lsvm
         ) : samples(samples_), labels(labels_), nfolds(_nfolds), lsvm(_lsvm) {}
 
-        double operator() (FloatType lognu) const {
+        double operator() (FloatType logarg) const {
             using namespace dlib;
             // see below for changes from dlib examples
-            const FloatType nu = exp(lognu);
+            const FloatType arg = exp(logarg);
+            matrix<FloatType> result;
 
             // Make an SVM trainer and tell it what the parameters are supposed to be.
-#ifdef SVM_FAST_MODE
-            svm_pegasos<kernel_type> trainer;
-            trainer.set_kernel(kernel_type());
-            trainer.set_lambda(nu);
-            matrix<FloatType> result = cross_validate_trainer(batch_cached(trainer,->trainer_batch_rate), samples, labels, nfolds);
-#else
+#ifdef SVM_NU_TRAINER
             svm_nu_trainer<kernel_type> trainer;
             trainer.set_kernel(kernel_type());
-            trainer.set_nu(nu);
-#ifdef _OPENMP
-            matrix<FloatType> result = cross_validate_trainer_threaded(trainer, samples, labels, nfolds, omp_get_num_threads());
-#else
-            matrix<FloatType> result = cross_validate_trainer(trainer, samples, labels, nfolds);
-#endif
-#endif
+            trainer.set_nu(arg);
 
+#if defined(_OPENMP)
+            // multi-thread here only if not at the caller level
+            if (lsvm->grid_size==1) {
+                result = cross_validate_trainer_threaded(trainer, samples, labels, nfolds, omp_get_num_threads());
+            } else
+#endif
+            result = cross_validate_trainer(trainer, samples, labels, nfolds);
+            
+#else
+            svm_pegasos<kernel_type> trainer;
+            trainer.set_kernel(kernel_type());
+            trainer.set_lambda(arg);
+
+#if defined(_OPENMP)
+            // multi-thread here only if not at the caller level
+            if (lsvm->grid_size==1) {
+                result = cross_validate_trainer_threaded(batch_cached(trainer,lsvm->trainer_batch_rate), samples, labels, nfolds, omp_get_num_threads());
+            } else
+#endif
+            result = cross_validate_trainer(batch_cached(trainer,lsvm->trainer_batch_rate), samples, labels, nfolds);
+            
+#endif
             return sum(result);
         }
 
@@ -72,156 +85,56 @@ struct LinearSVM {
     FloatType crossValidate(int nfolds, const std::vector<sample_type>& samples, const std::vector<FloatType>& labels) {
         using namespace dlib;
         using namespace std;
-        // taken from dlib examples
-#ifndef SVM_FAST_MODE
 
-#ifdef SVM_FAST_MODE
-        trainer_batch_rate = 0.1;//05 + tbri * 0.007;
-        // nu is actually lambda
-        double max_nu = 1e-2;
-        double min_nu = 1e-6;
-#else
-        // largest allowed nu: strictly below what's returned by maximum_nu
-        double max_nu = 0.999*maximum_nu(labels);
-        double min_nu = max_nu * 1e-3;
-#endif
-
-        matrix<FloatType> best_result(2,1);
-        best_result = -std::numeric_limits<FloatType>::max();
-        int best_index = -1;
-        int best_index_span = 0;
-
-        int num_grid_nu = 25;
-        double lmin = log(min_nu);
-        double lmax = log(max_nu);
-        for (int gidx = 0; gidx<num_grid_nu; ++gidx) {
-            double nu = exp(lmin + (lmax - lmin) * gidx / (num_grid_nu - 1.0));
-#ifdef SVM_FAST_MODE
-            svm_pegasos<kernel_type> pegasos_trainer;
-            pegasos_trainer.set_lambda(nu);
-            pegasos_trainer.set_kernel(kernel_type());
-            batch_trainer<svm_pegasos<kernel_type> > trainer = batch_cached(pegasos_trainer,trainer_batch_rate);
-#else
-            svm_nu_trainer<kernel_type> trainer;
-            trainer.set_nu(nu);
-            trainer.set_kernel(kernel_type());
-#endif
-#ifdef _OPENMP
-            matrix<FloatType> result = cross_validate_trainer_threaded(trainer, samples, labels, nfolds, omp_get_num_threads());
-#else
-            matrix<FloatType> result = cross_validate_trainer(trainer, samples, labels, nfolds);
-#endif
-cout << "nu = " << nu << ", result=" << sum(result) << endl;
-            if (sum(result) > sum(best_result)) {
-                best_result = result;
-                best_index = gidx;
-                best_index_span = 0;
-            }
-            else if (sum(result) == sum(best_result)) {
-                ++best_index_span;
-            }
-        }
-        // take median of interval range with same best values
-        double best_nu = exp(lmin + (lmax - lmin) * (best_index + best_index_span * 0.5) / (num_grid_nu - 1.0));
-        
-cout << "best_nu = " << best_nu << endl;
-        // may exceed original min/max bounds
-        // do it in linear scale
-        double min2 = exp(lmin + (lmax - lmin) * (best_index - 1) / (num_grid_nu - 1.0));
-        double max2 = exp(lmin + (lmax - lmin) * (best_index + best_index_span + 1) / (num_grid_nu - 1.0));
-        best_index = -1;
-        for (int gidx = 1; gidx<=num_grid_nu; ++gidx) {
-            // take 2 more grid points corresponding to the previous steps already
-            // computed, do not recompute them
-            double nu = min2 + (max2 - min2) * gidx / (num_grid_nu + 1.0);
-#ifdef SVM_FAST_MODE
-            svm_pegasos<kernel_type> pegasos_trainer;
-            pegasos_trainer.set_lambda(nu);
-            pegasos_trainer.set_kernel(kernel_type());
-            batch_trainer<svm_pegasos<kernel_type> > trainer = batch_cached(pegasos_trainer,trainer_batch_rate);
-#else
-            svm_nu_trainer<kernel_type> trainer;
-            trainer.set_nu(nu);
-            trainer.set_kernel(kernel_type());
-#endif
-#ifdef _OPENMP
-            matrix<FloatType> result = cross_validate_trainer_threaded(trainer, samples, labels, nfolds, omp_get_num_threads());
-#else
-            matrix<FloatType> result = cross_validate_trainer(trainer, samples, labels, nfolds);
-#endif
-cout << "nu = " << nu << ", result=" << sum(result) << endl;
-            if (sum(result) > sum(best_result)) {
-                best_result = result;
-                best_index = gidx;
-                best_index_span = 0;
-            }
-            else if (sum(result) == sum(best_result)) {
-                if (best_index==-1) best_index = gidx;
-                ++best_index_span;
-            }
-        }
-        // if no better index keep previous best_nu
-        if (best_index>=0) best_nu = min2 + (max2 - min2) * (best_index + best_index_span * 0.5) / (num_grid_nu + 1.0);
-cout << "best_nu = " << best_nu << endl;
-
-        double lnu = log(best_nu);
-
-        double best_score = dlib::find_max_single_variable(
-            cross_validation_objective(samples, labels, nfolds,this), // Function to maximize
-            lnu,              // starting point and result
-            log(min_nu),          // lower bound
-            log(max_nu),          // upper bound
-            1e-3,
-            50
-        );
-cout << "best_nu after find_max_single_variable = " << (FloatType)exp(lnu) << ", result=" << best_score << endl;
-        return (FloatType)exp(lnu);
-
-#else // SVM_FAST_MODE
         double best_score = -1;
-        double best_llambda = log(1e-4);
-        cout << "Optimising the lambda parameter (SVM-pegasos algorithm) " << flush;
-        int num_grid_lambda = 25;
+        double best_logarg = log(1e-4);
+        cout << "Optimising the SVM" << flush;
+#ifdef SVM_NU_TRAINER
+        // largest allowed nu: strictly below what's returned by maximum_nu
+        double max_arg = 0.999*maximum_nu(labels);
+        double min_arg = max_arg * 1e-3;
+        double lmax = log(max_arg);
+        double lmin = log(min_arg);
+#else
+        // arg is actually lambda
         double lmin = log(1e-6);
         double lmax = log(1e-2);
-        #pragma omp parallel for
-        for (int gidx = 0; gidx<num_grid_lambda; ++gidx) {
+#endif
+        #pragma omp parallel for schedule(dynamic)
+        for (int gidx = 1; gidx<=grid_size; ++gidx) {
             cout << "." << flush;
-            // batch rate from 0.05 to 0.12
-            trainer_batch_rate = 0.1;//05 + tbri * 0.007;
-            double llambda = log(1e-4); //lmin + (lmax - lmin) * gidx / (num_grid_lambda - 1.0);
+            double larg = lmin + (lmax - lmin) * gidx / (grid_size + 1.0);
             double score = find_max_single_variable(
                 cross_validation_objective(samples, labels, nfolds, this), // Function to maximize
-                llambda,              // starting point and result
+                larg,          // starting point and result
                 lmin,          // lower bound, log(1e-6)
                 lmax,          // upper bound
-                1e-3,
-                50
+                // precision (here on the sum of both class accuracies)
+                2e-4,
+                100            // max number of iterations
             );
             #pragma omp critical
             if (score > best_score) {
                 best_score = score;
-                best_llambda = llambda;
+                best_logarg = larg;
             }
         }
         cout << endl;
-cout << "best_lambda after find_max_single_variable = " << (FloatType)exp(best_llambda) << ", result=" << best_score << endl;
-        return (FloatType)exp(best_llambda);
-
-#endif
+        cout << "cross-validated balanced accuracy = " << 0.5 * best_score << endl;
+        return (FloatType)exp(best_logarg);
     }
     
     void train(int nfolds, FloatType nu, const std::vector<sample_type>& samples, const std::vector<FloatType>& labels) {
         using namespace dlib;
-#ifdef SVM_FAST_MODE
+#ifdef SVM_NU_TRAINER
+        svm_nu_trainer<kernel_type> trainer;
+        trainer.set_nu(nu);
+        trainer.set_kernel(kernel_type());
+#else
         svm_pegasos<kernel_type> pegasos_trainer;
         pegasos_trainer.set_lambda(nu);
         pegasos_trainer.set_kernel(kernel_type());
         batch_trainer<svm_pegasos<kernel_type> > trainer = batch_cached(pegasos_trainer,trainer_batch_rate);
-#else
-        svm_nu_trainer<kernel_type> trainer;
-        trainer.set_nu(nu);
-        trainer.set_kernel(kernel_type());
 #endif
         int dim = samples.back().size();
         // linear kernel: convert the decision function to an hyperplane rather than support vectors
@@ -247,16 +160,7 @@ cout << "best_lambda after find_max_single_variable = " << (FloatType)exp(best_l
         // So in the final classifier we have d(x)=0 matching the probabilistic decfun
         for (int i=0; i<=dim; ++i) weights[i] *= pdecfun.alpha;
         weights[dim] += pdecfun.beta;
-/*
-        // checking for a few samples
-        for (int i=0; i<10; ++i) {
-            cout << pdecfun(samples[i]) << " ";
-            FloatType dx = weights[dim];
-            for (int j=0; j<dim; ++j) dx += weights[j] * samples[i](j);
-            dx = 1 / (1+exp(dx));
-            cout << dx << endl;
-        }
-*/
+
         // revert the decision function so we compute proba to be in the -1 class, i.e.
         // the first class given to the classifier program
         for (int i=0; i<=dim; ++i) weights[i] = -weights[i];

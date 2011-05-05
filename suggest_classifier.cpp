@@ -20,11 +20,16 @@ using namespace std;
 typedef LinearSVM::sample_type sample_type;
 
 int help(const char* errmsg = 0) {
-    if (errmsg) cout << "Error: " << errmsg << endl;
 cout << "\
-suggest_classifier outfile.svg [ msc(non label) ...] : class1.msc ... - class2.msc ...\n\
+suggest_classifier [=N] outfile.svg [ unlabeled.msc ...] : class1.msc ... - class2.msc ...\n\
+    input: class1.msc ... - class2.msc ...  # the multiscale files for each class, separated by -\n\
+    output: outfile.svg                     # a svg file in which to write a classifier definition. This file may be edited graphically (ex: with inkscape) so as to add more points in the path that separates both classes. So long as there is only one path consisting only of line segments it shall be recognised.\n\
+    \n\
+    input(optional): unlabeled.msc          # additionnal multiscale files for the scene that are not classified. These provide more points for semi-supervised learning. The corresponding points will be displayed in grey in the output file.\n\
+    input(optional): =N                     # Size of the search grid for cross-validating the SVM. By default N=1 is used, with a local search for the best parameters around a default value hopefully adequate most of the time. Use N>1 in order to increase the quality of the training at the expense of a larger computation time.\n\
 "<<endl;
-        return 0;
+    if (errmsg) cout << "Error: " << errmsg << endl;
+    return 0;
 }
 
 bool fpeq(FloatType a, FloatType b) {
@@ -120,10 +125,20 @@ int main(int argc, char** argv) {
     
     if (argc<5) return help();
     
-    ofstream svgfile(argv[1]);
+    int grid_size = 1;
+    int arg_shift = 0;
+    
+    string first_arg = argv[1];
+    if (first_arg[0]=='=') {
+        grid_size = atoi(first_arg.substr(1).c_str());
+        if (grid_size<1) return help();
+        ++arg_shift;
+    }
+    
+    ofstream svgfile(argv[arg_shift+1]);
     
     int arg_class1 = argc;
-    for (int argi = 2; argi<argc; ++argi) if (!strcmp(argv[argi],":")) {
+    for (int argi = arg_shift+2; argi<argc; ++argi) if (!strcmp(argv[argi],":")) {
         arg_class1 = argi+1;
         break;
     }
@@ -139,12 +154,12 @@ int main(int argc, char** argv) {
     sample_type undefsample;
     int ptnparams;
 
-    cout << "Loading unlabelled files" << endl;
+    cout << "Loading unlabeled files" << endl;
     
     // neutral files, if any
     int ndata_unlabeled = 0;
     vector<FloatType> scales;
-    for (int argi = 2; argi<arg_class1-1; ++argi) {
+    for (int argi = arg_shift+2; argi<arg_class1-1; ++argi) {
         ifstream mscfile(argv[argi], ifstream::binary);
         // read the file header
         int npts = read_msc_header(mscfile, scales, ptnparams);
@@ -157,7 +172,7 @@ int main(int argc, char** argv) {
     // fill data
     vector<sample_type> data_unlabeled(ndata_unlabeled, undefsample);
     int base_pt = 0;
-    for (int argi = 2; argi<arg_class1-1; ++argi) {
+    for (int argi = arg_shift+2; argi<arg_class1-1; ++argi) {
         ifstream mscfile(argv[argi], ifstream::binary);
         // read the file header (again)
         int npts = read_msc_header(mscfile, scales, ptnparams);
@@ -212,7 +227,7 @@ int main(int argc, char** argv) {
     
     cout << "Computing the two best projection directions" << endl;
 
-    LinearSVM classifier;
+    LinearSVM classifier(grid_size);
 
     // shuffle before cross-validating to spread instances of each class
     dlib::randomize_samples(samples, labels);
@@ -238,7 +253,7 @@ int main(int argc, char** argv) {
     }
 
     // already shuffled, and do not change order for the proj1 anyway
-    LinearSVM ortho_classifier;
+    LinearSVM ortho_classifier(grid_size);
     nu = ortho_classifier.crossValidate(10, samples, labels);
     cout << "Training" << endl;
     ortho_classifier.train(10, nu, samples, labels);
@@ -388,7 +403,7 @@ int main(int argc, char** argv) {
     // cumulating transluscent points to easily get a density estimate
     cairo_set_source_rgba(cr, 0.4, 0.4, 0.4, 0.1);
     // Plot points
-    // first the unlabelled data, if any
+    // first the unlabeled data, if any
     for (int i=0; i<ndata_unlabeled; ++i) {
         // we have to project this data as this was not done above
         FloatType x = classifier.predict(data_unlabeled[i]) * scaleFactor + halfSvgSize;
@@ -519,12 +534,12 @@ int main(int argc, char** argv) {
 #endif
 
 #ifdef CANUPO_NO_PNG
-    string filename = argv[1];
+    string filename = argv[arg_shift+1];
     filename.replace(filename.size()-3,3,"ppm");
     ppmwrite(surface,filename.c_str());
     svgfile << "<image xlink:href=\""<< filename << "\" width=\""<<svgSize<<"\" height=\""<<svgSize<<"\" x=\"0\" y=\"0\" style=\"z-index:0\" />" << endl;
 #else
-    //cairo_surface_write_to_png (surface, argv[1]);
+    //cairo_surface_write_to_png (surface, argv[arg_shift+1]);
     std::vector<char> pngdata;
     pngdata.reserve(800*800*3); // need only large enough init size
     cairo_surface_write_to_png_stream(surface, png_copier, &pngdata);
