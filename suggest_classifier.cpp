@@ -229,55 +229,23 @@ int main(int argc, char** argv) {
     // The procedure is a bit like PCA except we seek the successive directions of maximal
     // separability instead of maximal variance
     
-    // projection parameters
-    vector<FloatType> nvec(fdim); // normal vector
-    FloatType norm = 0;
-    for (int i=0; i<fdim; ++i) {
-        nvec[i] = classifier.weights[i];
-        norm += nvec[i] * nvec[i];
-    }
-    norm = sqrt(norm);
-    for (int i=0; i<fdim; ++i) nvec[i] /= norm;
-    vector<FloatType> svec(fdim); // shift vector
-    // dot product between normal and shift is given by the bias
-    FloatType sndot = -classifier.weights[fdim] / norm;
-    for (int i=0; i<fdim; ++i) svec[i] = sndot * nvec[i];
-    
     // project the data onto the hyperplane so as to get the second direction
-    LinearSVM ortho_classifier;
+    FloatType w2 = 0;
+    for (int i=0; i<fdim; ++i) w2 += classifier.weights[i] * classifier.weights[i];
     for (int si=0; si<nsamples; ++si) {
-        FloatType dotprod = 0;
-        for(int i=0; i<fdim; ++i) dotprod += nvec[i] * (samples[si](i) - svec[i]);
-        for(int i=0; i<fdim; ++i) samples[si](i) -= dotprod * nvec[i];
+        FloatType c = proj1[si] / w2;
+        for(int i=0; i<fdim; ++i) samples[si](i) -= c * classifier.weights[i];
     }
+
     // already shuffled, and do not change order for the proj1 anyway
+    LinearSVM ortho_classifier;
     nu = ortho_classifier.crossValidate(10, samples, labels);
+    cout << "Training" << endl;
     ortho_classifier.train(10, nu, samples, labels);
 
     vector<FloatType> proj2(nsamples);
     for (int i=0; i<nsamples; ++i) proj2[i] = ortho_classifier.predict(samples[i]);
-    
-    // Warning: this is in the projected space !
-    // samples X were transformed
-    // Xproj = X - (N . (X - S)) * N  with S shift vector
-    // second hyperplane equa in original space : 
-    // N_ortho . (Xproj - S_ortho) = 0
-    // N_ortho . (X - (N . (X - S)) * N - S_ortho) = 0
-    // But N_ortho . N = 0 by def
-    // N_ortho . (X - S_ortho) = 0   // ok, equa directly applicable in original space
-    vector<FloatType> nvec_ortho(fdim); // normal vector
-    FloatType norm_ortho = 0;
-    for (int i=0; i<fdim; ++i) {
-        nvec_ortho[i] = ortho_classifier.weights[i];
-        norm_ortho += nvec_ortho[i] * nvec_ortho[i];
-    }
-    norm_ortho = sqrt(norm_ortho);
-    for (int i=0; i<fdim; ++i) nvec_ortho[i] /= norm_ortho;
-    vector<FloatType> svec_ortho(fdim); // shift vector
-    // dot product between normal and shift is given by the bias
-    FloatType sndot_ortho = -ortho_classifier.weights[fdim] / norm_ortho;
-    for (int i=0; i<fdim; ++i) svec_ortho[i] = sndot_ortho * nvec_ortho[i];
-    
+
     // compute the reference points for orienting the classifier boundaries
     // pathological cases are possible where an arbitrary point in the (>0,>0)
     // quadrant is not in the +1 class for example
