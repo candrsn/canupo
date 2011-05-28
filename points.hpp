@@ -52,6 +52,7 @@ struct PointTemplate : public Base, boost::addable<PointTemplate<Base>, boost::s
     inline FloatType norm() const {return sqrt(norm2());}
     inline FloatType dot(const PointTemplate& v) const {return x*v.x + y*v.y + z*v.z;}
     inline PointTemplate cross(const PointTemplate& v) const {return PointTemplate(y*v.z-z*v.y, z*v.x-x*v.z, x*v.y-y*v.x);}
+    inline FloatType normalize() {double n = norm(); if (n>0) *this /= n;}
 
     enum {dim = 3};
 };
@@ -192,7 +193,7 @@ struct PointCloud {
         ++nextptidx;
     }
 
-    void load_txt(const char* filename, std::vector<FloatType>* additionalInfo = 0) {
+    void load_txt(const char* filename, std::vector<std::vector<FloatType> >* additionalInfo = 0) {
         using namespace std;
         data.clear();
         grid.clear();
@@ -218,14 +219,9 @@ struct PointCloud {
                 if (i<Point::dim) point[i] = value;
                 if (++i==4) break;
             }
-            if ((use4 && i<4) || (i<3)) {
-                cout << "Warning: ignoring line " << linenum << " with only " << i << " value" << (i>1?"s":"") << " in file " << filename << endl;
-                continue;
-            }
             if (i==4 && additionalInfo) {
                 if (use4==false && !data.empty()) {
-                    cout << "Warning: 4rth value met at line " << linenum << " but it was not present before, ignoring all data up to that line." << endl;
-                    npts = 0;
+                    cout << "Warning: 4rth value met at line " << linenum << " but it was not present before." << endl;
                 }
                 use4 = true;
             }
@@ -237,10 +233,9 @@ struct PointCloud {
         }
         
         prepare(xmin, xmax, ymin, ymax, npts);
-        if (use4) additionalInfo->resize(npts);
+        if (additionalInfo) additionalInfo->resize(npts);
         
         // second pass to load the data structure in place
-        int ptidx=0;
         datafile.close();
         datafile.open(filename);
         while (datafile && !datafile.eof()) {
@@ -252,16 +247,18 @@ struct PointCloud {
             int i = 0;
             while (linereader >> value) {
                 if (i<Point::dim) point[i] = value;
-                if (++i==4) break;
+                if (i>=Point::dim && additionalInfo!=0) {
+                    (*additionalInfo)[nextptidx].push_back(value);
+                }
+                ++i;
             }
-            if (i>=Point::dim+use4) {
-                insert(point);
-                if (use4) (*additionalInfo)[ptidx++] = value;
-            }
+            insert(point);
         }
         datafile.close();
     }
-    inline void load_txt(std::string s) {load_txt(s.c_str());}
+    inline void load_txt(std::string s, std::vector<std::vector<FloatType> >* additionalInfo = 0) {
+        load_txt(s.c_str(), additionalInfo);
+    }
 
     // TODO: save_bin / load_bin if txt files take too long to load
     

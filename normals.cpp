@@ -40,11 +40,14 @@ normals scales... : refx refy data.xyz data_core.xyz data_core_normals.xyz\n\
                          # Tip: use core points at least at max_scale distance from the scene\n\
                          # boundaries in order to avoid spurious multi-scale relations\n\
   outputs: data_core_normals.msc\n\
-                         # The normals for each core points as the first xyz entries in the file\n\
-                         # The 4rth column indicates the scale at which the normal was computed\n\
+                         # The normals for each core points\n\
+                         # The core points are shifted along the normal direction to be at the\n\
+                         # center of the cloud in that direction\n\
+                         # The shifted core points are given as the first xyz entries in each line\n\
+                         # The normal are given as the next xyz entries on the line\n\
+                         # The 7th column indicates the scale at which the normal was computed\n\
                          # That scale was selected as the one where the cloud is the most\n\
                          # 2D in the given range (in case of equality choose the largest scale)\n\
-                         # Normals are oriented toward the vertical: normal.vertical > 0\n\
 "<<endl;
     return 0;
 }

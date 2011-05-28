@@ -228,7 +228,7 @@ int main(int argc, char** argv) {
     
     cout << "Loading scene data" << endl;
     PointCloud<Point> sceneCloud;
-    vector<FloatType> sceneAdditionalInfo;
+    vector<vector<FloatType> > sceneAdditionalInfo;
     sceneCloud.load_txt(argv[2], &sceneAdditionalInfo);
     
     cout << "Processing scene data" << endl;
@@ -338,9 +338,9 @@ int main(int argc, char** argv) {
                             else pred = class2sceneidx.size() / (FloatType)nsamples;
 */
                             vector<FloatType> info1(class1sceneidx.size());
-                            for (int i=0; i<class1sceneidx.size(); ++i) info1[i] = sceneAdditionalInfo[class1sceneidx[i]];
+                            for (int i=0; i<class1sceneidx.size(); ++i) info1[i] = sceneAdditionalInfo[class1sceneidx[i]][0];
                             vector<FloatType> info2(class2sceneidx.size());
-                            for (int i=0; i<class2sceneidx.size(); ++i) info2[i] = sceneAdditionalInfo[class2sceneidx[i]];
+                            for (int i=0; i<class2sceneidx.size(); ++i) info2[i] = sceneAdditionalInfo[class2sceneidx[i]][0];
                             sort(info1.begin(), info1.end());
                             sort(info2.begin(), info2.end());
                             vector<FloatType>* smallestvec, * largestvec;
