@@ -31,7 +31,10 @@ Usage: tranche_berge  data_core_normals.xyz data.xyz hmin hmax lmin lmax E dx ou
   input: E         # width of the slice\n\
   input: dx        # profile granularity\n\
   output: output_prefix   # Results will be generated for each core point as output_prefix%d_type.txt\n\
-  input: type      #  type=\"raw\": all points in the slice, as: x y z scalar1 xi yi zi with xi yi zi the local coordinates, x y z and scalars the original data. The first line contains the core point with scalar1=99. type=\"slice\": all points in the slice, as: xi yi zi x y z scalars... and in a separate file \"base\" the coordinate of the core point and then the local x, y, z vectors, on 4 lines. type=\"prof\": the profile. type=\"all\" computes all types. \n\
+  input: type      #  type=\"raw\": all points in the slice, as: x y z scalar1 xi yi zi with xi yi zi the local coordinates, x y z and scalars the original data. The first line contains the core point with scalar1=99.\n\
+                   # type=\"slice\": all points in the slice, as: xi yi zi x y z scalars... and in a separate file \"base\" the coordinate of the core point and then the local x, y, z vectors, on 4 lines.\n\
+                   # type=\"profile\": the profile containing on each line some statistics on a slab of size (dx,E,hmin+hmax) along the local X axis: xp xavg yavg zavg zmin zmax zdev count xg yg zg scalar_avg... where: xp is the center position of the slab along the local X (so the slab ranges xp-dx/2 to xp+dx/2), (xavg,yavg,zavg) is the real average position of the points in the slab (local coordinates), zmin/zmax/zdev are statistics on z in the slab (local coordinates), count is the number of points in the slab, (xg,yg,zg) are the global coordinates of the point with local coordinates (xp,0,zavg). Averaged scalars if any are then given on the remaining of the line\n\
+                   # type=\"all\" computes all types. \n\
 more types can be given, all corresponding files will be generated (saves computation time)  \n\
 " << endl;
     return 0;
@@ -59,7 +62,7 @@ int main(int argc, char** argv) {
     for (int argi=10; argi<argc; ++argi) {
         if (strcasecmp(argv[argi],"raw")==0 || strcasecmp(argv[argi],"all")==0) compute_raw = true;
         if (strcasecmp(argv[argi],"slice")==0 || strcasecmp(argv[argi],"all")==0) compute_slice = true;
-        if (strcasecmp(argv[argi],"prof")==0 || strcasecmp(argv[argi],"all")==0) compute_prof = true;
+        if (strcasecmp(argv[argi],"profile")==0 || strcasecmp(argv[argi],"all")==0) compute_prof = true;
         if (strcasecmp(argv[argi],"sec")==0 || strcasecmp(argv[argi],"all")==0) compute_sec = true;
     }
     
@@ -146,6 +149,7 @@ int main(int argc, char** argv) {
         int nprof = 0; 
         if (dx>0) nprof = (int)floor((lmin+lmax) / dx);
         vector<double> profile_xavg(nprof, 0.0);
+        vector<double> profile_yavg(nprof, 0.0);
         vector<double> profile_zmin(nprof, 0.0);
         vector<double> profile_zmax(nprof, 0.0);
         vector<double> profile_zavg(nprof, 0.0);
@@ -205,6 +209,7 @@ int main(int argc, char** argv) {
                 int pi = (int)floor((local_neighbor.x + lmin) * nprof / (lmin+lmax));
                 if (pi>=0 && pi<nprof) { // shall always be the case
                     profile_xavg[pi] += local_neighbor.x;
+                    profile_yavg[pi] += local_neighbor.y;
                     if (local_neighbor.z < profile_zmin[pi]) {profile_zmin[pi] = local_neighbor.z;}
                     if (local_neighbor.z > profile_zmax[pi]) {profile_zmax[pi] = local_neighbor.z;}
                     profile_zavg[pi] += local_neighbor.z;
@@ -216,16 +221,18 @@ int main(int argc, char** argv) {
         }
         
         if (compute_prof) {
-            ofstream prof_ouput_file(str(boost::format("%s%d_prof.txt") % output_prefix % (corenum+1)).c_str());
+            ofstream prof_ouput_file(str(boost::format("%s%d_profile.txt") % output_prefix % (corenum+1)).c_str());
             for (int pi = 0; pi < nprof; ++pi) {
                 double xp = -lmin + (pi+0.5) * (lmin+lmax) / nprof;
                 double count = profile_count[pi];
                 if (count<1) count = 1; // in which case the avg are 0, so division is OK
                 profile_xavg[pi] /= count;
+                profile_yavg[pi] /= count;
                 profile_zavg[pi] /= count;
                 profile_zdev[pi] = sqrt((profile_zdev[pi] - profile_zavg[pi] * profile_zavg[pi] * count) / (count - 1.0));
                 if (count==1) profile_zdev[pi] = 0;
-                prof_ouput_file << profile_xavg[pi] << " " << profile_zavg[pi] << " " << profile_zmin[pi] << " " << profile_zmax[pi] << " " << profile_zdev[pi] << " " << profile_count[pi] << " " << xp;
+                Point tranche_pos = corepoints[corenum] + xp * lxvec + profile_zavg[pi] * lzvec;
+                prof_ouput_file << xp << " " << profile_xavg[pi] << " " << profile_yavg[pi] << " " << profile_zavg[pi] << " " << profile_zmin[pi] << " " << profile_zmax[pi] << " " << profile_zdev[pi] << " " << profile_count[pi] << " " << tranche_pos.x << " " << tranche_pos.y << " " << tranche_pos.z;
                 for (int si=0; si<nscalar; ++si) prof_ouput_file << " " << (profile_scalar[pi][si] / count);
                 prof_ouput_file << endl;
             }

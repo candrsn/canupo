@@ -27,6 +27,10 @@ classify features.prm scene.xyz scene_core.msc scene_annotated.xyz [pok [usage_f
   input: scene_core.msc       # Multiscale parameters at core points in the scene\n\
                               # This file need only contain the relevant scales for classification\n\
                               # as reported by the make_features program\n\
+  output: scene_annotated.xyz # Output file containing extra columns: the class\n\
+                              # of each point, the confidence in the classification,\n\
+                              # the number of neighbors at the min and max scales\n\
+                              # Scene points are labelled with the class of the nearest core point.\n\
   input: pok                  # Some threshold, expressed as a probability to make\n\
                               # a correct classification (0.5<pok<1). Use 0\n\
                               # to disable the threshold, which is also the default\n\
@@ -42,8 +46,6 @@ classify features.prm scene.xyz scene_core.msc scene_annotated.xyz [pok [usage_f
                               #      for points < pok\n\
                               #      This parameter has no effect if there is no 4rth value\n\
                               #      in the provided file\n\
-  output: scene_annotated.xyz # Output file containing an extra column with the class of each point\n\
-                              # Scene points are labelled with the class of the nearest core point.\n\
 "<<endl;
 #ifdef CHECK_CLASSIFIER
 cout << "\n\
@@ -64,7 +66,8 @@ bool fpeq(FloatType a, FloatType b) {
 struct ClassifInfo {
     bool reliable;
     int classif;
-    ClassifInfo() : reliable(false), classif(-1) {}
+    FloatType confidence;
+    ClassifInfo() : reliable(false), classif(-1), confidence(0.5) {}
 };
 typedef PointTemplate<ClassifInfo> PointClassif;
 
@@ -85,7 +88,7 @@ int main(int argc, char** argv) {
             usage_flag = atoi(argv[6]);
         }
     }
-    
+
     cout << "Loading parameters and core points" << endl;
     
     ifstream classifparamsfile(argv[1], ifstream::binary);
@@ -163,8 +166,9 @@ int main(int argc, char** argv) {
     // Put the points in the cloud, keep the multiscale information in a separate vector matched by point index
     PointCloud<PointClassif> coreCloud;
     vector<FloatType> mscdata(ncorepoints * nscales*2);
-    // extract only largest scale neighbor stats for output file
+    // extract only min/max scales neighbor stats for output file
     vector<int> nneigh_max_scale(ncorepoints);
+    vector<int> nneigh_min_scale(ncorepoints);
     //vector<FloatType> avg_ndist_max_scale(ncorepoints);
     coreCloud.data.resize(ncorepoints);
     coreCloud.xmin = numeric_limits<FloatType>::max();
@@ -196,11 +200,11 @@ int main(int argc, char** argv) {
             mscdata[pt * nscales_msc*2 + s*2  ] = x;
             mscdata[pt * nscales_msc*2 + s*2+1] = y;
         }
-        // we care only for number of neighbors and average dist between nearest
-        // neighbors at max scale
-        int fooi;
+        // we care only for number of neighbors at max and min scales
         mscfile.read((char*)&nneigh_max_scale[pt], sizeof(int));
-        for (int i=1; i<nscales; ++i) mscfile.read((char*)&fooi, sizeof(int));
+        int numneigh;
+        for (int i=1; i<nscales; ++i) mscfile.read((char*)&numneigh, sizeof(int));
+        nneigh_min_scale[pt] = numneigh;
 /*        FloatType foof;
         mscfile.read((char*)&avg_ndist_max_scale[pt], sizeof(FloatType));
         for (int i=1; i<nscales; ++i) mscfile.read((char*)&foof, sizeof(FloatType));*/
@@ -268,6 +272,7 @@ int main(int argc, char** argv) {
             int ptidx = idxToSearch[itsi];
             map<int,int> votes;
             map< pair<int,int>, FloatType > predictions;
+            map<int,FloatType> minconfidences;
             bool unreliable = false;
             // one-against-one process: apply all classifiers and vote for this point class
             for (int ci=0; ci<nclassifiers; ++ci) {
@@ -410,8 +415,18 @@ int main(int argc, char** argv) {
                     else unreliable = true;
                 }
                 if (unreliable) break;
-                if (pred>=0) ++votes[maxclass];
-                else ++votes[minclass];
+                FloatType confidence = 1.0 / (exp(-fabs(pred))+1.0);
+                int theclass = minclass;
+                if (pred>=0) theclass = maxclass;
+                ++votes[theclass];
+                // simply maintain the min confidence for each class
+                // and we'll use that for the best vote below
+                // for our application this is enough
+                if (minconfidences.find(theclass)==minconfidences.end()) {
+                    minconfidences[theclass] = confidence;
+                } else {
+                    if (confidence<minconfidences[theclass]) minconfidences[theclass] = confidence;
+                }
                 predictions[make_pair(minclass, maxclass)] = pred;
             }
             if (unreliable) continue; // no classification
@@ -430,29 +445,25 @@ int main(int argc, char** argv) {
                     bestclasses.push_back(vclass);
                 }
             }
+
             // only one class => do not bother with tie breaking
-            if (bestclasses.size()==1) coreCloud.data[ptidx].classif = bestclasses[0]; 
+            if (bestclasses.size()==1) {
+                coreCloud.data[ptidx].classif = bestclasses[0]; 
+                coreCloud.data[ptidx].confidence = minconfidences[bestclasses[0]];
+            }
             else {
                 // in case equality = use the distances from the decision boundary
-                map<int, FloatType> votepred;
-                // process only once each pair of classes
-                for (int j=1; j<bestclasses.size(); ++j) for (int i=0; i<j; ++i) {
-                    int minc = min(bestclasses[i], bestclasses[j]);
-                    int maxc = max(bestclasses[i], bestclasses[j]);
-                    FloatType pred = predictions[make_pair(minc,maxc)];
-                    if (pred>=0) votepred[maxc] += pred;
-                    else votepred[minc] -= pred; // sum positive contributions
-                }
-                // now look for the class with max total decision boundary
-                FloatType maxpred = -numeric_limits<FloatType>::max();
-                int selectedclass = 1;
-                for (map<int, FloatType>::iterator it = votepred.begin(); it!=votepred.end(); ++it) {
-                    if (maxpred < it->second) {
-                        maxpred = it->second;
-                        selectedclass = it->first;
+                // take the max vote class that has also farthest min dist
+                FloatType max_minc = minconfidences[bestclasses[0]];
+                int selectedclass = bestclasses[0];
+                for (int j=1; j<bestclasses.size(); ++j) {
+                    if (minconfidences[bestclasses[j]]>max_minc) {
+                        max_minc = minconfidences[bestclasses[j]];
+                        selectedclass = bestclasses[j];
                     }
                 }
                 coreCloud.data[ptidx].classif = selectedclass;
+                coreCloud.data[ptidx].confidence = max_minc;
             }
         }
         
@@ -478,7 +489,7 @@ int main(int argc, char** argv) {
 
     cout << "Core points classified, labelling scene data" << endl;
     cout << "Output file contains for each point a line with the following values:" << endl;
-    cout << "x  y  z  class  num_neighbors_max_scale ";// avg_dist_nearest_neighbors_max_scale";
+    cout << "x  y  z  class  confidence num_neighbors_min_scale num_neighbors_max_scale ";// avg_dist_nearest_neighbors_max_scale";
     if (!coreAdditionalInfo.empty()) cout << " extra_info";
     cout << endl;
     cout << "The first 3 values are those of the scene point (x,y,z), the other values are taken from the nearest core point to this scene point" << endl;
@@ -493,8 +504,10 @@ int main(int argc, char** argv) {
             return 1;
         }
         // assign the scene point to this core point class, which was computed before
-        scene_annotated << point.x << " " << point.y << " " << point.z << " ";
-        scene_annotated << coreCloud.data[neighidx].classif;
+        scene_annotated << point.x << " " << point.y << " " << point.z;
+        scene_annotated << " " << coreCloud.data[neighidx].classif;
+        scene_annotated << " " << coreCloud.data[neighidx].confidence;
+        scene_annotated << " " << nneigh_min_scale[neighidx];
         scene_annotated << " " << nneigh_max_scale[neighidx];
         //scene_annotated << " " << avg_ndist_max_scale[neighidx];
         if (!coreAdditionalInfo.empty()) scene_annotated << " " << coreAdditionalInfo[neighidx];
