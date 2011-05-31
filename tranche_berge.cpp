@@ -30,7 +30,7 @@ Usage: tranche_berge  data_core_normals.xyz data.xyz hmin hmax lmin lmax E dx ou
   input: lmax      # max distance along the normal in the positive direction from the core point\n\
   input: E         # width of the slice\n\
   input: dx        # profile granularity\n\
-  output: output_prefix   # Results will be generated for each core point as output_prefix%d_type.txt\n\
+  output: output_prefix   # Results will be generated for each core point as output_prefixNNN_type.txt where NNN is the number of the core point in order of appearance in the original file.\n\
   input: type      #  type=\"raw\": all points in the slice, as: x y z scalar1 xi yi zi with xi yi zi the local coordinates, x y z and scalars the original data. The first line contains the core point with scalar1=99.\n\
                    # type=\"slice\": all points in the slice, as: xi yi zi x y z scalars... and in a separate file \"base\" the coordinate of the core point and then the local x, y, z vectors, on 4 lines.\n\
                    # type=\"profile\": the profile containing on each line some statistics on a slab of size (dx,E,hmin+hmax) along the local X axis: xp xavg yavg zavg zmin zmax zdev count xg yg zg scalar_avg... where: xp is the center position of the slab along the local X (so the slab ranges xp-dx/2 to xp+dx/2), (xavg,yavg,zavg) is the real average position of the points in the slab (local coordinates), zmin/zmax/zdev are statistics on z in the slab (local coordinates), count is the number of points in the slab, (xg,yg,zg) are the global coordinates of the point with local coordinates (xp,0,zavg). Averaged scalars if any are then given on the remaining of the line\n\
@@ -71,8 +71,10 @@ int main(int argc, char** argv) {
     string line;
     int linenum = 0;
     while (corepointsfile && !corepointsfile.eof()) {
-        ++linenum;
         getline(corepointsfile, line);
+        trim(line);
+        if (line.empty() || starts_with(line,"#") || starts_with(line,";") || starts_with(line,"!") || starts_with(line,"//")) continue;
+        ++linenum;
     }
     corepointsfile.close();
     
@@ -83,6 +85,7 @@ int main(int argc, char** argv) {
     linenum = 0;
     while (corepointsfile && !corepointsfile.eof()) {
         getline(corepointsfile, line);
+        trim(line);
         if (line.empty() || starts_with(line,"#") || starts_with(line,";") || starts_with(line,"!") || starts_with(line,"//")) continue;
         stringstream linereader(line);
         FloatType value;
