@@ -24,7 +24,7 @@ using namespace boost;
 int help(const char* errmsg = 0) {
     if (errmsg) cout << "Error: " << errmsg << endl;
 cout << "\
-canupo scales... : data.xyz data_core.xyz data_core.msc\n\
+canupo scales... : data.xyz data_core.xyz data_core.msc [flag]\n\
   inputs: scales         # list of scales at which to perform the analysis\n\
                          # The syntax minscale:increment:maxscale is also accepted\n\
                          # Use : to indicate the end of the list of scales\n\
@@ -37,7 +37,8 @@ canupo scales... : data.xyz data_core.xyz data_core.msc\n\
                          # data points, the core points need only lie in the same region as data.\n\
                          # Tip: use core points at least at max_scale distance from the scene\n\
                          # boundaries in order to avoid spurious multi-scale relations\n\
-  outputs: data_core.msc # corresponding multiscale parameters at each core point\n\
+  output: data_core.msc  # corresponding multiscale parameters at each core point\n\
+  input: flag            # (optional) if the flag is set to 1 then an additionnal field is added into the output msc file for each core point: the angle (0<=a<=90°) between the vertical and the normal of the best 2D plane fit at that core point, at the largest given scale. 0 thus means a perfectly horizontal plane, 90 means a perfectly vertical one\n\
 "<<endl;
     return 0;
 }
@@ -101,7 +102,12 @@ int main(int argc, char** argv) {
     string datafilename = argv[separator+1];
     string corepointsfilename = argv[separator+2];
     string mscfilename = argv[separator+3];
+    
+    int flag = 0;
+    if (argc>separator+4) flag = atoi(argv[separator+4]);
 
+    bool add_vertical_info = bool( (flag & 1) != 0 );
+    
     cout << "Loading data files" << endl;
     
     PointCloud<Point> cloud;
@@ -162,6 +168,7 @@ int main(int argc, char** argv) {
         mscfile.write((char*)&scale, sizeof(scale));
     }
     int ptnparams = 3 + !additionalInfo.empty();
+    if (add_vertical_info) ++ptnparams;
     mscfile.write((char*)&ptnparams, sizeof(int));
     // file ready to write data for all points one by one
 
@@ -200,6 +207,10 @@ if (omp_get_thread_num()==0) {
         // ab values implicitly reused from higher scale if there are not enough neighbors
         // TODO: nearest neighbors of ab at higher scales and get average of the neighbors ab at low scale
         FloatType a = 1.0/3.0, b = 1.0/3.0;
+        
+        // used only when computing the additionnal vertical info
+        FloatType vertical_angle = -1;
+        vector<FloatType> eigenvectors(9);
         
         // Scales shall be sorted from max to lowest 
         for (ScaleSet::iterator scaleit = scales.begin(); scaleit != scales.end(); ++scaleit) {
@@ -253,7 +264,23 @@ if (omp_get_thread_num()==0) {
                     A[i+neighbors.size()+neighbors.size()] = neighbors[i].pt->z - avg.z;
                 }
                 // SVD decomposition handled by LAPACK
-                svd(neighbors.size(), 3, &A[0], &svalues[0]);
+                // compute the vertical info only at the larger scale
+                if (add_vertical_info && vertical_angle==-1) {
+                    svd(neighbors.size(), 3, &A[0], &svalues[0], false, &eigenvectors[0]);
+                    // column-major matrix, eigenvectors as rows
+                    Point e1(eigenvectors[0], eigenvectors[3], eigenvectors[6]);
+                    Point e2(eigenvectors[1], eigenvectors[4], eigenvectors[7]);
+                    // e3 shall be orthogonal to e1 and e2
+                    // use the cross-product since the two first components are
+                    // better conditionned
+                    // then project to (0,0,1), possibly reverting the orientation
+                    vertical_angle = fabs(e1.cross(e2).z);
+                    // ensure no idiotic out-of-range due to float-point precision...
+                    if (vertical_angle<0) vertical_angle = 0;
+                    if (vertical_angle>1) vertical_angle = 1;
+                    vertical_angle = acos(vertical_angle) * 180 / M_PI;
+                }
+                else svd(neighbors.size(), 3, &A[0], &svalues[0]);
                 // convert to percent variance explained by each dim
                 FloatType totalvar = 0;
                 for (int i=0; i<3; ++i) {
@@ -306,6 +333,7 @@ if (omp_get_thread_num()==0) {
             mscfile.write((char*)&corepoints[ptidx].y,sizeof(FloatType));
             mscfile.write((char*)&corepoints[ptidx].z,sizeof(FloatType));
             if (!additionalInfo.empty()) mscfile.write((char*)&additionalInfo[ptidx],sizeof(FloatType));
+            if (add_vertical_info) mscfile.write((char*)&vertical_angle,sizeof(FloatType));
             for (int i=0; i<abdata.size(); ++i) mscfile.write((char*)&abdata[i], sizeof(FloatType));
             for (int i=0; i<nscales; ++i) mscfile.write((char*)&nneigh[i], sizeof(int));
 //            for (int i=0; i<nscales; ++i) mscfile.write((char*)&avgndist[i], sizeof(FloatType));
