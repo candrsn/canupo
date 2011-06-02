@@ -78,18 +78,25 @@ int read_msc_header(MSCFile& mscfile, std::vector<FloatType>& scales, int& ptnpa
     int npts;
     mscfile.read(npts);
     if (npts<=0) {
-        cerr << "invalid msc file" << endl;
+        cerr << "invalid msc file (negative or null number of points)" << endl;
         exit(1);
     }
     
     int nscales_thisfile;
     mscfile.read(nscales_thisfile);
-    vector<FloatType> scales_thisfile(nscales_thisfile);
-    for (int si=0; si<nscales_thisfile; ++si) mscfile.read(scales_thisfile[si]);
     if (nscales_thisfile<=0) {
-        cerr << "invalid msc file" << endl;
+        cerr << "invalid msc file (negative or null number of scales)" << endl;
         exit(1);
     }
+#ifndef MAX_SCALES_IN_MSC_FILE
+#define MAX_SCALES_IN_MSC_FILE 1000000
+#endif
+    if (nscales_thisfile>MAX_SCALES_IN_MSC_FILE) {
+        cerr << "This msc file claims to contain more than " << MAX_SCALES_IN_MSC_FILE << " scales. Aborting, this is probably a mistake. If not, simply recompile with a different value for MAX_SCALES_IN_MSC_FILE." << endl;
+        exit(1);
+    }
+    vector<FloatType> scales_thisfile(nscales_thisfile);
+    for (int si=0; si<nscales_thisfile; ++si) mscfile.read(scales_thisfile[si]);
     
     // all files must be consistant
     if (scales.size() == 0) {
@@ -106,7 +113,7 @@ int read_msc_header(MSCFile& mscfile, std::vector<FloatType>& scales, int& ptnpa
     return npts;
 }
 
-void read_msc_data(MSCFile& mscfile, int nscales, int npts, FloatType* data, int ptnparams) {
+void read_msc_data(MSCFile& mscfile, int nscales, int npts, FloatType* data, int ptnparams, bool convert_from_tri_to_2D = false) {
     for (int pt=0; pt<npts; ++pt) {
         FloatType param;
         // we do not care for the point coordinates and other parameters
@@ -116,6 +123,13 @@ void read_msc_data(MSCFile& mscfile, int nscales, int npts, FloatType* data, int
         for (int s=0; s<nscales; ++s) {
             mscfile.read(data[s*2]);
             mscfile.read(data[s*2+1]);
+            if (convert_from_tri_to_2D) {
+                FloatType c = 1 - data[s*2] - data[s*2+1];
+                FloatType x = data[s*2+1] + c / 2;
+                FloatType y = c * sqrt(3)/2;
+                data[s*2] = x;
+                data[s*2+1] = y;
+            }
         }
         // we do not care for number of neighbors and average dist between nearest neighbors
         int fooi;
