@@ -106,7 +106,7 @@ int main(int argc, char** argv) {
     vector<FloatType> scales;
     int ptnparams;
     int npts = 0;
-    for (int argi=2; argi<arg_separator; ++argi) {
+    for (int argi=2; argi<(cmd_info?(arg_separator>0?arg_separator:argc):arg_separator); ++argi) {
         vector<FloatType> scales_thisfile;
         MSCFile mscfile(argv[argi]);
         int npts_thisfile = read_msc_header(mscfile, scales_thisfile, ptnparams);
