@@ -25,7 +25,7 @@ suggest_classifier [=N] outfile.svg [ unlabeled.msc ...] : class1.msc ... - clas
     input: class1.msc ... - class2.msc ...  # the multiscale files for each class, separated by -\n\
     output: outfile.svg                     # a svg file in which to write a classifier definition. This file may be edited graphically (ex: with inkscape) so as to add more points in the path that separates both classes. So long as there is only one path consisting only of line segments it shall be recognised.\n\
     \n\
-    input(optional): unlabeled.msc          # additionnal multiscale files for the scene that are not classified. These provide more points for semi-supervised learning. The corresponding points will be displayed in grey in the output file.\n\
+    input(optional): unlabeled.msc          # additionnal multiscale files for the scene that are not classified. These provide more points for semi-supervised learning. The corresponding points will be displayed in grey in the output file. If these are not given a Linear Discriminant Analysis is performed in the projected space to separate the classes. To perform semi-supervised learning with density estimation even when no additionnal unlabelled data is available simply repeat the class1 and class2 data as unlabeled.\n\
     input(optional): =N                     # Size of the search grid for cross-validating the SVM. By default N=1 is used, with a local search for the best parameters around a default value hopefully adequate most of the time. Use N>1 in order to increase the quality of the training at the expense of a larger computation time.\n\
 "<<endl;
     if (errmsg) cout << "Error: " << errmsg << endl;
@@ -132,6 +132,49 @@ cairo_status_t png_copier(void *closure, const unsigned char *data, unsigned int
     pngdata->resize(cursize + length); // use reserve() before, or this will be slow
     memcpy(&(*pngdata)[cursize], data, length);
     return CAIRO_STATUS_SUCCESS;
+}
+
+void GramSchmidt(dlib::matrix<dlib::matrix<FloatType,0,1>,0,1>& basis, dlib::matrix<FloatType,0,1>& newX) {
+    using namespace dlib;
+    // goal: find a basis so that the given vector is the new X
+    // principle: at least one basis vector is not orthogonal with newX (except if newX is null but we suppose this is not the case)
+    // => use the max dot product vector, and replace it by newX. this forms a set of
+    // linearly independent vectors.
+    // then apply the Gram-Schmidt process
+    int dim = basis.size();
+    double maxabsdp = -1; int selectedCoord = 0;
+    for (int i=0; i<dim; ++i) {
+        double absdp = fabs(dot(basis(i),newX));
+        if (absdp > maxabsdp) {
+            absdp = maxabsdp;
+            selectedCoord = i;
+        }
+    }
+    // swap basis vectors to use the selected coord as the X vector, then replaced by newX
+    basis(selectedCoord) = basis(0);
+    basis(0) = newX;
+    // Gram-Schmidt process to re-orthonormalise the basis.
+    // Thanks Wikipedia for the stabilized version
+    for (int j = 0; j < dim; ++j) {
+        for (int i = 0; i < j; ++i) {
+            basis(j) -= (dot(basis(j),basis(i)) / dot(basis(i),basis(i))) * basis(i);
+        }
+        basis(j) /= sqrt(dot(basis(j),basis(j)));
+    }
+}
+
+int dichosearch(const vector<double>& series, double x) {
+    int dichofirst = 0;
+    int dicholast = series.size();
+    int dichomed;
+    while (true) {
+        dichomed = (dichofirst + dicholast) / 2;
+        if (dichomed==dichofirst) break;
+        if (x==series[dichomed]) break;
+        if (x<series[dichomed]) { dicholast = dichomed; continue;}
+        dichofirst = dichomed;
+    }
+    return dichomed;
 }
 
 int main(int argc, char** argv) {
@@ -257,19 +300,36 @@ int main(int argc, char** argv) {
     // The procedure is a bit like PCA except we seek the successive directions of maximal
     // separability instead of maximal variance
     
+    // perform a real projection with reduced dimension to help the SVM a bit
+    dlib::matrix<dlib::matrix<FloatType,0,1>,0,1> basis;
+    basis.set_size(fdim);
+    for (int i=0; i<fdim; ++i) {
+        basis(i).set_size(fdim);
+        for (int j=0; j<fdim; ++j) basis(i)(j) = 0;
+        basis(i)(i) = 1;
+    }
+    dlib::matrix<FloatType,0,1> w_vect;
+    w_vect.set_size(fdim);
+    for (int i=0; i<fdim; ++i) w_vect(i) = classifier.weights[i];
+    GramSchmidt(basis,w_vect);
+    
+    vector<sample_type> samples_reduced(nsamples);
+    for (int i=0; i<nsamples; ++i) samples_reduced[i].set_size(fdim-1);
     // project the data onto the hyperplane so as to get the second direction
-    FloatType w2 = 0;
-    for (int i=0; i<fdim; ++i) w2 += classifier.weights[i] * classifier.weights[i];
     for (int si=0; si<nsamples; ++si) {
-        FloatType c = proj1[si] / w2;
-        for(int i=0; i<fdim; ++i) samples[si](i) -= c * classifier.weights[i];
+        for(int i=1; i<fdim; ++i) samples_reduced[si](i-1) = dlib::dot(samples[si], basis(i));
     }
 
     // already shuffled, and do not change order for the proj1 anyway
     LinearSVM ortho_classifier(grid_size);
-    nu = ortho_classifier.crossValidate(10, samples, labels);
+    nu = ortho_classifier.crossValidate(10, samples_reduced, labels);
     cout << "Training" << endl;
-    ortho_classifier.train(10, nu, samples, labels);
+    ortho_classifier.train(10, nu, samples_reduced, labels);
+    
+    // convert back the classifier weights into the original space
+    for(int i=0; i<fdim; ++i) w_vect(i) = 0;
+    for(int i=1; i<fdim; ++i) w_vect += ortho_classifier.weights[i-1] * basis(i);
+    for(int i=0; i<fdim; ++i) ortho_classifier.weights[i] = w_vect(i);
 
     vector<FloatType> proj2(nsamples);
     for (int i=0; i<nsamples; ++i) proj2[i] = ortho_classifier.predict(samples[i]);
@@ -313,7 +373,7 @@ int main(int argc, char** argv) {
     xmaxg = max(xmaxg, xmaxc);
     yming = min(yming, yminc);
     ymaxg = max(ymaxg, ymaxc);
-    
+
     static const int svgSize = 800;
     static const int halfSvgSize = svgSize / 2;
     FloatType minX = numeric_limits<FloatType>::max();
@@ -328,7 +388,7 @@ int main(int argc, char** argv) {
     }
     FloatType absmaxXY = fabs(max(max(max(-minX,maxX),-minY),maxY));
     FloatType scaleFactor = halfSvgSize / absmaxXY;
-    
+
     PointCloud<Point2D> cloud2D;
     cloud2D.prepare(xming,xmaxg,yming,ymaxg,nsamples+data_unlabeled.size());
     for (int i=0; i<data_unlabeled.size(); ++i) cloud2D.insert(Point2D(
@@ -344,62 +404,138 @@ int main(int argc, char** argv) {
     // radius from probabilistic SVM, diameter = 90% chance of correct classif
     FloatType radius = -log(1.0/0.9 - 1.0) / 2;
     
-    int minsumd = numeric_limits<int>::max();
-    FloatType minvx = 0, minvy = 0, minspcx = 0, minspcy = 0;
+    FloatType wx = 0, wy = 0, wc = 0, minspcx = 0, minspcy = 0;
     
-    cout << "Finding the line with least density" << flush;
-    
-    for (int spci = 0; spci <= nsearchpointm1; ++spci) {
-        cout << "." << flush;
+    if (ndata_unlabeled) {
+
+        int minsumd = numeric_limits<int>::max();
+        FloatType minvx = 0, minvy = 0;
         
-        FloatType spcx = refpt_neg.x + spci * (refpt_pos.x - refpt_neg.x) / nsearchpointm1;
-        FloatType spcy = refpt_neg.y + spci * (refpt_pos.y - refpt_neg.y) / nsearchpointm1;
-    
-        // now we swipe a decision boundary in each direction around the point
-        // and look for the lowest overall density along the boundary
-        int nsearchdir = 90; // each 2 degree, as we swipe from 0 to 180 (unoriented lines)
-        FloatType incr = max(xmaxg-xming, ymaxg-yming) / nsearchpointm1;
-        vector<FloatType> sumds(nsearchdir);
-#pragma omp parallel for
-        for(int sd = 0; sd < nsearchdir; ++sd) {
-            // use the parametric P = P0 + alpha*V formulation of a line
-            // unit vector in the direction of the line
-            FloatType vx = cos(M_PI * sd / nsearchdir);
-            FloatType vy = sin(M_PI * sd / nsearchdir);
-            sumds[sd] = 0;
-            for(int sp = -nsearchpointm1/2; sp < nsearchpointm1/2; ++sp) {
-                int s = sp * incr;
-                FloatType x = vx * s + spcx;
-                FloatType y = vy * s + spcy;
-                vector<DistPoint<Point2D> > neighbors;
-                cloud2D.findNeighbors(back_inserter(neighbors), Point2D(x,y), radius);
-                sumds[sd] += neighbors.size();
+        cout << "Finding the line with least density" << flush;
+        
+        for (int spci = 0; spci <= nsearchpointm1; ++spci) {
+            cout << "." << flush;
+            
+            FloatType spcx = refpt_neg.x + spci * (refpt_pos.x - refpt_neg.x) / nsearchpointm1;
+            FloatType spcy = refpt_neg.y + spci * (refpt_pos.y - refpt_neg.y) / nsearchpointm1;
+        
+            // now we swipe a decision boundary in each direction around the point
+            // and look for the lowest overall density along the boundary
+            int nsearchdir = 90; // each 2 degree, as we swipe from 0 to 180 (unoriented lines)
+            FloatType incr = max(xmaxg-xming, ymaxg-yming) / nsearchpointm1;
+            vector<FloatType> sumds(nsearchdir);
+    #pragma omp parallel for
+            for(int sd = 0; sd < nsearchdir; ++sd) {
+                // use the parametric P = P0 + alpha*V formulation of a line
+                // unit vector in the direction of the line
+                FloatType vx = cos(M_PI * sd / nsearchdir);
+                FloatType vy = sin(M_PI * sd / nsearchdir);
+                sumds[sd] = 0;
+                for(int sp = -nsearchpointm1/2; sp < nsearchpointm1/2; ++sp) {
+                    int s = sp * incr;
+                    FloatType x = vx * s + spcx;
+                    FloatType y = vy * s + spcy;
+                    vector<DistPoint<Point2D> > neighbors;
+                    cloud2D.findNeighbors(back_inserter(neighbors), Point2D(x,y), radius);
+                    sumds[sd] += neighbors.size();
+                }
+            }
+            for(int sd = 0; sd < nsearchdir; ++sd) {
+                if (sumds[sd]<minsumd) {
+                    minsumd = sumds[sd];
+                    minvx = cos(M_PI * sd / nsearchdir);
+                    minvy = sin(M_PI * sd / nsearchdir);
+                    minspcx = spcx;
+                    minspcy = spcy;
+                }
             }
         }
-        for(int sd = 0; sd < nsearchdir; ++sd) {
-            if (sumds[sd]<minsumd) {
-                minsumd = sumds[sd];
-                minvx = cos(M_PI * sd / nsearchdir);
-                minvy = sin(M_PI * sd / nsearchdir);
-                minspcx = spcx;
-                minspcy = spcy;
+        cout << endl;
+    
+        // so we finally have the decision boundary in this 2D space
+        // P = P0 + alpha * V : px-p0x = alpha * vx  and  py-p0y = alpha * vy,
+        // alpha = (px-p0x) / vx; // if vx is null see below
+        // py-p0y = (px-p0x) * vy / vx
+        // py = px * vy/vx + p0y - p0x * vy / vx
+        // px * vy/vx - py + p0y - p0x * vy / vx = 0
+        // equa: wx * px + wy * py + c = 0
+        // with: wx = vy/vx; wy = -1; c = p0y - p0x * vy / vx
+        // null vx just reverse roles as vy is then !=0 (v is unit vec)
+        if (minvx!=0) { wx = minvy / minvx; wy = -1; wc = minspcy - minspcx * wx;}
+        else {wx = -1; wy = minvx / minvy; wc = minspcx - minspcy * wy;}
+    } else {
+        Point2D c1(0,0), c2(0,0);
+        for (int i=0; i<nsamples; ++i) {
+            if (labels[i]<0) c1 += Point2D(proj1[i],proj2[i]);
+            else c2 += Point2D(proj1[i],proj2[i]);
+        }
+        c1 /= ndata_class1;
+        c2 /= ndata_class2;
+        
+        Point2D w_vect = c2 - c1;
+        w_vect /= w_vect.norm();
+        Point2D w_orth(-w_vect.y,w_vect.x);
+
+        double cba2_max = 0;
+
+        for(int sd = 1; sd < 180; ++sd) {
+            FloatType vx = cos(sd * M_PI / 180.0);
+            FloatType vy = sin(sd * M_PI / 180.0);
+            
+            dlib::matrix<double,2,2> basis;
+            Point2D base_vec1 = w_vect;
+            Point2D base_vec2 = vx * w_vect + vy * w_orth;
+            basis(0,0) = base_vec1.x; basis(0,1) = base_vec1.y;
+            basis(1,0) = base_vec2.x; basis(1,1) = base_vec2.y;
+            basis = inv(basis);
+            dlib::matrix<double,2,1> P;
+            
+            double m1 = 0, m2 = 0;
+            vector<double> p1, p2;
+            for (int i=0; i<nsamples; ++i) {
+                P(0) = proj1[i];
+                P(1) = proj2[i];
+                P = basis * P;
+                double d = P(0); // projection on w_vect along the slanted direction
+                if (labels[i]<0) {p1.push_back(d); m1+=d;}
+                else {p2.push_back(d); m2+=d;}
             }
+            m1 /= ndata_class1;
+            m2 /= ndata_class2;
+            
+            // search for optimal separation
+            bool reversed = false;
+            double n1 = ndata_class1, n2 = ndata_class2;
+            if (m1 > m2) {
+                reversed = true;
+                swap(m1,m2);
+                p1.swap(p2);
+            }
+            sort(p1.begin(), p1.end());
+            sort(p2.begin(), p2.end());
+            for (int i=0; i<=100; ++i) {
+                double pos = m1 + i * (m2 - m1) / 100.0;
+                int idx1 = dichosearch(p1, pos);
+                int idx2 = dichosearch(p2, pos);
+                double pr1 = idx1 / (double)ndata_class1;
+                double pr2 = 1.0 - idx2 / (double)ndata_class2;
+                double cba2 = pr1 + pr2;
+                if (cba2 > cba2_max) {
+                    cba2_max = cba2;
+                    double r = (pos - m1) / (m2 - m1);
+                    if (reversed) r = 1.0 - r;
+                    Point2D center = c1 + r * (c2 - c1);
+                    minspcx = center.x;
+                    minspcy = center.y;
+                    wx = base_vec2.x;
+                    wy = base_vec2.y;
+                    // wx * cx + wy * cy + wc = 0
+                    wc = -wx * center.x - wy * center.y;
+                }
+            }
+            
         }
     }
-    cout << endl;
-    
-    // so we finally have the decision boundary in this 2D space
-    // P = P0 + alpha * V : px-p0x = alpha * vx  and  py-p0y = alpha * vy,
-    // alpha = (px-p0x) / vx; // if vx is null see below
-    // py-p0y = (px-p0x) * vy / vx
-    // py = px * vy/vx + p0y - p0x * vy / vx
-    // px * vy/vx - py + p0y - p0x * vy / vx = 0
-    // equa: wx * px + wy * py + c = 0
-    // with: wx = vy/vx; wy = -1; c = p0y - p0x * vy / vx
-    // null vx just reverse roles as vy is then !=0 (v is unit vec)
-    FloatType wx = 0, wy = 0, wc = 0;
-    if (minvx!=0) { wx = minvy / minvx; wy = -1; wc = minspcy - minspcx * wx;}
-    else {wx = -1; wy = minvx / minvy; wc = minspcx - minspcy * wy;}
 
     cout << "Drawing image" << endl;
 
@@ -592,8 +728,10 @@ int main(int argc, char** argv) {
     // some may be NaN
     FloatType xsvgy0 = -csvg / wxsvg; // at ysvg = 0
     FloatType ysvgx0 = -csvg / wysvg; // at xsvg = 0
+    // wxsvg * xsvg + wysvg * ysvg + csvg = 0
     FloatType xsvgymax = (-csvg -wysvg*svgSize) / wxsvg; // at ysvg = svgSize
     FloatType ysvgxmax = (-csvg -wxsvg*svgSize) / wysvg; // at xsvg = svgSize
+cout << "svg line: " << xsvgy0 << " " << ysvgx0 << " " << xsvgymax << " " << ysvgxmax << endl;
     // NaN comparisons always fail, so use only positive tests and this is OK
     bool useLeft = (ysvgx0 >= 0) && (ysvgx0 <= svgSize);
     bool useRight = (ysvgxmax >= 0) && (ysvgxmax <= svgSize);
