@@ -44,20 +44,33 @@ bool fpeq(FloatType a, FloatType b) {
 int read_msc_header(ifstream& mscfile, vector<FloatType>& scales, int& ptnparams) {
     int npts;
     mscfile.read((char*)&npts,sizeof(npts));
-    if (npts<=0) help("invalid file");
+    if (npts<=0) {
+        cerr << "invalid msc file (negative or null number of points)" << endl;
+        exit(1);
+    }
     
     int nscales_thisfile;
     mscfile.read((char*)&nscales_thisfile, sizeof(nscales_thisfile));
+    if (nscales_thisfile<=0) {
+        cerr << "invalid msc file (negative or null number of scales)" << endl;
+        exit(1);
+    }
+#ifndef MAX_SCALES_IN_MSC_FILE
+#define MAX_SCALES_IN_MSC_FILE 1000000
+#endif
+    if (nscales_thisfile>MAX_SCALES_IN_MSC_FILE) {
+        cerr << "This msc file claims to contain more than " << MAX_SCALES_IN_MSC_FILE << " scales. Aborting, this is probably a mistake. If not, simply recompile with a different value for MAX_SCALES_IN_MSC_FILE." << endl;
+        exit(1);
+    }
     vector<FloatType> scales_thisfile(nscales_thisfile);
     for (int si=0; si<nscales_thisfile; ++si) mscfile.read((char*)&scales_thisfile[si], sizeof(FloatType));
-    if (nscales_thisfile<=0) help("invalid file");
     
     // all files must be consistant
     if (scales.size() == 0) {
         scales = scales_thisfile;
     } else {
-        if (scales.size() != nscales_thisfile) {cerr<<"input file mismatch: "<<endl; return 1;}
-        for (int si=0; si<scales.size(); ++si) if (!fpeq(scales[si],scales_thisfile[si])) {cerr<<"input file mismatch: "<<endl; return 1;}
+        if (scales.size() != nscales_thisfile) {cerr<<"input file mismatch"<<endl; exit(1);}
+        for (int si=0; si<scales.size(); ++si) if (!fpeq(scales[si],scales_thisfile[si])) {cerr<<"input file mismatch"<<endl; exit(1);}
     }
     
     // TODO: check consistency of ptnparams

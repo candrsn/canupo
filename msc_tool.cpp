@@ -100,6 +100,7 @@ int main(int argc, char** argv) {
         break;
     }
     if (arg_separator<2 && !cmd_info) return help();
+    if (arg_separator<2 && cmd_info) arg_separator = argc;
 
     bool inconsistent = false;
 
@@ -125,7 +126,7 @@ int main(int argc, char** argv) {
         else for (int si=0; si<scales.size(); ++si) if (!fpeq(scales[si],scales_thisfile[si])) inconsistent = true;
     }
 
-    if (arg_separator==-1 || arg_separator==argc-1) {
+    if (arg_separator==-1 || arg_separator>=argc-1) {
         if (cmd_info) return 0; // done
         if (cmd_project) return help("Need a parameter file defining the projection.");
         if (cmd_xyz) return help("Need a xyz file name to write to.");

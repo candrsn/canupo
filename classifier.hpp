@@ -46,7 +46,7 @@ struct Classifier {
                 ld.wx = ydelta / xdelta; // slope
                 ld.c = path[i].y - path[i].x * ld.wx;
             } else {
-                if (fabs(xdelta) < 1e-6) {
+                if (fabs(ydelta) < 1e-6) {
                     cerr << "invalid path definition in classifier" << endl;
                     exit(1);
                 }
