@@ -13,20 +13,20 @@
 
 #include "points.hpp"
 #include "base64.hpp"
-#include "linearSVM.hpp"
+
+#include "dlib/matrix.h"
 
 using namespace std;
 
-typedef LinearSVM::sample_type sample_type;
+typedef dlib::matrix<double, 0, 1> sample_type;
 
 int help(const char* errmsg = 0) {
 cout << "\
-suggest_classifier [=N] outfile.svg [ unlabeled.msc ...] : class1.msc ... - class2.msc ...\n\
+suggest_classifier_lda outfile.svg [ unlabeled.msc ...] : class1.msc ... - class2.msc ...\n\
     input: class1.msc ... - class2.msc ...  # the multiscale files for each class, separated by -\n\
     output: outfile.svg                     # a svg file in which to write a classifier definition. This file may be edited graphically (ex: with inkscape) so as to add more points in the path that separates both classes. So long as there is only one path consisting only of line segments it shall be recognised.\n\
     \n\
-    input(optional): unlabeled.msc          # additionnal multiscale files for the scene that are not classified. These provide more points for semi-supervised learning. The corresponding points will be displayed in grey in the output file. If these are not given a Linear Discriminant Analysis is performed in the projected space to separate the classes. To perform semi-supervised learning with density estimation even when no additionnal unlabelled data is available simply repeat the class1 and class2 data as unlabeled.\n\
-    input(optional): =N                     # Size of the search grid for cross-validating the SVM. By default N=1 is used, with a local search for the best parameters around a default value hopefully adequate most of the time. Use N>1 in order to increase the quality of the training at the expense of a larger computation time.\n\
+    input(optional): unlabeled.msc          # additionnal multiscale files for the scene that are not classified. These provide more points for semi-supervised learning. The corresponding points will be displayed in grey in the output file. If these are not given the orthogonal to the center line is used.\n\
 "<<endl;
     if (errmsg) cout << "Error: " << errmsg << endl;
     return 0;
@@ -134,7 +134,18 @@ cairo_status_t png_copier(void *closure, const unsigned char *data, unsigned int
     return CAIRO_STATUS_SUCCESS;
 }
 
-void GramSchmidt(dlib::matrix<dlib::matrix<FloatType,0,1>,0,1>& basis, dlib::matrix<FloatType,0,1>& newX) {
+
+struct LinearPredictor {
+    std::vector<FloatType> weights;
+    FloatType predict(const sample_type& data) {
+        int dim = weights.size()-1;
+        FloatType ret = weights[dim];
+        for (int d=0; d<dim; ++d) ret += weights[d] * data(d);
+        return ret;
+    }
+};
+
+void GramSchmidt(dlib::matrix<dlib::matrix<double,0,1>,0,1>& basis, dlib::matrix<double,0,1>& newX) {
     using namespace dlib;
     // goal: find a basis so that the given vector is the new X
     // principle: at least one basis vector is not orthogonal with newX (except if newX is null but we suppose this is not the case)
@@ -183,13 +194,6 @@ int main(int argc, char** argv) {
     
     int grid_size = 1;
     int arg_shift = 0;
-    
-    string first_arg = argv[1];
-    if (first_arg[0]=='=') {
-        grid_size = atoi(first_arg.substr(1).c_str());
-        if (grid_size<1) return help();
-        ++arg_shift;
-    }
     
     ofstream svgfile(argv[arg_shift+1]);
     
@@ -260,8 +264,12 @@ int main(int argc, char** argv) {
     fdim = nscales * 2;
     undefsample.set_size(fdim,1);
     int nsamples = ndata_class1+ndata_class2;
-    vector<sample_type> samples(nsamples, undefsample);
-    vector<FloatType> labels(nsamples, 0);
+    
+    using namespace dlib;
+    matrix<matrix<double,0,1>,0,1> samples;
+    samples.set_size(nsamples);
+    for (int i=0; i<nsamples; ++i) samples(i).set_size(fdim);
+    std::vector<FloatType> labels(nsamples, 0);
     for (int i=0; i<ndata_class1; ++i) labels[i] = -1;
     for (int i=ndata_class1; i<nsamples; ++i) labels[i] = 1;
     
@@ -269,70 +277,80 @@ int main(int argc, char** argv) {
     for (int argi = arg_class1; argi<arg_class2-1; ++argi) {
         ifstream mscfile(argv[argi], ifstream::binary);
         int npts = read_msc_header(mscfile, scales, ptnparams);
-        read_msc_data(mscfile,nscales,npts,&samples[base_pt], ptnparams);
+        read_msc_data(mscfile,nscales,npts,&samples(base_pt), ptnparams);
         mscfile.close();
         base_pt += npts;
     }
     for (int argi = arg_class2; argi<argc; ++argi) {
         ifstream mscfile(argv[argi], ifstream::binary);
         int npts = read_msc_header(mscfile, scales, ptnparams);
-        read_msc_data(mscfile,nscales,npts,&samples[base_pt], ptnparams);
+        read_msc_data(mscfile,nscales,npts,&samples(base_pt), ptnparams);
         mscfile.close();
         base_pt += npts;
     }
     
     cout << "Computing the two best projection directions" << endl;
 
-    LinearSVM classifier(grid_size);
+    sample_type mu1 = samples(0);
+    for (int i=1; i<ndata_class1; ++i) mu1 += samples(i);
+    mu1 /= ndata_class1;
+    sample_type mu2 = samples(ndata_class1);
+    for (int i=ndata_class1+1; i<nsamples; ++i) mu2 += samples(i);
+    mu2 /= ndata_class2;
+    
+    matrix<double> sigma1 = covariance(subm(samples,0,0,ndata_class1,1));
+    matrix<double> sigma2 = covariance(subm(samples,ndata_class1,0,ndata_class2,1));
 
-    // shuffle before cross-validating to spread instances of each class
-    dlib::randomize_samples(samples, labels);
-    FloatType nu = classifier.crossValidate(10, samples, labels);
-    cout << "Training" << endl;
-    classifier.train(10, nu, samples, labels);
+    matrix<double,0,1> w_vect = pinv(sigma1+sigma2) * (mu2 - mu1);
+    LinearPredictor classifier;
+    classifier.weights.resize(fdim+1);
+    for (int i=0; i<fdim; ++i) classifier.weights[i] = w_vect(i);
+    classifier.weights[fdim] = -dot(w_vect,(mu1+mu2)*0.5);
     
     // get the projections of each sample on the first classifier direction
-    vector<FloatType> proj1(nsamples);
-    for (int i=0; i<nsamples; ++i) proj1[i] = classifier.predict(samples[i]);
+    std::vector<FloatType> proj1(nsamples);
+    for (int i=0; i<nsamples; ++i) proj1[i] = classifier.predict(samples(i));
     
-    // we now have the first hyperplane and corresponding decision boundary
-    // projection onto the orthogonal subspace and repeat SVM to get a 2D plot
-    // The procedure is a bit like PCA except we seek the successive directions of maximal
-    // separability instead of maximal variance
-    
-    // perform a real projection with reduced dimension to help the SVM a bit
-    dlib::matrix<dlib::matrix<FloatType,0,1>,0,1> basis;
+    matrix<matrix<double,0,1>,0,1> basis;
     basis.set_size(fdim);
     for (int i=0; i<fdim; ++i) {
         basis(i).set_size(fdim);
         for (int j=0; j<fdim; ++j) basis(i)(j) = 0;
         basis(i)(i) = 1;
     }
-    dlib::matrix<FloatType,0,1> w_vect;
-    w_vect.set_size(fdim);
-    for (int i=0; i<fdim; ++i) w_vect(i) = classifier.weights[i];
     GramSchmidt(basis,w_vect);
     
-    vector<sample_type> samples_reduced(nsamples);
-    for (int i=0; i<nsamples; ++i) samples_reduced[i].set_size(fdim-1);
+    matrix<matrix<double,0,1>,0,1> samples_reduced;
+    samples_reduced.set_size(nsamples);
+    for (int i=0; i<nsamples; ++i) samples_reduced(i).set_size(fdim-1);
+    
     // project the data onto the hyperplane so as to get the second direction
     for (int si=0; si<nsamples; ++si) {
-        for(int i=1; i<fdim; ++i) samples_reduced[si](i-1) = dlib::dot(samples[si], basis(i));
+        for(int i=1; i<fdim; ++i) samples_reduced(si)(i-1) = dot(samples(si), basis(i));
     }
 
-    // already shuffled, and do not change order for the proj1 anyway
-    LinearSVM ortho_classifier(grid_size);
-    nu = ortho_classifier.crossValidate(10, samples_reduced, labels);
-    cout << "Training" << endl;
-    ortho_classifier.train(10, nu, samples_reduced, labels);
-    
-    // convert back the classifier weights into the original space
-    for(int i=0; i<fdim; ++i) w_vect(i) = 0;
-    for(int i=1; i<fdim; ++i) w_vect += ortho_classifier.weights[i-1] * basis(i);
-    for(int i=0; i<fdim; ++i) ortho_classifier.weights[i] = w_vect(i);
+    mu1 = samples_reduced(0);
+    for (int i=1; i<ndata_class1; ++i) mu1 += samples_reduced(i);
+    mu1 /= ndata_class1;
+    mu2 = samples_reduced(ndata_class1);
+    for (int i=ndata_class1+1; i<nsamples; ++i) mu2 += samples_reduced(i);
+    mu2 /= ndata_class2;
+    sigma1 = covariance(subm(samples_reduced,0,0,ndata_class1,1));
+    sigma2 = covariance(subm(samples_reduced,ndata_class1,0,ndata_class2,1));
 
-    vector<FloatType> proj2(nsamples);
-    for (int i=0; i<nsamples; ++i) proj2[i] = ortho_classifier.predict(samples[i]);
+    matrix<double,0,1> w_vect_in_basis = pinv(sigma1+sigma2) * (mu2 - mu1);
+
+    for(int i=0; i<fdim; ++i) w_vect(i) = 0;
+    for(int i=1; i<fdim; ++i) w_vect += w_vect_in_basis(i-1) * basis(i);
+    
+    LinearPredictor ortho_classifier;
+    ortho_classifier.weights.resize(fdim+1);
+    for (int i=0; i<fdim; ++i) ortho_classifier.weights[i] = w_vect(i);
+    ortho_classifier.weights[fdim] = -dot(w_vect_in_basis,(mu1+mu2)*0.5);
+
+    
+    std::vector<FloatType> proj2(nsamples);
+    for (int i=0; i<nsamples; ++i) proj2[i] = ortho_classifier.predict(samples(i));
 
     // compute the reference points for orienting the classifier boundaries
     // pathological cases are possible where an arbitrary point in the (>0,>0)
@@ -373,7 +391,7 @@ int main(int argc, char** argv) {
     xmaxg = max(xmaxg, xmaxc);
     yming = min(yming, yminc);
     ymaxg = max(ymaxg, ymaxc);
-
+    
     static const int svgSize = 800;
     static const int halfSvgSize = svgSize / 2;
     FloatType minX = numeric_limits<FloatType>::max();
@@ -388,7 +406,7 @@ int main(int argc, char** argv) {
     }
     FloatType absmaxXY = fabs(max(max(max(-minX,maxX),-minY),maxY));
     FloatType scaleFactor = halfSvgSize / absmaxXY;
-
+    
     PointCloud<Point2D> cloud2D;
     cloud2D.prepare(xming,xmaxg,yming,ymaxg,nsamples+data_unlabeled.size());
     for (int i=0; i<data_unlabeled.size(); ++i) cloud2D.insert(Point2D(
@@ -405,12 +423,11 @@ int main(int argc, char** argv) {
     FloatType radius = -log(1.0/0.9 - 1.0) / 2;
     
     FloatType wx = 0, wy = 0, wc = 0, minspcx = 0, minspcy = 0;
-    
-    if (ndata_unlabeled) {
 
+    if (ndata_unlabeled) {
         int minsumd = numeric_limits<int>::max();
         FloatType minvx = 0, minvy = 0;
-        
+
         cout << "Finding the line with least density" << flush;
         
         for (int spci = 0; spci <= nsearchpointm1; ++spci) {
@@ -423,7 +440,7 @@ int main(int argc, char** argv) {
             // and look for the lowest overall density along the boundary
             int nsearchdir = 90; // each 2 degree, as we swipe from 0 to 180 (unoriented lines)
             FloatType incr = max(xmaxg-xming, ymaxg-yming) / nsearchpointm1;
-            vector<FloatType> sumds(nsearchdir);
+            std::vector<FloatType> sumds(nsearchdir);
     #pragma omp parallel for
             for(int sd = 0; sd < nsearchdir; ++sd) {
                 // use the parametric P = P0 + alpha*V formulation of a line
@@ -435,7 +452,7 @@ int main(int argc, char** argv) {
                     int s = sp * incr;
                     FloatType x = vx * s + spcx;
                     FloatType y = vy * s + spcy;
-                    vector<DistPoint<Point2D> > neighbors;
+                    std::vector<DistPoint<Point2D> > neighbors;
                     cloud2D.findNeighbors(back_inserter(neighbors), Point2D(x,y), radius);
                     sumds[sd] += neighbors.size();
                 }
@@ -491,7 +508,7 @@ int main(int argc, char** argv) {
             dlib::matrix<double,2,1> P;
             
             double m1 = 0, m2 = 0;
-            vector<double> p1, p2;
+            std::vector<double> p1, p2;
             for (int i=0; i<nsamples; ++i) {
                 P(0) = proj1[i];
                 P(1) = proj2[i];
@@ -532,8 +549,7 @@ int main(int argc, char** argv) {
                     // wx * cx + wy * cy + wc = 0
                     wc = -wx * center.x - wy * center.y;
                 }
-            }
-            
+            }            
         }
     }
 
@@ -637,7 +653,7 @@ int main(int argc, char** argv) {
     // Save the classifier parameters as an SVG comment so we can find them back later on
     // Use base64 encoded binary to preserve full precision
     
-    vector<char> binary_parameters(
+    std::vector<char> binary_parameters(
         sizeof(int)
       + nscales*sizeof(FloatType)
       + (fdim+1)*sizeof(FloatType)
@@ -728,17 +744,15 @@ int main(int argc, char** argv) {
     // some may be NaN
     FloatType xsvgy0 = -csvg / wxsvg; // at ysvg = 0
     FloatType ysvgx0 = -csvg / wysvg; // at xsvg = 0
-    // wxsvg * xsvg + wysvg * ysvg + csvg = 0
     FloatType xsvgymax = (-csvg -wysvg*svgSize) / wxsvg; // at ysvg = svgSize
     FloatType ysvgxmax = (-csvg -wxsvg*svgSize) / wysvg; // at xsvg = svgSize
-cout << "svg line: " << xsvgy0 << " " << ysvgx0 << " " << xsvgymax << " " << ysvgxmax << endl;
     // NaN comparisons always fail, so use only positive tests and this is OK
     bool useLeft = (ysvgx0 >= 0) && (ysvgx0 <= svgSize);
     bool useRight = (ysvgxmax >= 0) && (ysvgxmax <= svgSize);
     bool useTop = (xsvgy0 >= 0) && (xsvgy0 <= svgSize);
     bool useBottom = (xsvgymax >= 0) && (xsvgymax <= svgSize);
     int sidescount = useLeft + useRight + useTop + useBottom;
-    vector<Point2D> path;
+    std::vector<Point2D> path;
 //    if (sidescount==2) {
         svgfile << "<path style=\"fill:none;stroke:#000000;stroke-width:1px;z-index:1;\" d=\"M ";
         if (useLeft) {
