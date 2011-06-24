@@ -502,8 +502,8 @@ int main(int argc, char** argv) {
             dlib::matrix<double,2,2> basis;
             Point2D base_vec1 = w_vect;
             Point2D base_vec2 = vx * w_vect + vy * w_orth;
-            basis(0,0) = base_vec1.x; basis(0,1) = base_vec1.y;
-            basis(1,0) = base_vec2.x; basis(1,1) = base_vec2.y;
+            basis(0,0) = base_vec1.x; basis(0,1) = base_vec2.x;
+            basis(1,0) = base_vec1.y; basis(1,1) = base_vec2.y;
             basis = inv(basis);
             dlib::matrix<double,2,1> P;
             

@@ -280,7 +280,7 @@ int main(int argc, char** argv) {
     vector<double> density_grid(svgSize * svgSize, 0.0);
     FloatType max_distance = kernel_dev * 3;
     FloatType scaleFactor = halfSvgSize / classifier.absmaxXY;
-    
+
     for (int pi=0; pi<npts; ++pi) {
         FloatType a, b;
         
@@ -322,10 +322,10 @@ int main(int argc, char** argv) {
     
     cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, svgSize, svgSize);
     cairo_t *cr = cairo_create(surface);
-    int surface_height = cairo_image_surface_get_height(surface);
+/*    int surface_height = cairo_image_surface_get_height(surface);
     int surface_width = cairo_image_surface_get_width(surface);
     int surface_stride = cairo_image_surface_get_stride(surface);
-    unsigned char* surface_data = cairo_image_surface_get_data(surface);
+    unsigned char* surface_data = cairo_image_surface_get_data(surface);*/
     for (int j=0; j<svgSize; ++j) {
         for (int i=0; i<svgSize; ++i) {
             //double density_01 = (density_grid[j*svgSize+i] - min_density) / (max_density - min_density);
@@ -333,11 +333,15 @@ int main(int argc, char** argv) {
             int r,g,b;
             // low value = blue(hue=4/6), high = red(hue=0)
             hueToRGB(4./6. * (1.0 - density_01),r,g,b);
-            surface_data[i*4+2] = r;
+            cairo_set_source_rgb(cr, r/256.0, g/256.0, b/256.0);
+            cairo_rectangle(cr,i,j,1,1);
+            cairo_stroke(cr);
+
+/*            surface_data[i*4+2] = r;
             surface_data[i*4+1] = g;
-            surface_data[i*4+0] = b;
+            surface_data[i*4+0] = b;*/
         }
-        surface_data += surface_stride;
+//        surface_data += surface_stride;
     }
 
     cairo_set_source_rgb(cr, 0.25,0.25,0.25);
@@ -443,7 +447,7 @@ int main(int argc, char** argv) {
     
     // include the image inline    
     svgfile << "<image xlink:href=\"data:image/png;base64,"<< &base64pngdata[0]
-            << "\" width=\""<<svgSize<<"\" height=\""<<svgSize<<"\" x=\"0\" y=\"0\" style=\"z-index:0\" />" << endl;
+            << "\" width=\""<<svgSize<<"\" height=\""<<svgSize<<"\" x=\"0\" y=\"0\" style=\"z-index:3\" />" << endl;
 #endif
     
     // include the reference points
