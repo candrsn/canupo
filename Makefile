@@ -13,7 +13,7 @@ CXXFLAGS+=$(CPPFLAGS)
 CXX=g++
 LAPACK=-llapack
 
-all: canupo density suggest_classifier_svm suggest_classifier_lda msc_tool validate_classifier combine_classifier classify
+all: canupo density suggest_classifier_svm suggest_classifier_lda msc_tool validate_classifier combine_classifiers classify
 
 canupo:
 	$(CXX) $(CXXFLAGS) canupo.cpp $(LAPACK) $(LDFLAGS) -o canupo
@@ -39,8 +39,8 @@ msc_tool:
 validate_classifier:
 	$(CXX) $(CXXFLAGS) validate_classifier.cpp -o validate_classifier
 
-combine_classifier:
-	$(CXX) $(CXXFLAGS) combine_classifier.cpp -o combine_classifier
+combine_classifiers:
+	$(CXX) $(CXXFLAGS) combine_classifiers.cpp -o combine_classifiers
 
 classify:
 	$(CXX) $(CXXFLAGS) classify.cpp -o classify
