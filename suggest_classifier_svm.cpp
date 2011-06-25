@@ -290,7 +290,7 @@ int main(int argc, char** argv) {
     FloatType nu = classifier.crossValidate(10, samples, labels);
     cout << "Training" << endl;
     classifier.train(10, nu, samples, labels);
-    
+
     // get the projections of each sample on the first classifier direction
     vector<FloatType> proj1(nsamples);
     for (int i=0; i<nsamples; ++i) proj1[i] = classifier.predict(samples[i]);
@@ -327,10 +327,12 @@ int main(int argc, char** argv) {
     ortho_classifier.train(10, nu, samples_reduced, labels);
     
     // convert back the classifier weights into the original space
+    ortho_classifier.weights.resize(fdim+1);
+    ortho_classifier.weights[fdim] = ortho_classifier.weights[fdim-1];
     for(int i=0; i<fdim; ++i) w_vect(i) = 0;
     for(int i=1; i<fdim; ++i) w_vect += ortho_classifier.weights[i-1] * basis(i);
     for(int i=0; i<fdim; ++i) ortho_classifier.weights[i] = w_vect(i);
-
+    
     vector<FloatType> proj2(nsamples);
     for (int i=0; i<nsamples; ++i) proj2[i] = ortho_classifier.predict(samples[i]);
 
@@ -405,12 +407,11 @@ int main(int argc, char** argv) {
     FloatType radius = -log(1.0/0.9 - 1.0) / 2;
     
     FloatType wx = 0, wy = 0, wc = 0, minspcx = 0, minspcy = 0;
-    
-    if (ndata_unlabeled) {
 
+    if (ndata_unlabeled) {
         int minsumd = numeric_limits<int>::max();
         FloatType minvx = 0, minvy = 0;
-        
+
         cout << "Finding the line with least density" << flush;
         
         for (int spci = 0; spci <= nsearchpointm1; ++spci) {
@@ -476,7 +477,7 @@ int main(int argc, char** argv) {
         w_vect /= w_vect.norm();
         Point2D w_orth(-w_vect.y,w_vect.x);
 
-        double cba2_max = 0;
+        double cump_diff_min = 2.0;
 
         for(int sd = 1; sd < 180; ++sd) {
             FloatType vx = cos(sd * M_PI / 180.0);
@@ -485,8 +486,8 @@ int main(int argc, char** argv) {
             dlib::matrix<double,2,2> basis;
             Point2D base_vec1 = w_vect;
             Point2D base_vec2 = vx * w_vect + vy * w_orth;
-            basis(0,0) = base_vec1.x; basis(0,1) = base_vec1.y;
-            basis(1,0) = base_vec2.x; basis(1,1) = base_vec2.y;
+            basis(0,0) = base_vec1.x; basis(0,1) = base_vec2.x;
+            basis(1,0) = base_vec1.y; basis(1,1) = base_vec2.y;
             basis = inv(basis);
             dlib::matrix<double,2,1> P;
             
@@ -519,9 +520,8 @@ int main(int argc, char** argv) {
                 int idx2 = dichosearch(p2, pos);
                 double pr1 = idx1 / (double)ndata_class1;
                 double pr2 = 1.0 - idx2 / (double)ndata_class2;
-                double cba2 = pr1 + pr2;
-                if (cba2 > cba2_max) {
-                    cba2_max = cba2;
+                double cump_diff = fabs(pr1 - pr2);
+                if (cump_diff < cump_diff_min) {cump_diff_min = cump_diff;
                     double r = (pos - m1) / (m2 - m1);
                     if (reversed) r = 1.0 - r;
                     Point2D center = c1 + r * (c2 - c1);
@@ -731,7 +731,6 @@ int main(int argc, char** argv) {
     // wxsvg * xsvg + wysvg * ysvg + csvg = 0
     FloatType xsvgymax = (-csvg -wysvg*svgSize) / wxsvg; // at ysvg = svgSize
     FloatType ysvgxmax = (-csvg -wxsvg*svgSize) / wysvg; // at xsvg = svgSize
-cout << "svg line: " << xsvgy0 << " " << ysvgx0 << " " << xsvgymax << " " << ysvgxmax << endl;
     // NaN comparisons always fail, so use only positive tests and this is OK
     bool useLeft = (ysvgx0 >= 0) && (ysvgx0 <= svgSize);
     bool useRight = (ysvgxmax >= 0) && (ysvgxmax <= svgSize);

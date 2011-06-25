@@ -15,10 +15,11 @@
 #include "base64.hpp"
 
 #include "dlib/matrix.h"
+#include "dlib/svm.h"
 
 using namespace std;
 
-typedef dlib::matrix<double, 0, 1> sample_type;
+typedef dlib::matrix<FloatType, 0, 1> sample_type;
 
 int help(const char* errmsg = 0) {
 cout << "\
@@ -134,18 +135,7 @@ cairo_status_t png_copier(void *closure, const unsigned char *data, unsigned int
     return CAIRO_STATUS_SUCCESS;
 }
 
-
-struct LinearPredictor {
-    std::vector<FloatType> weights;
-    FloatType predict(const sample_type& data) {
-        int dim = weights.size()-1;
-        FloatType ret = weights[dim];
-        for (int d=0; d<dim; ++d) ret += weights[d] * data(d);
-        return ret;
-    }
-};
-
-void GramSchmidt(dlib::matrix<dlib::matrix<double,0,1>,0,1>& basis, dlib::matrix<double,0,1>& newX) {
+void GramSchmidt(dlib::matrix<dlib::matrix<FloatType,0,1>,0,1>& basis, dlib::matrix<FloatType,0,1>& newX) {
     using namespace dlib;
     // goal: find a basis so that the given vector is the new X
     // principle: at least one basis vector is not orthogonal with newX (except if newX is null but we suppose this is not the case)
@@ -187,6 +177,105 @@ int dichosearch(const vector<double>& series, double x) {
     }
     return dichomed;
 }
+
+struct LDA_trainer {
+    typedef ::sample_type sample_type;
+    typedef FloatType  scalar_type;
+    typedef dlib::linear_kernel<sample_type> kernel_type;
+    typedef dlib::decision_function<kernel_type> trained_function_type;
+    typedef trained_function_type::mem_manager_type mem_manager_type;
+    
+    trained_function_type train(const trained_function_type::sample_vector_type& samplesvec, const trained_function_type::scalar_vector_type& labels) const {
+        using namespace dlib;
+        int fdim = samplesvec(0).size();
+        int nsamples = samplesvec.size();
+        
+        int ndata_class1 = 0, ndata_class2 = 0;
+        for (int i=0; i<nsamples; ++i) {
+            if (labels(i)>0) ++ndata_class1;
+            else ++ndata_class2;
+        }
+        
+        matrix<sample_type,0,1> samples1, samples2;
+        samples1.set_size(ndata_class1);
+        samples2.set_size(ndata_class2);
+        sample_type mu1; mu1.set_size(fdim);
+        sample_type mu2; mu2.set_size(fdim);
+        for (int i=0; i<fdim; ++i) {mu1(i)=0; mu2(i)=0;}
+        
+        ndata_class1 = 0; ndata_class2 = 0;
+        for (int i=0; i<nsamples; ++i) {
+            if (labels(i)>0) {
+                samples1(ndata_class1) = samplesvec(i);
+                ++ndata_class1;
+                mu1 += samplesvec(i);
+            }
+            else {
+                samples2(ndata_class2) = samplesvec(i);
+                ++ndata_class2;
+                mu2 += samplesvec(i);
+            }
+        }
+        mu1 /= ndata_class1;
+        mu2 /= ndata_class2;
+    
+        matrix<FloatType> sigma1 = covariance(samples1);
+        matrix<FloatType> sigma2 = covariance(samples2);
+
+        matrix<FloatType,0,1> w_vect = pinv(sigma1+sigma2) * (mu2 - mu1);
+    
+        trained_function_type ret;
+        //ret.alpha.set_size(fdim);
+        //for (int i=0; i<fdim; ++i) ret.alpha(i) = w_vect(i);
+        ret.alpha = w_vect;
+        ret.b = dot(w_vect,(mu1+mu2)*0.5);
+        // linear kernel idiocy
+        ret.basis_vectors.set_size(fdim);
+        for (int i=0; i<fdim; ++i) {
+            ret.basis_vectors(i).set_size(fdim);
+            for (int j=0; j<fdim; ++j) ret.basis_vectors(i)(j)=0;
+            ret.basis_vectors(i)(i) = 1;
+        }
+        return ret;
+/*        LinearPredictor classifier;
+        classifier.weights.resize(fdim+1);
+        for (int i=0; i<fdim; ++i) classifier.weights[i] = w_vect(i);
+        classifier.weights[fdim] = -dot(w_vect,(mu1+mu2)*0.5);
+        return classifier;*/
+    }
+    
+    void train(int nfolds, const std::vector<sample_type>& samples, const std::vector<FloatType>& labels) {
+        using namespace dlib;
+        probabilistic_decision_function<kernel_type> pdecfun = train_probabilistic_decision_function(*this, samples, labels, nfolds);
+        decision_function<kernel_type>& decfun = pdecfun.decision_funct;
+        int dim = samples.back().size();
+        // see comments in linearSVM.hpp
+        weights.clear();
+        weights.resize(dim+1, 0);
+        matrix<FloatType> w(dim,1);
+        w = 0;
+        for (int i=0; i<decfun.alpha.nr(); ++i) {
+            w += decfun.alpha(i) * decfun.basis_vectors(i);
+        }
+        for (int i=0; i<dim; ++i) weights[i] = w(i);
+        weights[dim] = -decfun.b;
+        for (int i=0; i<=dim; ++i) weights[i] *= pdecfun.alpha;
+        weights[dim] += pdecfun.beta;
+
+        // TODO: check if necessary here
+        for (int i=0; i<=dim; ++i) weights[i] = -weights[i];
+    }
+    
+    std::vector<FloatType> weights;
+    FloatType predict(const sample_type& data) {
+        int dim = weights.size()-1;
+        FloatType ret = weights[dim];
+        for (int d=0; d<dim; ++d) ret += weights[d] * data(d);
+        return ret;
+    }
+
+};
+
 
 int main(int argc, char** argv) {
     
@@ -264,12 +353,8 @@ int main(int argc, char** argv) {
     fdim = nscales * 2;
     undefsample.set_size(fdim,1);
     int nsamples = ndata_class1+ndata_class2;
-    
-    using namespace dlib;
-    matrix<matrix<double,0,1>,0,1> samples;
-    samples.set_size(nsamples);
-    for (int i=0; i<nsamples; ++i) samples(i).set_size(fdim);
-    std::vector<FloatType> labels(nsamples, 0);
+    vector<sample_type> samples(nsamples, undefsample);
+    vector<FloatType> labels(nsamples, 0);
     for (int i=0; i<ndata_class1; ++i) labels[i] = -1;
     for (int i=ndata_class1; i<nsamples; ++i) labels[i] = 1;
     
@@ -277,80 +362,60 @@ int main(int argc, char** argv) {
     for (int argi = arg_class1; argi<arg_class2-1; ++argi) {
         ifstream mscfile(argv[argi], ifstream::binary);
         int npts = read_msc_header(mscfile, scales, ptnparams);
-        read_msc_data(mscfile,nscales,npts,&samples(base_pt), ptnparams);
+        read_msc_data(mscfile,nscales,npts,&samples[base_pt], ptnparams);
         mscfile.close();
         base_pt += npts;
     }
     for (int argi = arg_class2; argi<argc; ++argi) {
         ifstream mscfile(argv[argi], ifstream::binary);
         int npts = read_msc_header(mscfile, scales, ptnparams);
-        read_msc_data(mscfile,nscales,npts,&samples(base_pt), ptnparams);
+        read_msc_data(mscfile,nscales,npts,&samples[base_pt], ptnparams);
         mscfile.close();
         base_pt += npts;
     }
     
     cout << "Computing the two best projection directions" << endl;
 
-    sample_type mu1 = samples(0);
-    for (int i=1; i<ndata_class1; ++i) mu1 += samples(i);
-    mu1 /= ndata_class1;
-    sample_type mu2 = samples(ndata_class1);
-    for (int i=ndata_class1+1; i<nsamples; ++i) mu2 += samples(i);
-    mu2 /= ndata_class2;
-    
-    matrix<double> sigma1 = covariance(subm(samples,0,0,ndata_class1,1));
-    matrix<double> sigma2 = covariance(subm(samples,ndata_class1,0,ndata_class2,1));
-
-    matrix<double,0,1> w_vect = pinv(sigma1+sigma2) * (mu2 - mu1);
-    LinearPredictor classifier;
-    classifier.weights.resize(fdim+1);
-    for (int i=0; i<fdim; ++i) classifier.weights[i] = w_vect(i);
-    classifier.weights[fdim] = -dot(w_vect,(mu1+mu2)*0.5);
+    LDA_trainer classifier;
+    // shuffle before internal cross-validation to spread instances of each class
+    dlib::randomize_samples(samples, labels);
+    classifier.train(10, samples, labels);
     
     // get the projections of each sample on the first classifier direction
-    std::vector<FloatType> proj1(nsamples);
-    for (int i=0; i<nsamples; ++i) proj1[i] = classifier.predict(samples(i));
+    vector<FloatType> proj1(nsamples);
+    for (int i=0; i<nsamples; ++i) proj1[i] = classifier.predict(samples[i]);
     
-    matrix<matrix<double,0,1>,0,1> basis;
+    dlib::matrix<dlib::matrix<FloatType,0,1>,0,1> basis;
     basis.set_size(fdim);
     for (int i=0; i<fdim; ++i) {
         basis(i).set_size(fdim);
         for (int j=0; j<fdim; ++j) basis(i)(j) = 0;
         basis(i)(i) = 1;
     }
+    dlib::matrix<FloatType,0,1> w_vect;
+    w_vect.set_size(fdim);
+    for (int i=0; i<fdim; ++i) w_vect(i) = classifier.weights[i];
     GramSchmidt(basis,w_vect);
     
-    matrix<matrix<double,0,1>,0,1> samples_reduced;
-    samples_reduced.set_size(nsamples);
-    for (int i=0; i<nsamples; ++i) samples_reduced(i).set_size(fdim-1);
-    
+    vector<sample_type> samples_reduced(nsamples);
+    for (int i=0; i<nsamples; ++i) samples_reduced[i].set_size(fdim-1);
     // project the data onto the hyperplane so as to get the second direction
     for (int si=0; si<nsamples; ++si) {
-        for(int i=1; i<fdim; ++i) samples_reduced(si)(i-1) = dot(samples(si), basis(i));
+        for(int i=1; i<fdim; ++i) samples_reduced[si](i-1) = dlib::dot(samples[si], basis(i));
     }
 
-    mu1 = samples_reduced(0);
-    for (int i=1; i<ndata_class1; ++i) mu1 += samples_reduced(i);
-    mu1 /= ndata_class1;
-    mu2 = samples_reduced(ndata_class1);
-    for (int i=ndata_class1+1; i<nsamples; ++i) mu2 += samples_reduced(i);
-    mu2 /= ndata_class2;
-    sigma1 = covariance(subm(samples_reduced,0,0,ndata_class1,1));
-    sigma2 = covariance(subm(samples_reduced,ndata_class1,0,ndata_class2,1));
-
-    matrix<double,0,1> w_vect_in_basis = pinv(sigma1+sigma2) * (mu2 - mu1);
-
-    for(int i=0; i<fdim; ++i) w_vect(i) = 0;
-    for(int i=1; i<fdim; ++i) w_vect += w_vect_in_basis(i-1) * basis(i);
+    LDA_trainer ortho_classifier;
+    ortho_classifier.train(10, samples_reduced, labels);
     
-    LinearPredictor ortho_classifier;
+    // convert back the classifier weights into the original space
     ortho_classifier.weights.resize(fdim+1);
-    for (int i=0; i<fdim; ++i) ortho_classifier.weights[i] = w_vect(i);
-    ortho_classifier.weights[fdim] = -dot(w_vect_in_basis,(mu1+mu2)*0.5);
-
+    ortho_classifier.weights[fdim] = ortho_classifier.weights[fdim-1];
+    for(int i=0; i<fdim; ++i) w_vect(i) = 0;
+    for(int i=1; i<fdim; ++i) w_vect += ortho_classifier.weights[i-1] * basis(i);
+    for(int i=0; i<fdim; ++i) ortho_classifier.weights[i] = w_vect(i);
     
-    std::vector<FloatType> proj2(nsamples);
-    for (int i=0; i<nsamples; ++i) proj2[i] = ortho_classifier.predict(samples(i));
+    vector<FloatType> proj2(nsamples);
+    for (int i=0; i<nsamples; ++i) proj2[i] = ortho_classifier.predict(samples[i]);
 
     // compute the reference points for orienting the classifier boundaries
     // pathological cases are possible where an arbitrary point in the (>0,>0)
@@ -391,7 +456,7 @@ int main(int argc, char** argv) {
     xmaxg = max(xmaxg, xmaxc);
     yming = min(yming, yminc);
     ymaxg = max(ymaxg, ymaxc);
-    
+
     static const int svgSize = 800;
     static const int halfSvgSize = svgSize / 2;
     FloatType minX = numeric_limits<FloatType>::max();
@@ -406,7 +471,7 @@ int main(int argc, char** argv) {
     }
     FloatType absmaxXY = fabs(max(max(max(-minX,maxX),-minY),maxY));
     FloatType scaleFactor = halfSvgSize / absmaxXY;
-    
+
     PointCloud<Point2D> cloud2D;
     cloud2D.prepare(xming,xmaxg,yming,ymaxg,nsamples+data_unlabeled.size());
     for (int i=0; i<data_unlabeled.size(); ++i) cloud2D.insert(Point2D(
@@ -440,7 +505,7 @@ int main(int argc, char** argv) {
             // and look for the lowest overall density along the boundary
             int nsearchdir = 90; // each 2 degree, as we swipe from 0 to 180 (unoriented lines)
             FloatType incr = max(xmaxg-xming, ymaxg-yming) / nsearchpointm1;
-            std::vector<FloatType> sumds(nsearchdir);
+            vector<FloatType> sumds(nsearchdir);
     #pragma omp parallel for
             for(int sd = 0; sd < nsearchdir; ++sd) {
                 // use the parametric P = P0 + alpha*V formulation of a line
@@ -452,7 +517,7 @@ int main(int argc, char** argv) {
                     int s = sp * incr;
                     FloatType x = vx * s + spcx;
                     FloatType y = vy * s + spcy;
-                    std::vector<DistPoint<Point2D> > neighbors;
+                    vector<DistPoint<Point2D> > neighbors;
                     cloud2D.findNeighbors(back_inserter(neighbors), Point2D(x,y), radius);
                     sumds[sd] += neighbors.size();
                 }
@@ -493,7 +558,7 @@ int main(int argc, char** argv) {
         w_vect /= w_vect.norm();
         Point2D w_orth(-w_vect.y,w_vect.x);
 
-        double cba2_max = 0;
+        double cump_diff_min = 2.0;
 
         for(int sd = 1; sd < 180; ++sd) {
             FloatType vx = cos(sd * M_PI / 180.0);
@@ -502,13 +567,13 @@ int main(int argc, char** argv) {
             dlib::matrix<double,2,2> basis;
             Point2D base_vec1 = w_vect;
             Point2D base_vec2 = vx * w_vect + vy * w_orth;
-            basis(0,0) = base_vec1.x; basis(0,1) = base_vec1.y;
-            basis(1,0) = base_vec2.x; basis(1,1) = base_vec2.y;
+            basis(0,0) = base_vec1.x; basis(0,1) = base_vec2.x;
+            basis(1,0) = base_vec1.y; basis(1,1) = base_vec2.y;
             basis = inv(basis);
             dlib::matrix<double,2,1> P;
             
             double m1 = 0, m2 = 0;
-            std::vector<double> p1, p2;
+            vector<double> p1, p2;
             for (int i=0; i<nsamples; ++i) {
                 P(0) = proj1[i];
                 P(1) = proj2[i];
@@ -536,9 +601,8 @@ int main(int argc, char** argv) {
                 int idx2 = dichosearch(p2, pos);
                 double pr1 = idx1 / (double)ndata_class1;
                 double pr2 = 1.0 - idx2 / (double)ndata_class2;
-                double cba2 = pr1 + pr2;
-                if (cba2 > cba2_max) {
-                    cba2_max = cba2;
+                double cump_diff = fabs(pr1 - pr2);
+                if (cump_diff < cump_diff_min) {cump_diff_min = cump_diff;
                     double r = (pos - m1) / (m2 - m1);
                     if (reversed) r = 1.0 - r;
                     Point2D center = c1 + r * (c2 - c1);
@@ -549,7 +613,8 @@ int main(int argc, char** argv) {
                     // wx * cx + wy * cy + wc = 0
                     wc = -wx * center.x - wy * center.y;
                 }
-            }            
+            }
+            
         }
     }
 
@@ -653,7 +718,7 @@ int main(int argc, char** argv) {
     // Save the classifier parameters as an SVG comment so we can find them back later on
     // Use base64 encoded binary to preserve full precision
     
-    std::vector<char> binary_parameters(
+    vector<char> binary_parameters(
         sizeof(int)
       + nscales*sizeof(FloatType)
       + (fdim+1)*sizeof(FloatType)
@@ -744,6 +809,7 @@ int main(int argc, char** argv) {
     // some may be NaN
     FloatType xsvgy0 = -csvg / wxsvg; // at ysvg = 0
     FloatType ysvgx0 = -csvg / wysvg; // at xsvg = 0
+    // wxsvg * xsvg + wysvg * ysvg + csvg = 0
     FloatType xsvgymax = (-csvg -wysvg*svgSize) / wxsvg; // at ysvg = svgSize
     FloatType ysvgxmax = (-csvg -wxsvg*svgSize) / wysvg; // at xsvg = svgSize
     // NaN comparisons always fail, so use only positive tests and this is OK
@@ -752,7 +818,7 @@ int main(int argc, char** argv) {
     bool useTop = (xsvgy0 >= 0) && (xsvgy0 <= svgSize);
     bool useBottom = (xsvgymax >= 0) && (xsvgymax <= svgSize);
     int sidescount = useLeft + useRight + useTop + useBottom;
-    std::vector<Point2D> path;
+    vector<Point2D> path;
 //    if (sidescount==2) {
         svgfile << "<path style=\"fill:none;stroke:#000000;stroke-width:1px;z-index:1;\" d=\"M ";
         if (useLeft) {
