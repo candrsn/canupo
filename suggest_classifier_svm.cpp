@@ -407,12 +407,11 @@ int main(int argc, char** argv) {
     FloatType radius = -log(1.0/0.9 - 1.0) / 2;
     
     FloatType wx = 0, wy = 0, wc = 0, minspcx = 0, minspcy = 0;
-    
-    if (ndata_unlabeled) {
 
+    if (ndata_unlabeled) {
         int minsumd = numeric_limits<int>::max();
         FloatType minvx = 0, minvy = 0;
-        
+
         cout << "Finding the line with least density" << flush;
         
         for (int spci = 0; spci <= nsearchpointm1; ++spci) {

@@ -362,16 +362,22 @@ int main(int argc, char** argv) {
 
     // true/false positive/negative counts
     FloatType TP=0, TN=0, FP=0, FN=0;
+    double m1 = 0, m2 = 0, v1 = 0, v2=0;
     for (int i=0; i<ndata_class1; ++i) {
         FloatType pred = classifier.classify(&samples[i][0]);
         if (pred<0) ++TP;
         else ++FN;
+        m1+=pred; v1+=pred*pred;
     }
     for (int i=ndata_class1; i<nsamples; ++i) {
         FloatType pred = classifier.classify(&samples[i][0]);
         if (pred>0) ++TN;
         else ++FP;
+        m2+=pred; v2+=pred*pred;
     }
+    m1/=ndata_class1; m2/=ndata_class2;
+    v1 = (v1 - m1 * m1 * ndata_class1) / (ndata_class1 - 1);
+    v2 = (v2 - m2 * m2 * ndata_class2) / (ndata_class2 - 1);
     
     // display scores, at last...
     // http://en.wikipedia.org/wiki/Binary_classification
@@ -385,6 +391,7 @@ int main(int argc, char** argv) {
     else mcc = ((TP*TN) - (FP*FN)) / sqrt(mcc);
     cout << "Matthews correlation coefficient (note: -1 ≤ mcc ≤ 1): " << mcc << endl;
     cout << "Accuracy: " << (TP+TN) / nsamples << endl;
+    cout << "Fisher's discriminant ratio: " << (m1-m2)*(m1-m2)/(v1+v2) << endl;
     cout << "Balanced Accuracy: " << 0.5 * (TP / ndata_class1 + TN / ndata_class2) << endl;
     return 0;
 }
