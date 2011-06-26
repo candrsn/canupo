@@ -792,6 +792,7 @@ int main(int argc, char** argv) {
       + sizeof(FloatType)
       + sizeof(FloatType)
       + sizeof(int)
+      + sizeof(FloatType)
     );
     int bpidx = 0;
     memcpy(&binary_parameters[bpidx],&nscales,sizeof(int)); bpidx += sizeof(int);
@@ -813,6 +814,8 @@ int main(int argc, char** argv) {
     // conversion from svg to 2D space
     memcpy(&binary_parameters[bpidx],&scaleFactor,sizeof(FloatType)); bpidx += sizeof(FloatType);
     memcpy(&binary_parameters[bpidx],&halfSvgSize,sizeof(int)); bpidx += sizeof(int);
+    // axis scale ratio
+    memcpy(&binary_parameters[bpidx],&axis_scale_ratio,sizeof(FloatType)); bpidx += sizeof(FloatType);
 
     base64 codec;
     int nbytes;

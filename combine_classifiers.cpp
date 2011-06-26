@@ -30,7 +30,7 @@ struct BinaryClassifier {
     vector<FloatType> weights_axis1, weights_axis2;
     vector<Point2D> path;
     Point2D refpt1, refpt2;
-    FloatType absmaxXY;
+    FloatType absmaxXY,axis_scale_ratio;
 };
 
 int main(int argc, char** argv) {
@@ -91,6 +91,7 @@ int main(int argc, char** argv) {
             inputclassifier.read((char*)&bc.refpt2.y,sizeof(FloatType));
             // some information useful for debugging
             inputclassifier.read((char*)&bc.absmaxXY,sizeof(FloatType));
+            inputclassifier.read((char*)&bc.axis_scale_ratio,sizeof(FloatType));
             classifiers.push_back(bc);
         }
         
@@ -127,6 +128,7 @@ int main(int argc, char** argv) {
         classifierfile.write((char*)&classifiers[cidx].refpt2.y,sizeof(FloatType));
         // some information useful for debugging
         classifierfile.write((char*)&classifiers[cidx].absmaxXY,sizeof(FloatType));
+        classifierfile.write((char*)&classifiers[cidx].axis_scale_ratio,sizeof(FloatType));
     }
     classifierfile.close();
 

@@ -10,7 +10,7 @@ struct Classifier {
     int class1, class2;
     std::vector<FloatType> weights_axis1, weights_axis2;
     std::vector<Point2D> path;
-    FloatType absmaxXY;
+    FloatType absmaxXY, axis_scale_ratio;
     
     struct LineDef {
         FloatType wx, wy, c;
