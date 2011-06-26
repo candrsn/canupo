@@ -42,6 +42,10 @@ extern "C" {
 // - multiply the new observation (as a row vector) by the B matrix
 
 void svd(int nrows, int ncols, double* A, double* S, bool projectObservations = false, double* B = 0) {
+#ifndef LAPACK_IS_THREAD_SAFE
+#pragma omp critical
+{
+#endif
     int info = 0;
     double Dummy; int ld_Dummy = 1;
     int lwork = -1;
@@ -59,10 +63,17 @@ void svd(int nrows, int ncols, double* A, double* S, bool projectObservations = 
         exit(1);
     }
     delete [] work;
+#ifndef LAPACK_IS_THREAD_SAFE
+}
+#endif
 }
 
 // idem using floats
 void svd(int nrows, int ncols, float* A, float* S, bool projectObservations = false, float* B = 0) {
+#ifndef LAPACK_IS_THREAD_SAFE
+#pragma omp critical
+{
+#endif
     int info = 0;
     float Dummy; int ld_Dummy = 1;
     int lwork = -1;
@@ -80,6 +91,9 @@ void svd(int nrows, int ncols, float* A, float* S, bool projectObservations = fa
         exit(1);
     }
     delete [] work;
+#ifndef LAPACK_IS_THREAD_SAFE
+}
+#endif
 }
 
 

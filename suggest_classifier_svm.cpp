@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <limits>
 
+#include <boost/format.hpp>
+
 // graphics lib
 #include <cairo/cairo.h>
 
@@ -18,6 +20,8 @@
 using namespace std;
 
 typedef LinearSVM::sample_type sample_type;
+static const int svgSize = 800;
+static const int halfSvgSize = svgSize / 2;
 
 int help(const char* errmsg = 0) {
 cout << "\
@@ -335,7 +339,7 @@ int main(int argc, char** argv) {
     
     vector<FloatType> proj2(nsamples);
     for (int i=0; i<nsamples; ++i) proj2[i] = ortho_classifier.predict(samples[i]);
-
+    
     // compute the reference points for orienting the classifier boundaries
     // pathological cases are possible where an arbitrary point in the (>0,>0)
     // quadrant is not in the +1 class for example
@@ -348,6 +352,88 @@ int main(int argc, char** argv) {
     }
     refpt_pos /= refpt_pos.z;
     refpt_neg /= refpt_neg.z;
+    
+    FloatType scaleFactor = 0;
+    FloatType axis_scale_ratio = 1;
+
+// Experimental: dilatation to highlight the internal data structure
+    if (true) {
+        Point2D e1(refpt_pos.x-refpt_neg.x, refpt_pos.y-refpt_neg.y);
+        e1/=e1.norm();
+        Point2D e2(-e1.y, e1.x);
+        Point2D ori = Point2D(refpt_pos.x+refpt_neg.x, refpt_pos.y+refpt_neg.y) * 0.5;
+        FloatType m11=0, m21=0, m12=0, m22=0; // m12, m22 null by construction
+        FloatType v11=0, v12=0, v21=0, v22=0;
+        for (int i=0; i<nsamples; ++i) {
+            Point2D p(proj1[i], proj2[i]);
+            p -= ori;
+            FloatType p1 = p.dot(e1);
+            FloatType p2 = p.dot(e2);
+            if (labels[i]<0) {
+                m11 += p1; v11 += p1*p1;
+                m12 += p2; v12 += p2*p2;
+            }
+            else {
+                m21 += p1; v21 += p1*p1;
+                m22 += p2; v22 += p2*p2;
+            }
+        }
+        m11 /= ndata_class1;
+        v11 = (v11 - m11*m11*ndata_class1) / (ndata_class1-1);
+        m21 /= ndata_class2;
+        v21 = (v21 - m21*m21*ndata_class2) / (ndata_class2-1);
+        m12 /= ndata_class1;
+        v12 = (v12 - m12*m12*ndata_class1) / (ndata_class1-1);
+        m22 /= ndata_class2;
+        v22 = (v22 - m22*m22*ndata_class2) / (ndata_class2-1);
+
+        FloatType d1 = sqrt(v11/v12);
+        FloatType d2 = sqrt(v21/v22);
+        axis_scale_ratio = sqrt(d1*d2);
+
+        using namespace dlib;
+        matrix<FloatType,2,2> bd;
+        bd = e1.x, e1.y, e2.x/axis_scale_ratio, e2.y/axis_scale_ratio;
+        matrix<FloatType,2,2> bi;
+        bi = e1.x, e2.x, e1.y, e2.y;
+        //matrix<FloatType,2,2> c = bi * bd;
+        matrix<FloatType,2,2> c = inv(trans(bd));
+        
+        std::vector<FloatType>& w1 = classifier.weights;
+        std::vector<FloatType>& w2 = ortho_classifier.weights;
+        // first shift so the center of the figure is at the midpoint
+        w1[fdim] -= ori.x;
+        w2[fdim] -= ori.y;
+        // now transform / scale along e2
+        std::vector<FloatType> wn1(fdim+1), wn2(fdim+1);
+        for (int i=0; i<=fdim; ++i) {
+            wn1[i] = c(0,0) * w1[i] + c(0,1) * w2[i];
+            wn2[i] = c(1,0) * w1[i] + c(1,1) * w2[i];
+        }
+        for (int i=0; i<=fdim; ++i) cout << wn1[i] << " "; cout << endl;
+        for (int i=0; i<=fdim; ++i) cout << wn2[i] << " "; cout << endl;
+        
+        classifier.weights = wn1;
+        ortho_classifier.weights = wn2;
+        
+        
+        // reset projections
+        for (int i=0; i<nsamples; ++i) {
+            proj1[i] = classifier.predict(samples[i]);
+            proj2[i] = ortho_classifier.predict(samples[i]);
+        }
+        
+        refpt_pos = 0;
+        refpt_neg = 0;
+        for (int i=0; i<nsamples; ++i) {
+            if (labels[i]>0) refpt_pos += Point(proj1[i], proj2[i], 1);
+            else refpt_neg += Point(proj1[i], proj2[i], 1);
+        }
+        refpt_pos /= refpt_pos.z;
+        refpt_neg /= refpt_neg.z;
+        
+        scaleFactor = halfSvgSize / max(fabs(m11-sqrt(v11)*3),fabs(m21+sqrt(v21)*3));
+    }
     
     FloatType xming = numeric_limits<FloatType>::max();
     FloatType xmaxg = -numeric_limits<FloatType>::max();
@@ -376,8 +462,6 @@ int main(int argc, char** argv) {
     yming = min(yming, yminc);
     ymaxg = max(ymaxg, ymaxc);
 
-    static const int svgSize = 800;
-    static const int halfSvgSize = svgSize / 2;
     FloatType minX = numeric_limits<FloatType>::max();
     FloatType maxX = -minX;
     FloatType minY = minX;
@@ -389,7 +473,12 @@ int main(int argc, char** argv) {
         maxY = max(maxY, proj2[i]);
     }
     FloatType absmaxXY = fabs(max(max(max(-minX,maxX),-minY),maxY));
-    FloatType scaleFactor = halfSvgSize / absmaxXY;
+    if (scaleFactor==0) scaleFactor = halfSvgSize / absmaxXY;
+    else {
+        FloatType sf2 = halfSvgSize / absmaxXY;
+        if (scaleFactor<sf2) scaleFactor=sf2;
+        else absmaxXY = halfSvgSize / scaleFactor;
+    }
 
     PointCloud<Point2D> cloud2D;
     cloud2D.prepare(xming,xmaxg,yming,ymaxg,nsamples+data_unlabeled.size());
@@ -478,6 +567,7 @@ int main(int argc, char** argv) {
         Point2D w_orth(-w_vect.y,w_vect.x);
 
         double cump_diff_min = 2.0;
+        double cba2_max = 0;
 
         for(int sd = 1; sd < 180; ++sd) {
             FloatType vx = cos(sd * M_PI / 180.0);
@@ -520,15 +610,17 @@ int main(int argc, char** argv) {
                 int idx2 = dichosearch(p2, pos);
                 double pr1 = idx1 / (double)ndata_class1;
                 double pr2 = 1.0 - idx2 / (double)ndata_class2;
-                double cump_diff = fabs(pr1 - pr2);
-                if (cump_diff < cump_diff_min) {cump_diff_min = cump_diff;
+                //double cump_diff = fabs(pr1 - pr2);
+                //if (cump_diff < cump_diff_min) {cump_diff_min = cump_diff;
+                double cba2 = fabs(pr1 + pr2);
+                if (cba2 > cba2_max) {cba2_max = cba2;
                     double r = (pos - m1) / (m2 - m1);
                     if (reversed) r = 1.0 - r;
                     Point2D center = c1 + r * (c2 - c1);
                     minspcx = center.x;
                     minspcy = center.y;
-                    wx = base_vec2.x;
-                    wy = base_vec2.y;
+                    wx = -base_vec2.y;
+                    wy = base_vec2.x;
                     // wx * cx + wy * cy + wc = 0
                     wc = -wx * center.x - wy * center.y;
                 }
@@ -557,7 +649,7 @@ int main(int argc, char** argv) {
         // we have to project this data as this was not done above
         FloatType x = classifier.predict(data_unlabeled[i]) * scaleFactor + halfSvgSize;
         FloatType y = halfSvgSize - ortho_classifier.predict(data_unlabeled[i]) * scaleFactor;
-        cairo_arc(cr, x, y, 0.714, 0, 2*M_PI);
+        cairo_arc(cr, x, y, 0.5, 0, 2*M_PI);
         cairo_stroke(cr);
     }
     // now plot the reference data. It is very well that it was randomised so we do not have one class on top of the other
@@ -566,56 +658,30 @@ int main(int argc, char** argv) {
         FloatType y = halfSvgSize - proj2[i]*scaleFactor;
         if (labels[i]==1) cairo_set_source_rgba(cr, 1, 0, 0, 0.75);
         else cairo_set_source_rgba(cr, 0, 0, 1, 0.75);
-        cairo_arc(cr, x, y, 0.714, 0, 2*M_PI);
+        cairo_arc(cr, x, y, 0.5, 0, 2*M_PI);
         cairo_stroke(cr);
     }
 
-
-/*  // probabilistic circles every 5 % proba of correct classification
-    // too much, can't see anything in the middle
-    // 1 / (1+exp(-d)) = pval = 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95
-    for (int i=5; i<=45; i+=5) {
-        FloatType pval = (50.0 + i) / 100.0;
-        // 1+exp(-d) = 1/pval
-        // exp(-d) = 1/pval - 1
-        FloatType d = -log(1.0/pval - 1.0);  // OK as pval<1
-        cairo_arc(cr, halfSvgSize, halfSvgSize, d * scaleFactor, 0, 2*M_PI);
-        cairo_stroke(cr);
-    }
-
-    // plot the circle at 95% proba of being correct (5% of being wrong)
-    FloatType d95 = -log(1.0/0.95 - 1.0);
-    cairo_arc(cr, halfSvgSize, halfSvgSize, d95 * scaleFactor, 0, 2*M_PI);
-    cairo_stroke(cr);
-*/
-    // circles are prone to misinterpretation (radius = dist to hyperplane,
-    // error not only in the center zone)
     // specify scales at the bottom-right of the image, in a less-used quadrant
     cairo_set_source_rgb(cr, 0.25,0.25,0.25);
     cairo_select_font_face (cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
     cairo_set_font_size (cr, 12);
     cairo_text_extents_t extents;
-    FloatType dprob = -log(1.0/0.99 - 1.0) * scaleFactor;
-    const char* text = "p(classif)>99%";
+    FloatType dprob = -log(1.0/0.95 - 1.0) * scaleFactor;
+    const char* text = "p(classif)>95%";
     cairo_text_extents(cr, text, &extents);
     cairo_move_to(cr, svgSize - dprob - 20 - extents.width - extents.x_bearing, svgSize - 15 - extents.height/2 - extents.y_bearing);
     cairo_show_text(cr, text);
     cairo_move_to(cr, svgSize - dprob - 10, svgSize - 15);
     cairo_line_to(cr, svgSize - 10, svgSize - 15);
-    dprob = -log(1.0/0.95 - 1.0) * scaleFactor;
-    text = "p(classif)>95%";
-    cairo_text_extents(cr, text, &extents);
-    cairo_move_to(cr, svgSize - dprob - 20 - extents.width - extents.x_bearing, svgSize - 35 - extents.height/2 - extents.y_bearing);
-    cairo_show_text(cr, text);
-    cairo_move_to(cr, svgSize - dprob - 10, svgSize - 35);
-    cairo_line_to(cr, svgSize - 10, svgSize - 35);
-    dprob = -log(1.0/0.9 - 1.0) * scaleFactor;
-    text = "p(classif)>90%";
-    cairo_text_extents(cr, text, &extents);
-    cairo_move_to(cr, svgSize - dprob - 20 - extents.width - extents.x_bearing, svgSize - 55 - extents.height/2 - extents.y_bearing);
-    cairo_show_text(cr, text);
-    cairo_move_to(cr, svgSize - dprob - 10, svgSize - 55);
-    cairo_line_to(cr, svgSize - 10, svgSize - 55);
+    
+    string s_axis_scale_ratio = boost::str(boost::format("x%.1f") % axis_scale_ratio);
+    cairo_text_extents(cr, s_axis_scale_ratio.c_str(), &extents);
+    cairo_move_to(cr, svgSize - 20 - extents.width - extents.x_bearing, svgSize - 30 - extents.height - extents.y_bearing );
+    cairo_show_text(cr, s_axis_scale_ratio.c_str());
+    cairo_move_to(cr, svgSize - 10, svgSize - dprob - 30);
+    cairo_line_to(cr, svgSize - 10, svgSize - 30);
+    
     cairo_stroke(cr);
 
     // draw lines on top of points
@@ -746,7 +812,7 @@ int main(int argc, char** argv) {
             if (useRight) svgfile << svgSize << "," << ysvgxmax << " ";
             if (useBottom) svgfile << xsvgymax << "," << svgSize << " ";
         }
-        if (useTop) {
+        else if (useTop) {
             svgfile << xsvgy0 << "," << 0 << " L " << minspcxsvg<<","<<minspcysvg<<" L ";
             if (useRight) svgfile << svgSize << "," << ysvgxmax << " ";
             if (useBottom) svgfile << xsvgymax << "," << svgSize << " ";
