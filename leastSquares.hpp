@@ -17,6 +17,10 @@ extern "C" {
 
 // Our own somewhat simplified wrapper. See below for a simpler one where leadingA is nrows by default
 void leastSquares(double* A, int leadingA, int nrows, int ncols, double* B, int nrhs) {
+#ifndef LAPACK_IS_THREAD_SAFE
+#pragma omp critical
+{
+#endif
     int info = 0;
     int ldb = std::max(nrows,ncols);
     double *sval = new double[std::min(nrows,ncols)];
@@ -44,6 +48,9 @@ void leastSquares(double* A, int leadingA, int nrows, int ncols, double* B, int 
     delete [] iwork;
     delete [] work;
     delete [] sval;
+#ifndef LAPACK_IS_THREAD_SAFE
+}
+#endif
 }
 
 inline void leastSquares(double* A, int nrows, int ncols, double* B, int nrhs) {
@@ -51,6 +58,10 @@ inline void leastSquares(double* A, int nrows, int ncols, double* B, int nrhs) {
 }
 
 void leastSquares(float* A, int leadingA, int nrows, int ncols, float* B, int nrhs) {
+#ifndef LAPACK_IS_THREAD_SAFE
+#pragma omp critical
+{
+#endif
     int info = 0;
     int ldb = std::max(nrows,ncols);
     float *sval = new float[std::min(nrows,ncols)];
@@ -78,6 +89,9 @@ void leastSquares(float* A, int leadingA, int nrows, int ncols, float* B, int nr
     delete [] iwork;
     delete [] work;
     delete [] sval;
+#ifndef LAPACK_IS_THREAD_SAFE
+}
+#endif
 }
 void leastSquares(float* A, int nrows, int ncols, float* B, int nrhs) {
     leastSquares(A,nrows,nrows,ncols,B,nrhs);
