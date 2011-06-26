@@ -119,6 +119,7 @@ int main(int argc, char** argv) {
         classifparamsfile.read((char*)&classifiers[ci].refpt_neg.x,sizeof(FloatType));
         classifparamsfile.read((char*)&classifiers[ci].refpt_neg.y,sizeof(FloatType));
         classifparamsfile.read((char*)&classifiers[ci].absmaxXY,sizeof(FloatType));
+        classifparamsfile.read((char*)&classifiers[ci].axis_scale_ratio,sizeof(FloatType));
         classifiers[ci].prepare();
     }
     classifparamsfile.close();

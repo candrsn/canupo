@@ -251,6 +251,8 @@ int main(int argc, char** argv) {
     memcpy(&scaleFactor,&binary_params[bpidx],sizeof(FloatType)); bpidx += sizeof(FloatType);
     int halfSvgSize;
     memcpy(&halfSvgSize,&binary_params[bpidx],sizeof(int)); bpidx += sizeof(int);
+    FloatType axis_scale_ratio;
+    memcpy(&axis_scale_ratio,&binary_params[bpidx],sizeof(int)); bpidx += sizeof(int);
     
     // convert the path from SVG to 2D space
     for(int i=0; i<path.size(); ++i) {
@@ -294,6 +296,7 @@ int main(int argc, char** argv) {
     classifierfile.write((char*)&refpt2.y,sizeof(FloatType));
     // some information useful for debugging
     classifierfile.write((char*)&absmaxXY,sizeof(FloatType));
+    classifierfile.write((char*)&axis_scale_ratio,sizeof(FloatType));
     classifierfile.close();
 
     int arg_class1 = argc;

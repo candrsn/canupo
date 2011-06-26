@@ -2,6 +2,8 @@
 #include <limits>
 #include <fstream>
 
+#include <boost/format.hpp>
+
 #include <cairo/cairo.h>
 
 #include "points.hpp"
@@ -218,6 +220,7 @@ int main(int argc, char** argv) {
         classifparamsfile.read((char*)&classifiers[ci].refpt_neg.x,sizeof(FloatType));
         classifparamsfile.read((char*)&classifiers[ci].refpt_neg.y,sizeof(FloatType));
         classifparamsfile.read((char*)&classifiers[ci].absmaxXY,sizeof(FloatType));
+        classifparamsfile.read((char*)&classifiers[ci].axis_scale_ratio,sizeof(FloatType));
         classifiers[ci].prepare();
     }
     classifparamsfile.close();
@@ -348,27 +351,21 @@ int main(int argc, char** argv) {
     cairo_select_font_face (cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
     cairo_set_font_size (cr, 12);
     cairo_text_extents_t extents;
-    FloatType dprob = -log(1.0/0.99 - 1.0) * scaleFactor;
-    const char* text = "p(classif)>99%";
+    FloatType dprob = -log(1.0/0.95 - 1.0) * scaleFactor;
+    const char* text = "p(classif)>95%";
     cairo_text_extents(cr, text, &extents);
     cairo_move_to(cr, svgSize - dprob - 20 - extents.width - extents.x_bearing, svgSize - 15 - extents.height/2 - extents.y_bearing);
     cairo_show_text(cr, text);
     cairo_move_to(cr, svgSize - dprob - 10, svgSize - 15);
     cairo_line_to(cr, svgSize - 10, svgSize - 15);
-    dprob = -log(1.0/0.95 - 1.0) * scaleFactor;
-    text = "p(classif)>95%";
-    cairo_text_extents(cr, text, &extents);
-    cairo_move_to(cr, svgSize - dprob - 20 - extents.width - extents.x_bearing, svgSize - 35 - extents.height/2 - extents.y_bearing);
-    cairo_show_text(cr, text);
-    cairo_move_to(cr, svgSize - dprob - 10, svgSize - 35);
-    cairo_line_to(cr, svgSize - 10, svgSize - 35);
-    dprob = -log(1.0/0.9 - 1.0) * scaleFactor;
-    text = "p(classif)>90%";
-    cairo_text_extents(cr, text, &extents);
-    cairo_move_to(cr, svgSize - dprob - 20 - extents.width - extents.x_bearing, svgSize - 55 - extents.height/2 - extents.y_bearing);
-    cairo_show_text(cr, text);
-    cairo_move_to(cr, svgSize - dprob - 10, svgSize - 55);
-    cairo_line_to(cr, svgSize - 10, svgSize - 55);
+    
+    string s_axis_scale_ratio = boost::str(boost::format("x%.1f") % classifier.axis_scale_ratio);
+    cairo_text_extents(cr, s_axis_scale_ratio.c_str(), &extents);
+    cairo_move_to(cr, svgSize - 20 - extents.width - extents.x_bearing, svgSize - 30 - extents.height - extents.y_bearing );
+    cairo_show_text(cr, s_axis_scale_ratio.c_str());
+    cairo_move_to(cr, svgSize - 10, svgSize - dprob - 30);
+    cairo_line_to(cr, svgSize - 10, svgSize - 30);
+    
     cairo_stroke(cr);
 
     // draw lines on top of points
@@ -391,6 +388,7 @@ int main(int argc, char** argv) {
       + sizeof(FloatType)
       + sizeof(FloatType)
       + sizeof(int)
+      + sizeof(FloatType)
     );
     int bpidx = 0;
     memcpy(&binary_parameters[bpidx],&prm_nscales,sizeof(int)); bpidx += sizeof(int);
@@ -412,6 +410,8 @@ int main(int argc, char** argv) {
     // conversion from svg to 2D space
     memcpy(&binary_parameters[bpidx],&scaleFactor,sizeof(FloatType)); bpidx += sizeof(FloatType);
     memcpy(&binary_parameters[bpidx],&halfSvgSize,sizeof(int)); bpidx += sizeof(int);
+    // axis scale ratio
+    memcpy(&binary_parameters[bpidx],&classifier.axis_scale_ratio,sizeof(FloatType)); bpidx += sizeof(FloatType);
 
     base64 codec;
     int nbytes;
