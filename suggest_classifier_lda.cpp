@@ -514,12 +514,9 @@ int main(int argc, char** argv) {
             wn1[i] = c(0,0) * w1[i] + c(0,1) * w2[i];
             wn2[i] = c(1,0) * w1[i] + c(1,1) * w2[i];
         }
-        for (int i=0; i<=fdim; ++i) cout << wn1[i] << " "; cout << endl;
-        for (int i=0; i<=fdim; ++i) cout << wn2[i] << " "; cout << endl;
-        
+
         classifier.weights = wn1;
         ortho_classifier.weights = wn2;
-        
         
         // reset projections
         for (int i=0; i<nsamples; ++i) {

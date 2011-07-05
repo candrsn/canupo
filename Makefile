@@ -1,5 +1,5 @@
 ifndef no_openmp
-    CXXFLAGS+=-fopenmp
+    CXXFLAGS+=-fopenmp -lpthread
 endif
 
 ifdef debug
@@ -17,12 +17,6 @@ all: canupo density suggest_classifier_svm suggest_classifier_lda msc_tool valid
 
 canupo:
 	$(CXX) $(CXXFLAGS) canupo.cpp $(LAPACK) $(LDFLAGS) -o canupo
-
-normals:
-	$(CXX) $(CXXFLAGS) normals.cpp $(LAPACK) -o normals
-
-display_normals:
-	$(CXX) $(CXXFLAGS) display_normals.cpp -losg -losgViewer -losgGA -o display_normals
 
 density:
 	$(CXX) $(CXXFLAGS) density.cpp -o density
