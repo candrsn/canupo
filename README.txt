@@ -1,100 +1,97 @@
-Doc for each program :
+This is the CANUPO project (CAractérisation de NUages de POints)
 
-canupo scales... - data.xyz data_core.xyz data_core.msc
-  inputs: scales         # list of scales at which to perform the analysis
-                         # The syntax minscale:increment:maxscale is also accepted
-                         # Use - to indicate the end of the list of scales
-  input: data.xyz        # whole raw point cloud to process
-  input: data_core.xyz   # points at which to do the computation. It is not necessary that these
-                         # points match entries in data.xyz: This means data_core.xyz need not be
-                         # (but can be) a subsampling of data.xyz, a regular grid is OK.
-                         # You can also take exactly the same file, or put more core points than
-                         # data points, the core points need only lie in the same region as data.
-                         # Tip: use core points at least at max_scale distance from the scene
-                         # boundaries in order to avoid spurious multi-scale relations
-  outputs: data_core.msc # corresponding multiscale parameters at each core point
+You'll find here a software suite for processing 3D point clouds, such as can
+be captured by LiDAR systems. The goal is to recognise automatically various
+elements in the scene, like rocks, sand and vegetation. This is performed
+using a multi-scale dimensionality criterion which caracterises the geometric
+properties of the above elements in the scene. Each class can then be
+separated using a graphically defined classifier that can be edited (if
+necessary) very easily by non-specialists of machine learning.
 
-TODO annotate data.xyz data_core.msc annotated_file.xyz [some scales]
-  input: data.xyz            # Original data file that was used to compute the multiscale parameters
-  input: data_core.msc       # The multiscale parameters computed by canupo
-  input: some scales         # Selected scales at which to perform the annotation
-                             # All scales in the parameter file are used if not specified.
-  output: annotated_file.xyz # The data with RGB columns corresponding to the local 1D/2D/3D
-                             # property at each point. There are 3 such colums per selected scale.
-  # Note: the data points take the same characteristics as their nearest neighbor from the core points
-  #       defined in the msc file.
+To make it clearer consider a scene comprising rocks, sand, and vegetation
+patches. At a small scale the sand looks like a 2D surface, the rocks look 3D,
+and the vegetation is a mixture of small elements like stems and leaves (mostly
+1D and 2D). At a larger scale the sand still looks 2D, the rocks now look more
+2D than 3D, and the vegetation has become more like a 3D bush. When combining
+information from different scales we can thus build signatures of the scene at
+each point. This signature can then be used to discriminate vegetation from soil
+for example.
 
-density nsubdiv nametag [some scales] : [features.prm : ] data.msc [ - data2.msc ...]
-  input: nsubdiv               # Number of subdivisions on each side of the triangle
-  input: nametag               # The base name for the output files. One density plot is
-                               # generated per selected scale, named "nametag_scale.svg"
-  input: some scales           # Selected scales at which to perform the density plot
-                               # All scales in the parameter file are used if not specified.
-  input: data.msc              # The multiscale parameters computed by canupo.
-                               # Use - to separate classes. Multiple files per class are allowed.
-                               # If no classes are specified (ex: whole scene file) the density is color-coded from blue to red.
-                               # If multiple classes are specified the density is coded from light to bright colors with one color per class.
-  input: features.prm          # An optional classifier definition file. If it is specified the decision
-                               # boundaries at each scale will be displayed in the generated graphs.
+The full technique is described in our article "3D Terrestrial LiDAR data
+classification of complex natural scenes using a multi-scale dimensionality
+criterion: applications in geomorphology", by Nicolas Brodu and Dimitri Lague.
+That article is available on the first author web page as well as on the ArXiv:
+    http://arxiv.org/abs/1107.055
+
+The file you are reading comes with the source code and binary distribution.
+It describes how to use the software suite.
 
 
-features_XXX features.prm [scales] : data1.msc data2.msc - data3.msc - data4.msc...
-  output: features.prm  # The resulting parameters for feature extraction and classification of the whole scene
-  input:  scales        # Optional, a set of scales to compute the features on.
-                        # If this is not specified an automated procedure will find the scales that
-                        # best discriminates the given data. You will then be prompted for which
-                        # scales to use.
-                        # If the scales are specified on the command line there is no interaction and
-                        # no automated search.
-  inputs: dataX.msc     # The multiscale parameters for the samples the user wishes to discriminate
-                        # Use - separators to indicate each class, one or more samples allowed per class
-                        # The data file lists start after the : separator on the command line
-# Note: XXX stands for the classifier type:
-# - least_squares: Basic minimal least squared error hyperplane for each pair of classes
-# - linear_svm: Hyperplane separating each pair of classes, but defined so as to lead to maximal margins instead of least squares
-# - gaussian_svm: Gaussian kernel SVM, same principle but using the "kernel trick" to get a non-linear mapping in the original space.
+==== Usage ====
 
-trajectories some_file.svg features.prm N data1.msc data2.msc - data3.msc - data4.msc...
-  input: data.msc         # The multiscale parameters computed by canupo
-  input: features.prm     # Features computed by the make_features program
-  input: N                # Select the N most representative trajectories for each class for display
-                          # This is necessary as one trajectory per point would be unreadable
-                          # Use the percentiles. Ex: N=1: use median. N=2: use 33% and 66% percentiles. etc.
-                          # percentiles defined as worst/best classified points
-                          # => have N representative trajectories of the whole class, no outlier and quite some diversity !
-  output: some_file.svg   # Multiscale trajectories in the dimensionality feature space
-                          # TODO: find color/representation scheme for each class _and_ for beginning/end of trajectory (scales)
-                          # ex: color per class (red, blue, etc) and markers (cross, triangle, star) for scales with legend
+- When you don't know what a program does, just run it in a terminal. It will
+  tell you what it does and what arguments it expects on the standard output.
 
-classify features.prm scene.xyz scene_core.msc scene_annotated.xyz
-  input: features.prm         # Features computed by the make_features program
-  input: scene.xyz            # Point cloud to classify/annotate with each class
-  input: scene_core.msc       # Multiscale parameters at core points in the scene
-                              # This file need only contain the relevant scales for classification
-                              # as reported by the make_features program
-  output: scene_annotated.xyz # Output file containing an extra column with the class of each point
-                              # Scene points are labelled with the class of the nearest core point.
+- Using a 3D cloud edition software (tip: CloudCompare is free and quite
+  efficient), prepare at least one sample of each class you wish to recognise
+  in the scene. Example: select a vegetation bush and some portion of soil.
+  Save these samples in separate files.
+
+- Start by running "canupo" on the full data set and the samples. Give it
+  a set of scales to look at, which you think discriminates your samples (see
+  the introduction above). It will generate the multi-scale files.
+
+- Run "suggest_classifier_lda" for separating samples from two distinct
+  classes. You may optionally add in the full scene for semi-supervised
+  learning (but start with just the class samples to begin with).
+
+- Review the generated SVG file with a graphical editor like Inkscape. You may
+  optionally edit this classifier definition file: in this case move/add/remove
+  the nodes in the class separation path. You may use as many nodes as you wish
+  so long as there is only one path comprising only straight lines. But you may
+  simply ignore this step and use the default classifier.
+
+- Run "validate_classifier" on the SVG file. It will produce a binary parameter
+  file containing the classifier in a condensed form. Optionally feed the
+  validate_classifier program with your sample multi-scale files (see step 3).
+  It will then give you the performances of the classifier for separating the
+  samples. Loop to the previous step if you think you can improve these...
+
+- Finally run "classify" on the whole scene to automatically label each point
+  into classes corresponding to your samples. You get an extra column in
+  the xyz point cloud telling which class each point is in. Load this file
+  for example in CloudCompare and use the extra column as a "scalar>0" so
+  each class appears with a distinct color.
 
 
-----
-new way:
-----
+==== Advanced Usage ====
 
-canupo: compute msc params from xyz
+- Use the "density" program to investigate how the samples and the scene
+  look like in the dimensionality space at various scales. This may help you
+  select some scales offering a discriminative power, and ignore scales
+  where the classes are too similar. Note that the multi-scale feature goal
+  is to _combine_ the discriminative information at each scale, so usually
+  the more scales the better. Up to some limit where you add more noise than
+  information of course... a few well selected scales work better than a
+  large range of scales with similar information.
 
-suggest_classifier: outfile.svg msc(non label) ... : class1.msc ... - class2.msc ...
-    generate svg files
-    project on 2 main linear svm dir
-    write one default path from gaussian SVM
+- Use the "msc_tool" to project a scene into the plane of maximal separability
+  defined by a classifier. This will generate another SVG that you can edit
+  (and revalidate into another classifier!). You get a density map with
+  all points, which is sometimes more informative than the two-class SVG file
+  generated by "suggest_classifier_xxx".
 
-validate_classifier:  user_modified_svg  [class_num_1  class_num_2]
-    produce biclass prm file
-    from SVG, use path (predef path if not changed or user-defined)
-    if not specified   class_num_1 = 1   and   class_num_2 = 2
+- See "validate_classifier" and "combine_classifiers" for a scenario with more
+  than two classes. Note: If you can do as we do in the article, i.e. extract
+  classes one against the others one by one, then do it. Educated guesses like
+  that tend to work better than the majority vote technique performed when
+  using "combine_classifiers". Well, just try and see...
 
-combine_classifiers: any number of prm classifiers (incl. multiclass files)
-    produce multiclass prm file
-    auto from class nums that were specified
+- Play with the SVM classifier. The "=N" parameter increases the chances to get
+  a better separation up to some N value where it does not matter anymore. This
+  is _slower_ than LDA, so be prepared to wait some time (more for larger N).
+  This is sometimes, but seldom, better than LDA (usually not worth the wait).
 
-classify features.prm scene.xyz scene_core.msc scene_annotated.xyz
 
+Nicolas Brodu <nicolas.brodu@numerimoire.net>
+July 2011
