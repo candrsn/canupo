@@ -92,6 +92,12 @@ It describes how to use the software suite.
   is _slower_ than LDA, so be prepared to wait some time (more for larger N).
   This is sometimes, but seldom, better than LDA (usually not worth the wait).
 
+- You may find the other uses of "msc_tool" handy when dealing with a large
+  number of scenes and multiple multi-scale parameters. It can identify which
+  scales are present in a multiscale file, as well as convert these to plain
+  xyz files (warning: large files!). Similarly you may find the "filter"
+  utility occasionnaly useful for splitting a scene into classified elements.
+
 
 Nicolas Brodu <nicolas.brodu@numerimoire.net>
 July 2011
