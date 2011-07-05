@@ -23,8 +23,10 @@ criterion: applications in geomorphology", by Nicolas Brodu and Dimitri Lague.
 That article is available on the first author web page as well as on the ArXiv:
     http://arxiv.org/abs/1107.055
 
-The file you are reading comes with the source code and binary distribution.
-It describes how to use the software suite.
+The file you are reading comes with the source code and with the binary
+distribution. It describes how to use the software suite. Both source and
+binaries are available at the project home page:
+    http://nicolas.brodu.numerimoire.net/en/recherche/canupo/
 
 
 ==== Usage ====
