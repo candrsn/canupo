@@ -449,6 +449,7 @@ int main(int argc, char** argv) {
         for (int bootstrap_iter = 0; bootstrap_iter < num_bootstrap_iter; ++bootstrap_iter) {
             
             Point core_shift_bs_1, core_shift_bs_2;
+            Point normal_bs_1, normal_bs_2;
             
             FloatType svalues[3];
             FloatType eigenvectors[9];
@@ -458,6 +459,7 @@ int main(int argc, char** argv) {
             int* core_scale_idx_ref[2] = {&core_scale_idx_1, &core_scale_idx_2};
             int* normal_scale_idx_ref[2] = {&normal_scale_idx_1, &normal_scale_idx_2};
             Point* normal_ref[2] = {&normal_1, &normal_2};
+            Point* normal_bs_ref[2] = {&normal_bs_1, &normal_bs_2};
             Point* core_shift_ref[2] = {&core_shift_1, &core_shift_2};
             Point* core_shift_bs_ref[2] = {&core_shift_bs_1, &core_shift_bs_2};
             FloatType* plane_dev_ref[2] = {&plane_dev_1, &plane_dev_2};
@@ -492,7 +494,7 @@ int main(int argc, char** argv) {
                     A[i+npts*2] = resampled_neighbors[i].z;
                 }
             
-                Point normal;
+                Point& normal = *normal_bs_ref[ref12_idx];
                 
                 // vertical normals need none of the SVD business
                 // and could also skip A, etc...
@@ -616,7 +618,10 @@ int main(int argc, char** argv) {
             // and the dev of that as well after bootstrap
             // AND we also want the average shifted core points
             // but these can be recovered from the avg shifts after bootstrap
-            FloatType deltanorm = (core_shift_bs_2 - core_shift_bs_1).norm();
+            Point core_shift_diff = core_shift_bs_2 - core_shift_bs_1;
+            FloatType deltanorm = core_shift_diff.norm();
+            // signed distance according to the normal direction
+            if (core_shift_diff.dot(normal_bs_1+normal_bs_2)<0) deltanorm *= -1;
             diff += deltanorm;
             diff_dev += deltanorm * deltanorm;
         }
