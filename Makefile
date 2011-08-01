@@ -18,8 +18,8 @@ all: canupo density suggest_classifier_svm suggest_classifier_lda msc_tool valid
 canupo:
 	$(CXX) $(CXXFLAGS) canupo.cpp $(LAPACK) $(LDFLAGS) -o canupo
 
-normals:
-	$(CXX) $(CXXFLAGS) normals.cpp $(LAPACK) -o normals
+normaldiff:
+	$(CXX) $(CXXFLAGS) normaldiff.cpp $(LAPACK) -o normaldiff
 
 display_normals:
 	$(CXX) $(CXXFLAGS) display_normals.cpp -losg -losgViewer -losgGA -o display_normals
@@ -46,7 +46,7 @@ classify:
 	$(CXX) $(CXXFLAGS) classify.cpp -o classify
 
 clean:
-	rm -f canupo density suggest_classifier msc_tool validate_classifier combine_classifier classify normals display_normals
+	rm -f canupo density suggest_classifier msc_tool validate_classifier combine_classifier classify normaldiff display_normals
 
-.PHONY: canupo density suggest_classifier_svm suggest_classifier_lda msc_tool validate_classifier combine_classifiers classify normals display_normals
+.PHONY: canupo density suggest_classifier_svm suggest_classifier_lda msc_tool validate_classifier combine_classifiers classify normaldiff display_normals
 

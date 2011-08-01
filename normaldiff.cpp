@@ -40,7 +40,6 @@
 
 #include "points.hpp"
 #include "svd.hpp"
-//#include "leastSquares.hpp"
 
 #include <string.h>
 #include <stdlib.h>
