@@ -185,6 +185,8 @@ struct PointCloud {
     void prepare(FloatType _xmin, FloatType _xmax, FloatType _ymin, FloatType _ymax, int npts) {
         xmin = _xmin; xmax = _xmax;
         ymin = _ymin; ymax = _ymax;
+        if (xmin==xmax) {xmin -= 0.5; xmax += 0.5;}
+        if (ymin==ymax) {ymin -= 0.5; ymax += 0.5;}
         FloatType sizex = xmax - xmin;
         FloatType sizey = ymax - ymin;
         

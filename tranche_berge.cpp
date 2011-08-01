@@ -176,8 +176,8 @@ int main(int argc, char** argv) {
         if (dx>0) nprof = (int)floor((lmin+lmax) / dx);
         vector<double> profile_xavg(nprof, 0.0);
         vector<double> profile_yavg(nprof, 0.0);
-        vector<double> profile_zmin(nprof, 0.0);
-        vector<double> profile_zmax(nprof, 0.0);
+        vector<double> profile_zmin(nprof, numeric_limits<double>::max());
+        vector<double> profile_zmax(nprof, -numeric_limits<double>::max());
         vector<double> profile_zavg(nprof, 0.0);
         vector<double> profile_zdev(nprof, 0.0);
         vector<double> profile_count(nprof, 0.0);
