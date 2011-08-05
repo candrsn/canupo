@@ -251,12 +251,13 @@ int main(int argc, char** argv) {
             for (int pi = 0; pi < nprof; ++pi) {
                 double xp = -lmin + (pi+0.5) * (lmin+lmax) / nprof;
                 double count = profile_count[pi];
-                if (count<1) count = 1; // in which case the avg are 0, so division is OK
+                //if (count<1) count = 1; // in which case the avg are 0, so division is OK
+                if (count<1) continue;
                 profile_xavg[pi] /= count;
                 profile_yavg[pi] /= count;
                 profile_zavg[pi] /= count;
-                profile_zdev[pi] = sqrt((profile_zdev[pi] - profile_zavg[pi] * profile_zavg[pi] * count) / (count - 1.0));
                 if (count==1) profile_zdev[pi] = 0;
+                else profile_zdev[pi] = sqrt((profile_zdev[pi] - profile_zavg[pi] * profile_zavg[pi] * count) / (count - 1.0));
                 Point tranche_pos = corepoints[corenum] + xp * lxvec + profile_zavg[pi] * lzvec;
                 prof_ouput_file << xp << " " << profile_xavg[pi] << " " << profile_yavg[pi] << " " << profile_zavg[pi] << " " << profile_zmin[pi] << " " << profile_zmax[pi] << " " << profile_zdev[pi] << " " << profile_count[pi] << " " << tranche_pos.x << " " << tranche_pos.y << " " << tranche_pos.z;
                 for (int si=0; si<nscalar; ++si) prof_ouput_file << " " << (profile_scalar[pi][si] / count);
