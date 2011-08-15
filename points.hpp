@@ -42,7 +42,10 @@
 
 /// SOME USER-ADAPTABLE PARAMETERS
 
-typedef float FloatType;
+#ifndef FLOAT_TYPE
+#define FLOAT_TYPE float
+#endif
+typedef FLOAT_TYPE FloatType;
 
 static const int TargetAveragePointDensityPerGridCell = 10;
 

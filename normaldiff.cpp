@@ -38,6 +38,7 @@
 
 #include <boost/format.hpp>
 
+#define FLOAT_TYPE double
 #include "points.hpp"
 #include "svd.hpp"
 
@@ -76,8 +77,10 @@ normaldiff scales... : p1.xyz p2.xyz cores.xyz extpts.xyz result.xyz [opt_flags 
                          # All these results are influenced by the bootstrapping process except\n\
                          # the scale values that are fixed before the bootstrapping.\n\
                          # Each line contains space separated entries. In order:\n\
-                         # - c1.x c1.y c1.z: core point coordinates, shifted to surface of p1\n\
-                         # - c2.x c2.y c2.z: core point coordinates, shifted to surface of p2\n\
+                         # - c1.x c1.y c1.z: core point coordinates, shifted to surface of p1.\n\
+                         # The surface is defined by a mean position (default) or by a median position (option \"q\").\n\
+                         # - c2.x c2.y c2.z: core point coordinates, shifted to surface of p2.\n\
+                         # The surface is defined by a mean position (default) or by a median position (option \"q\").\n\
                          # - n1.x n1.y n1.z: surface normal vector coordinates for p1\n\
                          # - n2.x n2.y n2.z: surface normal vector coordinates for p2\n\
                          # - sn1 sn2: scales at which the normals were computed in p1 and p2\n\
@@ -85,7 +88,7 @@ normaldiff scales... : p1.xyz p2.xyz cores.xyz extpts.xyz result.xyz [opt_flags 
                          # - dev1 dev2: standard deviation of the distance between: the points\n\
                          #              surrounding c1 and c2 at scales sc1 and sc2; and the\n\
                          #              \"surface\" planes defined by the normals at c1 and c2.\n\
-                         #              This can be seen as a quality measure of the plane fitting.\n\
+                         #              This can be seen as a quality measure of the plane fitting. When option \"q\" is activated the interquartile ranges are used instead of standard deviations.\n\
                          # - np1 np2: number of points in these surroundings\n\
                          # - diff: average value of the signed distance c2 - c1, estimated by\n\
                          #         the statistical bootstrapping technique. Hence this value is\n\
@@ -94,6 +97,7 @@ normaldiff scales... : p1.xyz p2.xyz cores.xyz extpts.xyz result.xyz [opt_flags 
                          # - diff_dev: deviation of the diff value, estimated by bootstrapping.\n\
   input: opt_flags       # Optional flags. Some may be combined together. Ex: \"hnc\".\n\
                          # Available flags are:\n\
+                         #  q: Use the interquartile range and the median instead of standard deviation and mean, in order to define the new core point.\n\
                          #  h: make the resulting normals purely Horizontal (null z component).\n\
                          #  v: make the resulting normals purely Vertical (so, all normals are either +z or -z depending on the reference points).\n\
                          #  n: compute the Normal only at the max given scale (default is the scale at which the cloud is most 2D)\n\
@@ -101,20 +105,28 @@ normaldiff scales... : p1.xyz p2.xyz cores.xyz extpts.xyz result.xyz [opt_flags 
                          #  e: provide the standard deviation of the Error on the point positions\n\
                          #     in p1 and p2 as extra info. This is a parameter provided by the device\n\
                          #     used for measuring p1 and p2. It is incorporated in the bootstrapping.\n\
-                         #  s: Systematic error on the point differences given as a 3D vector\n\
-                         #     containing the mean error in each direction\n\
                          #  b: Number of bootstrap iterations (default is 100). 0 disables\n\
                          #     bootstrapping: you won't get diff_dev and diff is the sample mean.\n\
-  input: extra_info      # Extra parameters for the \"e\", \"s\" and \"b\" flags, given in the\n\
+                         #  d: Limiting distance for translating the original core point.\n\
+  input: extra_info      # Extra parameters for the \"e\", \"s\", \"b\" and \"d\" flags, given in the\n\
                          # same order as these flags were specified.\n\
-                         # Ex: normaldiff (all other opts) ehbs 1e-2 1000 2e-3 3e-4 1e-3\n\
-                         # The flags are \"e\", \"h\", \"b\" and \"s\". \"h\" has no extra parameter.\n\
-                         # So, in this order: e=1e-2, b=1000, and s=(2e-3,3e-4,1e-3)\n\
+                         # Ex: normaldiff (all other opts) ehb 1e-2 1000\n\
+                         # The flags are \"e\", \"h\" and \"b\". \"h\" has no extra parameter.\n\
+                         # So, in this order: e=1e-2 and b=1000\n\
 "<<endl;
     if (errmsg) cout << "Error: " << errmsg << endl;
     return 0;
 }
 
+// median: common definition using mid-point average in the even case
+FloatType median(FloatType* values, int num) {
+    int nd2 = num/2;
+    FloatType med = values[nd2];
+    if (num%2==0) { // even case
+        med = (med + values[nd2-1]) * 0.5;
+    }
+    return med;
+}
 
 int main(int argc, char** argv) {
 
@@ -183,30 +195,37 @@ int main(int argc, char** argv) {
     bool force_vertical = false;
     bool normal_max_scale = false;
     bool core_min_scale = false;
+    bool use_median = false;
     double pos_dev = 0;
+    double max_core_shift_distance = numeric_limits<double>::max();
     int num_bootstrap_iter = 100;
-    Point systematic_error(0,0,0);
+//    Point systematic_error(0,0,0);
     
     if (argc>separator+6) {
         int extra_info_idx = separator+6;
         for (char* opt=argv[separator+6]; *opt!=0; ++opt) {
             switch(*opt) {
+                case 'q': use_median = true; break;
                 case 'h': force_horizontal = true; break;
                 case 'v': force_vertical = true; break;
                 case 'n': normal_max_scale = true; break;
                 case 'c': core_min_scale = true; break;
+                case 'd': if (++extra_info_idx<argc) {
+                    max_core_shift_distance = atof(argv[extra_info_idx]); break;
+                } else return help("Missing value for the d flag");
                 case 'e': if (++extra_info_idx<argc) {
                     pos_dev = atof(argv[extra_info_idx]); break;
                 } else return help("Missing value for the e flag");
                 case 'b': if (++extra_info_idx<argc) {
                     num_bootstrap_iter = atoi(argv[extra_info_idx]); break;
                 } else return help("Missing value for the b flag");
-                case 's': if (extra_info_idx+3<argc) {
+/*                case 's': if (extra_info_idx+3<argc) {
                     systematic_error.x = atof(argv[++extra_info_idx]);
                     systematic_error.y = atof(argv[++extra_info_idx]);
                     systematic_error.z = atof(argv[++extra_info_idx]);
                     break;
                 } else return help("Missing value for the s flag"); break;
+*/
                 default: return help((string("Unrecognised optional flag: ")+opt).c_str());
             }
         }
@@ -219,6 +238,27 @@ int main(int argc, char** argv) {
         num_bootstrap_iter = 1;
         pos_dev = 0;
     }
+    
+    
+    // "diagonal" scale for the cylinder search.
+    // worse-case when looking for the most 2D scale
+    // exact when both n and c are specified
+    FloatType diagscale;
+    if (normal_max_scale && core_min_scale) {
+        diagscale = sqrt(scalesvec[0]*scalesvec[0] + scalesvec.back()*scalesvec.back());
+    } else {
+        // most 2D scale may be any, including the largest one
+        // we need to find all neighbors in the cylinder
+        diagscale = sqrt(2)*scalesvec[0];
+    }
+    // recompute the scales now
+    scales.insert(diagscale);
+    // new scale is largest, necessarily at vector index 0
+    // before the original scales
+    ++nscales;
+    scalesvec.resize(nscales);
+    for (int i=scalesvec.size()-1; i>0; --i) scalesvec[i] = scalesvec[i-1];
+    scalesvec[0] = diagscale;
     
     boost::mt19937 rng;
     boost::normal_distribution<FloatType> poserr_dist(0, pos_dev);
@@ -253,7 +293,7 @@ int main(int argc, char** argv) {
     corepointsfile.close();
     
     
-    ifstream refpointsfile(corefname.c_str());
+    ifstream refpointsfile(extptsfname.c_str());
     linenum = 0;
     vector<Point> refpoints;
     while (refpointsfile && !refpointsfile.eof()) {
@@ -302,21 +342,20 @@ int main(int argc, char** argv) {
         vector<int> neigh_num_1(nscales,0), neigh_num_2(nscales,0);
         vector<Point> neighsums_1, neighsums_2;
         
-        // Scales shall be sorted from max to lowest 
-        int scaleidx = 0;
-        for (ScaleSet::iterator scaleit = scales.begin(); scaleit != scales.end(); ++scaleit, ++scaleidx) {
+        // Scales are sorted from max to lowest
+        for (int scaleidx = 0; scaleidx<nscales; ++scaleidx) {
             // Neighborhood search only on max radius
             if (scaleidx==0) {
                 // we have all neighbors, unsorted, but with distances computed already
                 // use scales = diameters, not radius
-                p1.findNeighbors(back_inserter(neighbors_1), corepoints[ptidx], (*scaleit) * 0.5);
-                p2.findNeighbors(back_inserter(neighbors_2), corepoints[ptidx], (*scaleit) * 0.5);
+                p1.findNeighbors(back_inserter(neighbors_1), corepoints[ptidx], scalesvec[scaleidx] * 0.5);
+                p2.findNeighbors(back_inserter(neighbors_2), corepoints[ptidx], scalesvec[scaleidx] * 0.5);
                 // Sort the neighbors from closest to farthest, so we can process all lower scales easily
                 sort(neighbors_1.begin(), neighbors_1.end());
                 sort(neighbors_2.begin(), neighbors_2.end());
                 neigh_num_1[scaleidx] = neighbors_1.size();
                 neigh_num_2[scaleidx] = neighbors_2.size();
-                // pre-compute cumulated sums. The total is needed anyway at the larger scale
+                // pre-compute cumulated sums
                 // so we might as well share the intermediates to lower levels
                 neighsums_1.resize(neighbors_1.size());
                 if (!neighbors_1.empty()) neighsums_1[0] = *neighbors_1[0].pt;
@@ -327,7 +366,7 @@ int main(int argc, char** argv) {
             }
             // lower scale : restrict previously found neighbors to the new distance
             else {
-                FloatType radiussq = *scaleit * *scaleit * 0.25;
+                FloatType radiussq = scalesvec[scaleidx] * scalesvec[scaleidx] * 0.25;
                 // dicho search might be faster than sequencially from the vector end if there are many points
                 int dichofirst = 0;
                 int dicholast = neighbors_1.size();
@@ -359,7 +398,8 @@ int main(int argc, char** argv) {
         // The most planar scale is only computed once if needed
         // bootstrapping is then done on that scale for the normal computations
         int core_scale_idx_1 = nscales-1, core_scale_idx_2 = nscales-1;
-        int normal_scale_idx_1 = 0, normal_scale_idx_2 = 0;
+        // largest original scale has index 1, the diagonal has index 0
+        int normal_scale_idx_1 = 1, normal_scale_idx_2 = 1;
         // if either flag is not set, we must compute the most 2D scale now
         if (!normal_max_scale || !core_min_scale) {
             
@@ -375,7 +415,8 @@ int main(int argc, char** argv) {
             for (int ref12_idx = 0; ref12_idx < 2; ++ref12_idx) {
                 vector<DistPoint<Point> >& neighbors = *neighbors_ref[ref12_idx];
                 FloatType maxbarycoord = -numeric_limits<FloatType>::max();
-                for (int sidx=0; sidx<nscales; ++sidx) {
+                // skip the diagonal scale at index 0
+                for (int sidx=1; sidx<nscales; ++sidx) {
                     int npts = (*neigh_num_ref[ref12_idx])[sidx];
                     if (npts>=3) {
                         // use the pre-computed sums to get the average point
@@ -441,7 +482,7 @@ int main(int argc, char** argv) {
         Point core_shift_1, core_shift_2;
         FloatType plane_dev_1 = 0, plane_dev_2 = 0;
         FloatType plane_nump_1 = 0, plane_nump_2 = 0;
-        FloatType diff = 0, diff_dev = 0;
+        double diff = 0, diff_dev = 0;
 
         // We have all core point neighbors at all scales in each data set
         // and the correct scales for the computation
@@ -542,72 +583,53 @@ int main(int argc, char** argv) {
                 // The cylinder base diameter is core_scale
                 // The cylinder height is normal_scale
                 // The cylinder is centered on the original core point
-                // Then:
-                // - get the density profile along the cylinder center line
-                // - look for a peak in the density
-                //   alternatively, look for the plane with best fit ?
-                //   => does not work for bi-modal distributions...
-                // Possible answer:
-                // - simple grid search along the line for best histogram density
-                // - refining the grid, possibly twice
-                // We need to compute dev of dist from pts to plane with scale core_scale
-                // - finalise by using the average of the projections at +- half core scale
-                //   from the current bin center, and use that average instead of the bin center
-                //   => the average is now on the plane, and dev can be given
-                // loop on both pt sets
-                const int num_bins = 100;
-                vector<int> histogram(num_bins, 0);
-                vector<vector<FloatType> > incylptdist(num_bins, vector<FloatType>(0));
+                // Look for a plane parallel to the cylinder base that is
+                // placed at the median of the distribution of densities of points.
                 FloatType normal_radius = 0.5 * scalesvec[*normal_scale_idx_ref[ref12_idx]];
                 FloatType core_radius = 0.5 * scalesvec[*core_scale_idx_ref[ref12_idx]];
                 FloatType core_radius_sq = core_radius * core_radius;
+                // for median computations, if any
+                vector<FloatType> all_dists_along_axis;
+                // mean/dev
+                FloatType mean_dist = 0;
+                FloatType dev_dist = 0;
+                int npts_in_cylinder = 0;
                 for (int i=0; i<npts; ++i) {
                     Point delta = resampled_neighbors[i] - corepoints[ptidx];
                     FloatType dist_along_axis = delta.dot(normal);
                     FloatType dist_to_axis_sq = (delta - dist_along_axis * normal).norm2();
                     // ignore points outside the cylinder
                     if (dist_to_axis_sq > core_radius_sq) continue;
-                    int bin = (int)floor((normal_radius + dist_along_axis) * num_bins / (2.0 * normal_radius));
-                    // shall not happen except perhaps for roundoff errors
-                    if (bin<0) bin = 0; if (bin>=num_bins) bin = num_bins-1;
-                    ++histogram[bin];
-                    incylptdist[bin].push_back(dist_along_axis);
+                    // ignore points too far away
+                    if (fabs(dist_along_axis) > max_core_shift_distance) continue;
+                    if (use_median) all_dists_along_axis.push_back(dist_along_axis);
+                    mean_dist += dist_along_axis;
+                    dev_dist += dist_along_axis * dist_along_axis;
+                    ++npts_in_cylinder;
                 }
-                int selected_bin = 0;
-                int max_density = 0;
-                for (int i=0; i<num_bins; ++i) {
-                    // favor bins further along the normal direction
-                    // in case of equality (bins nearest the surface, the most "outside")
-                    // TODO: allow double-peaked distributions with lower second peak
-                    if (histogram[i]>=max_density) {
-                        max_density = histogram[i];
-                        selected_bin = i;
-                    }
+                // process average / median
+                FloatType avgd = 0, devd = 0;
+                if (use_median) {
+                    // median instead of average
+                    avgd = median(&all_dists_along_axis[0], npts_in_cylinder);
+                    // interquartile range
+                    //   there are several ways to compute it, with no standard
+                    //   commonly accepted definition. Use that of mathworld
+                    int num_pts_each_half = (npts_in_cylinder+1)/2;
+                    int offset_second_half = npts_in_cylinder/2;
+                    FloatType q1 = median(&all_dists_along_axis[0], num_pts_each_half);
+                    FloatType q3 = median(&all_dists_along_axis[offset_second_half], num_pts_each_half);
+                    devd = q3 - q1;
+                } else {
+                    // standard mean / std dev
+                    if (npts_in_cylinder>0) avgd = mean_dist / npts_in_cylinder;
+                    if (npts_in_cylinder>1) devd = sqrt( (dev_dist - avgd*avgd*npts_in_cylinder)/(npts_in_cylinder-1.0) );
                 }
-                // process average at +- core_radius from the current bin
-                int min_bin = selected_bin - core_radius * num_bins / (2.0 * normal_radius);
-                int max_bin = selected_bin + core_radius * num_bins / (2.0 * normal_radius);
-                if (min_bin<0) min_bin = 0;
-                if (max_bin>=num_bins) max_bin = num_bins - 1;
-                FloatType avgd = 0;
-                FloatType devd = 0;
-                int numd = 0;
-                for (int i=min_bin; i<=max_bin; ++i) {
-                    for (vector<FloatType>::iterator it = incylptdist[i].begin(); it != incylptdist[i].end(); ++it) {
-                        if (fabs(*it)<core_radius) {
-                            avgd += *it;
-                            devd += *it * *it;
-                            ++numd;
-                        }
-                    }
-                }
-                if (numd>0) avgd /= numd;
-                if (numd>1) devd = sqrt( (devd - avgd*avgd*numd)/(numd-1.0) );
                 
                 *core_shift_bs_ref[ref12_idx] = normal * avgd;
                 *core_shift_ref[ref12_idx] += normal * avgd;
                 *plane_dev_ref[ref12_idx] += devd;
-                *plane_nump_ref[ref12_idx] += numd;
+                *plane_nump_ref[ref12_idx] += npts_in_cylinder;
             }
             
             // also bootstrap the diff
@@ -648,8 +670,8 @@ int main(int argc, char** argv) {
         resultfile << core2.x << " " << core2.y << " " << core2.z << " ";
         resultfile << normal_1.x << " " << normal_1.y << " " << normal_1.z << " ";
         resultfile << normal_2.x << " " << normal_2.y << " " << normal_2.z << " ";
-        resultfile << normal_scale_idx_1 << " " << normal_scale_idx_2 << " ";
-        resultfile << core_scale_idx_1 << " " << core_scale_idx_2 << " ";
+        resultfile << scalesvec[normal_scale_idx_1] << " " << scalesvec[normal_scale_idx_2] << " ";
+        resultfile << scalesvec[core_scale_idx_1] << " " << scalesvec[core_scale_idx_2] << " ";
         resultfile << plane_dev_1 << " " << plane_dev_2 << " ";
         resultfile << plane_nump_1 << " " << plane_nump_2 << " ";
         resultfile << diff << " " << diff_dev << endl;
