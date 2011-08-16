@@ -512,60 +512,75 @@ int main(int argc, char** argv) {
             for (int ref12_idx = 0; ref12_idx < 2; ++ref12_idx) {
                 vector<DistPoint<Point> >& neighbors = *neighbors_ref[ref12_idx];
                 vector<Point>& resampled_neighbors = *resampled_neighbors_ref[ref12_idx];
-                int sidx = *normal_scale_idx_ref[ref12_idx];                
-                int npts = (*neigh_num_ref[ref12_idx])[sidx]; // ensured >=3 at this point
-                resampled_neighbors.resize(npts);
-                if (npts==0) continue;
-                // resampling with replacement.
+                int npts_scale0 = (*neigh_num_ref[ref12_idx])[0]; // ensured >=3 at this point
+                resampled_neighbors.resize(npts_scale0);
+                if (npts_scale0==0) continue;
+                // resampling with replacement
                 Point avg = 0;
-                vector<FloatType> A(npts * 3);
-                boost::uniform_int<int> int_dist(0, npts-1);
+                vector<FloatType> A(npts_scale0 * 3);
+                boost::uniform_int<int> int_dist(0, npts_scale0-1);
                 boost::variate_generator<boost::mt19937&, boost::uniform_int<int> > randint(rng, int_dist);
-                for (int i=0; i<npts; ++i) {
+                int normal_sidx = *normal_scale_idx_ref[ref12_idx];
+                int npts_scaleN = 0;
+                FloatType radiussq = scalesvec[normal_sidx] * scalesvec[normal_sidx] * 0.25;
+                
+                for (int i=0; i<npts_scale0; ++i) {
                     //int_dist(rng); // boost 1.47 is so much better :(
                     int selected_idx = randint();
+                    // actually no boostrap => keep the original points
+                    if (num_bootstrap_iter==1) selected_idx = i;
                     resampled_neighbors[i] = *neighbors[selected_idx].pt;
                     // add some gaussian noise with dev specified by the user on each coordinate
-                    resampled_neighbors[i].x += poserr_rand(); //poserr_dist(rng);
-                    resampled_neighbors[i].y += poserr_rand();
-                    resampled_neighbors[i].z += poserr_rand();
+                    if (num_bootstrap_iter>1) {
+                        resampled_neighbors[i].x += poserr_rand(); //poserr_dist(rng);
+                        resampled_neighbors[i].y += poserr_rand();
+                        resampled_neighbors[i].z += poserr_rand();
+                    }
+                    if (force_vertical) continue;
+                    // filter only the points within normal scale for the normal
+                    // computation below
+                    if ((corepoints[ptidx] - resampled_neighbors[i]).norm2()>=radiussq) continue;
+                    ++npts_scaleN;
                     avg += resampled_neighbors[i];
                     A[i] = resampled_neighbors[i].x;
-                    A[i+npts] = resampled_neighbors[i].y;
-                    A[i+npts*2] = resampled_neighbors[i].z;
+                    A[i+npts_scale0] = resampled_neighbors[i].y;
+                    A[i+npts_scale0*2] = resampled_neighbors[i].z;
                 }
             
                 Point& normal = *normal_bs_ref[ref12_idx];
                 
                 // vertical normals need none of the SVD business
-                // and could also skip A, etc...
                 if (force_vertical) normal.z = 1;
                 else {
+                    // need to reshape A, colomn-major for Fortran :(
+                    if (npts_scaleN<npts_scale0) {
+                        for (int i=0; i<npts_scaleN; ++i) A[i+npts_scaleN] = A[i+npts_scale0];
+                        for (int i=0; i<npts_scaleN; ++i) A[i+npts_scaleN*2] = A[i+npts_scale0*2];
+                    }
                     // now finish the averaging
-                    avg /= npts;
-                    for (int i=0; i<npts; ++i) {
+                    avg /= npts_scaleN;
+                    for (int i=0; i<npts_scaleN; ++i) {
                         A[i] -= avg.x;
-                        A[i+npts] -= avg.y;
-                        A[i+npts*2] -= avg.z;
+                        A[i+npts_scaleN] -= avg.y;
+                        A[i+npts_scaleN*2] -= avg.z;
                     }
                     if (force_horizontal) {
-                        if (npts<2 && bootstrap_iter==0) {
+                        if (npts_scaleN<2 && bootstrap_iter==0) {
                             cout << "Warning: Invalid core point / data file / scale combination: less than 2 points at max scale for core point " << (ptidx+1) << " in data set " << ref12_idx+1 << endl;
                         } else {
-                            // reshape A to 2x2 column-wise and skip z
-                            A[2] = A[3]; A[3] = A[4]; // A[5 and more is ignored].
+                            // column-wise A: no need to reshape so as to skip z
                             // SVD decomposition handled by LAPACK
-                            svd(npts, 2, &A[0], &svalues[0], false, &eigenvectors[0]);
+                            svd(npts_scaleN, 2, &A[0], &svalues[0], false, &eigenvectors[0]);
                             // The total least squares solution in the horizontal plane
                             // is given by the singular vector with minimal singular value
                             int mins = 0; if (svalues[1]<svalues[0]) mins = 1;
                             normal = Point(eigenvectors[mins], eigenvectors[2+mins], 0);
                         }
                     } else {
-                        if (npts<3 && bootstrap_iter==0) {
+                        if (npts_scaleN<3 && bootstrap_iter==0) {
                             cout << "Warning: Invalid core point / data file / scale combination: less than 3 points at max scale for core point " << (ptidx+1) << " in data set " << ref12_idx+1 << endl;
                         } else {
-                            svd(npts, 3, &A[0], &svalues[0], false, &eigenvectors[0]);
+                            svd(npts_scaleN, 3, &A[0], &svalues[0], false, &eigenvectors[0]);
                             // column-major matrix, eigenvectors as rows
                             Point e1(eigenvectors[0], eigenvectors[3], eigenvectors[6]);
                             Point e2(eigenvectors[1], eigenvectors[4], eigenvectors[7]);
@@ -585,7 +600,7 @@ int main(int argc, char** argv) {
                 // The cylinder is centered on the original core point
                 // Look for a plane parallel to the cylinder base that is
                 // placed at the median of the distribution of densities of points.
-                FloatType normal_radius = 0.5 * scalesvec[*normal_scale_idx_ref[ref12_idx]];
+                FloatType max_core_shift_within_cylinder = min(0.5 * scalesvec[*normal_scale_idx_ref[ref12_idx]], max_core_shift_distance);
                 FloatType core_radius = 0.5 * scalesvec[*core_scale_idx_ref[ref12_idx]];
                 FloatType core_radius_sq = core_radius * core_radius;
                 // for median computations, if any
@@ -594,14 +609,14 @@ int main(int argc, char** argv) {
                 FloatType mean_dist = 0;
                 FloatType dev_dist = 0;
                 int npts_in_cylinder = 0;
-                for (int i=0; i<npts; ++i) {
+                for (int i=0; i<npts_scale0; ++i) {
                     Point delta = resampled_neighbors[i] - corepoints[ptidx];
                     FloatType dist_along_axis = delta.dot(normal);
                     FloatType dist_to_axis_sq = (delta - dist_along_axis * normal).norm2();
                     // ignore points outside the cylinder
                     if (dist_to_axis_sq > core_radius_sq) continue;
                     // ignore points too far away
-                    if (fabs(dist_along_axis) > max_core_shift_distance) continue;
+                    if (fabs(dist_along_axis) > max_core_shift_within_cylinder) continue;
                     if (use_median) all_dists_along_axis.push_back(dist_along_axis);
                     mean_dist += dist_along_axis;
                     dev_dist += dist_along_axis * dist_along_axis;
@@ -610,6 +625,7 @@ int main(int argc, char** argv) {
                 // process average / median
                 FloatType avgd = 0, devd = 0;
                 if (use_median) {
+                    sort(all_dists_along_axis.begin(), all_dists_along_axis.end());
                     // median instead of average
                     avgd = median(&all_dists_along_axis[0], npts_in_cylinder);
                     // interquartile range
