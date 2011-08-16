@@ -127,6 +127,7 @@ normaldiff scales... : p1.xyz p2.xyz cores.xyz extpts.xyz result.txt[:format] [o
 
 // median: common definition using mid-point average in the even case
 FloatType median(FloatType* values, int num) {
+    if (num<1) return numeric_limits<FloatType>::quiet_NaN();
     int nd2 = num/2;
     FloatType med = values[nd2];
     if (num%2==0) { // even case
