@@ -54,7 +54,7 @@ using namespace boost;
 
 int help(const char* errmsg = 0) {
 cout << "\
-normaldiff scales... : p1.xyz p2.xyz cores.xyz extpts.xyz result.xyz [opt_flags [extra_info]]\n\
+normaldiff scales... : p1.xyz p2.xyz cores.xyz extpts.xyz result.txt[:format] [opt_flags [extra_info]]\n\
   inputs: scales         # list of scales at which to perform the analysis\n\
                          # The syntax minscale:increment:maxscale is also accepted\n\
                          # Use : to indicate the end of the list of scales\n\
@@ -73,15 +73,19 @@ normaldiff scales... : p1.xyz p2.xyz cores.xyz extpts.xyz result.xyz [opt_flags 
                          # to orient normals. The closest point in the set is used to orient the\n\
                          # normal a each core point. The exterior points shall be exterior to\n\
                          # both p1 and p2...\n\
-  outputs: result.txt    # A file containing as many result lines as core points.\n\
+  outputs: result.txt[:e1,e2,e3...]\n\
+                         # A file containing as many result lines as core points\n\
                          # All these results are influenced by the bootstrapping process except\n\
                          # the scale values that are fixed before the bootstrapping.\n\
-                         # Each line contains space separated entries. In order:\n\
+                         # Each line contains space separated entries, that can be\n\
+                         # specified in order by their names below (ex: c1,diff). The\n\
+                         # default is to use all entries in this order:\n\
                          # - c1.x c1.y c1.z: core point coordinates, shifted to surface of p1.\n\
-                         # The surface is defined by a mean position (default) or by a median position (option \"q\").\n\
+                         #   The surface is defined by a mean position (default) or by a median position (option \"q\").\n\
+                         #   Use the format name \"c1\", all three entries are then given.\n\
                          # - c2.x c2.y c2.z: core point coordinates, shifted to surface of p2.\n\
-                         # The surface is defined by a mean position (default) or by a median position (option \"q\").\n\
                          # - n1.x n1.y n1.z: surface normal vector coordinates for p1\n\
+                         #   Use the format name \"n1\", all three entries are then given.\n\
                          # - n2.x n2.y n2.z: surface normal vector coordinates for p2\n\
                          # - sn1 sn2: scales at which the normals were computed in p1 and p2\n\
                          # - sc1 sc2: scales at which the core points were computed in p1 and p2\n\
@@ -102,6 +106,9 @@ normaldiff scales... : p1.xyz p2.xyz cores.xyz extpts.xyz result.xyz [opt_flags 
                          #  v: make the resulting normals purely Vertical (so, all normals are either +z or -z depending on the reference points).\n\
                          #  n: compute the Normal only at the max given scale (default is the scale at which the cloud is most 2D)\n\
                          #  c: compute the shifted Core point only at the lowest given scale (default is the scale at which the cloud is most 2D)\n\
+                         #  1: Shift the core point on both clouds using the normal computed on the first cloud\n\
+                         #     The default is to shift the core point for each cloud using the normal computed on that cloud.\n\
+                         #  2: Shift the core point on both clouds using the normal computed on the second cloud.\n\
                          #  e: provide the standard deviation of the Error on the point positions\n\
                          #     in p1 and p2 as extra info. This is a parameter provided by the device\n\
                          #     used for measuring p1 and p2. It is incorporated in the bootstrapping.\n\
@@ -191,11 +198,39 @@ int main(int argc, char** argv) {
     string extptsfname = argv[separator+4];
     string resultfname = argv[separator+5];
     
+    const char* all_result_formats[] = {"c1", "c2", "n1", "n2", "sn1", "sn2", "sc1", "sc2", "dev1", "dev2", "np1", "np2", "diff", "diff_dev"};
+    const int nresformats = 14;
+    int resformatsep = resultfname.find(':');
+    vector<string> result_formats;
+    if (resformatsep!=string::npos) {
+        string truerfname = resultfname.substr(0,resformatsep);
+        int prevsep = resformatsep;
+        while(true) {
+            int commasep = resultfname.find(',',prevsep+1);
+            string format = resultfname.substr(prevsep+1,commasep-prevsep-1);
+            bool found = false;
+            for (int i=0; i<nresformats; ++i) if (format==all_result_formats[i]) {
+                found = true;
+                break;
+            }
+            if (!found) return help(("Invalid result file format: "+format).c_str());
+            result_formats.push_back(format);
+            if (commasep==string::npos) break;
+            prevsep = commasep;
+        }
+        resultfname = truerfname;
+    }
+    if (result_formats.empty()) {
+        for (int i=0; i<nresformats; ++i) result_formats.push_back(all_result_formats[i]);
+    }
+    
     bool force_horizontal = false;
     bool force_vertical = false;
     bool normal_max_scale = false;
     bool core_min_scale = false;
     bool use_median = false;
+    bool shift_first = false;
+    bool shift_second = false;
     double pos_dev = 0;
     double max_core_shift_distance = numeric_limits<double>::max();
     int num_bootstrap_iter = 100;
@@ -205,6 +240,8 @@ int main(int argc, char** argv) {
         int extra_info_idx = separator+6;
         for (char* opt=argv[separator+6]; *opt!=0; ++opt) {
             switch(*opt) {
+                case '1': shift_first = true; break;
+                case '2': shift_second = true; break;
                 case 'q': use_median = true; break;
                 case 'h': force_horizontal = true; break;
                 case 'v': force_vertical = true; break;
@@ -231,6 +268,7 @@ int main(int argc, char** argv) {
         }
     }
     
+    if (shift_first && shift_first) return help("Conflicting 1 and 2 options for shifting core points.");
     if (force_horizontal && force_vertical) return help("Cannot force normals to be both horizontal and vertical!");
     
     if (num_bootstrap_iter<=0) {
@@ -238,7 +276,6 @@ int main(int argc, char** argv) {
         num_bootstrap_iter = 1;
         pos_dev = 0;
     }
-    
     
     // "diagonal" scale for the cylinder search.
     // worse-case when looking for the most 2D scale
@@ -264,12 +301,17 @@ int main(int argc, char** argv) {
     boost::normal_distribution<FloatType> poserr_dist(0, pos_dev);
     boost::variate_generator<boost::mt19937&, boost::normal_distribution<FloatType> > poserr_rand(rng, poserr_dist);
 
-    cout << "Loading data files" << endl;
+    cout << "Loading cloud 1: " << p1fname << endl;
     
     PointCloud<Point> p1;
     p1.load_txt(p1fname);
+    
+    cout << "Loading cloud 2: " << p2fname << endl;
+    
     PointCloud<Point> p2;
     p2.load_txt(p2fname);
+        
+    cout << "Loading core points: " << corefname << endl;
     
     ifstream corepointsfile(corefname.c_str());
     string line;
@@ -291,7 +333,8 @@ int main(int argc, char** argv) {
         corepoints.push_back(point);
     }
     corepointsfile.close();
-    
+
+    cout << "Loading external reference points: " << extptsfname << endl;
     
     ifstream refpointsfile(extptsfname.c_str());
     linenum = 0;
@@ -314,10 +357,22 @@ int main(int argc, char** argv) {
     refpointsfile.close();
     
     if (refpoints.empty()) return help("Please provide at least one reference point");
+    
+    for (int i = separator+6; i<argc; ++i) {
+        if (i==separator+6) cout << "Options given:";
+        cout << " " << argv[i];
+        if (i==argc-1) cout << endl;
+    }
+    
+    cout << "Computing result file: " << resultfname << endl;
 
     ofstream resultfile(resultfname.c_str());
     
-    cout << "Processing, percent complete: 0" << flush;
+    cout << "Percent complete: 0" << flush;
+    
+    FloatType core_global_diff_mean = 0;
+    FloatType core_global_diff_min = numeric_limits<FloatType>::max();
+    FloatType core_global_diff_max = -numeric_limits<FloatType>::max();
     
     // for each core point
     int nextpercentcomplete = 5;
@@ -491,12 +546,14 @@ int main(int argc, char** argv) {
             
             Point core_shift_bs_1, core_shift_bs_2;
             Point normal_bs_1, normal_bs_2;
+            int npts_scale0_bs_1, npts_scale0_bs_2;
             
             FloatType svalues[3];
             FloatType eigenvectors[9];
             
             vector<Point> resampled_neighbors_1, resampled_neighbors_2;
             // avoid code dup below
+            int* npts_scale0_bs_ref[2] = {&npts_scale0_bs_1, &npts_scale0_bs_2};
             int* core_scale_idx_ref[2] = {&core_scale_idx_1, &core_scale_idx_2};
             int* normal_scale_idx_ref[2] = {&normal_scale_idx_1, &normal_scale_idx_2};
             Point* normal_ref[2] = {&normal_1, &normal_2};
@@ -512,7 +569,8 @@ int main(int argc, char** argv) {
             for (int ref12_idx = 0; ref12_idx < 2; ++ref12_idx) {
                 vector<DistPoint<Point> >& neighbors = *neighbors_ref[ref12_idx];
                 vector<Point>& resampled_neighbors = *resampled_neighbors_ref[ref12_idx];
-                int npts_scale0 = (*neigh_num_ref[ref12_idx])[0]; // ensured >=3 at this point
+                int& npts_scale0 = *npts_scale0_bs_ref[ref12_idx];
+                npts_scale0 = (*neigh_num_ref[ref12_idx])[0]; // ensured >=3 at this point
                 resampled_neighbors.resize(npts_scale0);
                 if (npts_scale0==0) continue;
                 // resampling with replacement
@@ -593,6 +651,18 @@ int main(int argc, char** argv) {
                 if (normal.dot(deltaref)<0) normal *= -1;
                 
                 *normal_ref[ref12_idx] += normal;
+            }
+
+            // once the normal has been added to the bootstrap above,
+            // we can freely replace the local iteration value
+            // for the options "1" and "2"
+            if (shift_first) normal_bs_2 = normal_bs_1;
+            if (shift_second) normal_bs_1 = normal_bs_2;
+                
+            for (int ref12_idx = 0; ref12_idx < 2; ++ref12_idx) {
+                Point& normal = *normal_bs_ref[ref12_idx];
+                int& npts_scale0 = *npts_scale0_bs_ref[ref12_idx];
+                vector<Point>& resampled_neighbors = *resampled_neighbors_ref[ref12_idx];
                 
                 // projection of the core point along a cylinder in the normal direction
                 // The cylinder base diameter is core_scale
@@ -678,22 +748,42 @@ int main(int argc, char** argv) {
         
         diff /= num_bootstrap_iter;
         if (num_bootstrap_iter>1) diff_dev = sqrt( (diff_dev - diff*diff*num_bootstrap_iter)/(num_bootstrap_iter-1.0) );
+        else diff_dev = 0;
         
         Point core1 = corepoints[ptidx] + core_shift_1;
         Point core2 = corepoints[ptidx] + core_shift_2;
         
-        resultfile << core1.x << " " << core1.y << " " << core1.z << " ";
-        resultfile << core2.x << " " << core2.y << " " << core2.z << " ";
-        resultfile << normal_1.x << " " << normal_1.y << " " << normal_1.z << " ";
-        resultfile << normal_2.x << " " << normal_2.y << " " << normal_2.z << " ";
-        resultfile << scalesvec[normal_scale_idx_1] << " " << scalesvec[normal_scale_idx_2] << " ";
-        resultfile << scalesvec[core_scale_idx_1] << " " << scalesvec[core_scale_idx_2] << " ";
-        resultfile << plane_dev_1 << " " << plane_dev_2 << " ";
-        resultfile << plane_nump_1 << " " << plane_nump_2 << " ";
-        resultfile << diff << " " << diff_dev << endl;
+        for (int i=0; i<result_formats.size(); ++i) {
+            if (i>0) resultfile << " ";
+            if (result_formats[i] == "c1") resultfile << core1.x << " " << core1.y << " " << core1.z;
+            else if (result_formats[i] == "c2") resultfile << core2.x << " " << core2.y << " " << core2.z;
+            else if (result_formats[i] == "n1") resultfile << normal_1.x << " " << normal_1.y << " " << normal_1.z;
+            else if (result_formats[i] == "n2") resultfile << normal_2.x << " " << normal_2.y << " " << normal_2.z;
+            else if (result_formats[i] == "sn1") resultfile << scalesvec[normal_scale_idx_1];
+            else if (result_formats[i] == "sn2") resultfile << scalesvec[normal_scale_idx_2];
+            else if (result_formats[i] == "sc1") resultfile << scalesvec[core_scale_idx_1];
+            else if (result_formats[i] == "sc2") resultfile << scalesvec[core_scale_idx_2];
+            else if (result_formats[i] == "dev1") resultfile << plane_dev_1;
+            else if (result_formats[i] == "dev2") resultfile << plane_dev_2;
+            else if (result_formats[i] == "np1") resultfile << plane_nump_1;
+            else if (result_formats[i] == "np2") resultfile << plane_nump_2;
+            else if (result_formats[i] == "diff") resultfile << diff;
+            else if (result_formats[i] == "diff_dev") resultfile << diff_dev;
+            else {
+                if (ptidx==0) cout << "Invalid result format \"" << result_formats[i] << "\" is ignored." << endl;
+            }
+        }        
+        resultfile << endl;
+        
+        
+        core_global_diff_mean += diff;
+        core_global_diff_min = min(core_global_diff_min, diff);
+        core_global_diff_max = max(core_global_diff_min, diff);
     }
-    
     cout << endl;
+    
+    core_global_diff_mean /= corepoints.size();
+    cout << "Global diff min / mean / max on all core points: " << core_global_diff_min << " / " << core_global_diff_mean << " / " << core_global_diff_max << endl;
     
     resultfile.close();
 
