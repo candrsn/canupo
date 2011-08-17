@@ -62,7 +62,7 @@ struct PointTemplate : public Base, boost::addable<PointTemplate<Base>, boost::s
     FloatType x,y,z;
 
     inline FloatType& operator[](int idx) {
-        return reinterpret_cast<FloatType*>(this)[idx];
+        return reinterpret_cast<FloatType*>(&x)[idx];
     }
     PointTemplate() : x(0),y(0),z(0) {}
     PointTemplate(FloatType _x, FloatType _y, FloatType _z) : x(_x),y(_y),z(_z) {}
@@ -221,7 +221,69 @@ struct PointCloud {
         ++nextptidx;
     }
 
-    void load_txt(const char* filename, std::vector<std::vector<FloatType> >* additionalInfo = 0) {
+    void remove(int dataidx) {
+        int cellx = floor((data[dataidx].x - xmin) / cellside);
+        int celly = floor((data[dataidx].y - ymin) / cellside);
+        
+        // run through links list to find a good index
+        // is this the list head ?
+        if (grid[celly * ncellx + cellx]==dataidx) {
+            // easy, just walk along
+            grid[celly * ncellx + cellx] = links[dataidx];
+        } else {
+            // run through list, starting second pos
+            IndexType previdx = grid[celly * ncellx + cellx];
+            for (IndexType idx = links[previdx]; idx != IndexType(-1); previdx = idx, idx=links[idx]) {
+                // found? => remove from list
+                if (idx==dataidx) {
+                    links[previdx] = links[idx];
+                    break;
+                }
+            }
+        }
+
+        // now the tricky part.
+        // we just removed an element, but it is still in the data vector
+        // it may be free from links by anything, not appearing in the grid,
+        // but still it pollutes the data vector.
+        // => swap it with the last pos, reduce data vector
+        // BUT we then need to update links using that last element
+        // to use its new index
+        
+        // prepare the linkage at new pos
+        int lastpos = data.size()-1;
+        // process only if useful
+        if (lastpos!=dataidx) {
+            links[dataidx] = links[lastpos];
+            // need to find previous element in list...
+            cellx = floor((data[lastpos].x - xmin) / cellside);
+            celly = floor((data[lastpos].y - ymin) / cellside);
+            // run through links list to find a good index
+            // is this the list head ?
+            if (grid[celly * ncellx + cellx] == lastpos) {
+                // update it to new pos
+                grid[celly * ncellx + cellx] = dataidx;
+            } else {
+                // run through list, starting second pos
+                IndexType previdx = grid[celly * ncellx + cellx];
+                for (IndexType idx = links[previdx]; idx != IndexType(-1); previdx = idx, idx=links[idx]) {
+                    // found? => update
+                    if (idx==lastpos) {
+                        links[previdx] = dataidx;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // now we can finally update the data vector
+        data[dataidx] = data[lastpos];
+        data.pop_back();
+        links.pop_back();
+        nextptidx = lastpos;
+    }
+
+    void load_txt(const char* filename, std::vector<std::vector<FloatType> >* additionalInfo = 0, std::vector<std::string> *lines = 0) {
         using namespace std;
         data.clear();
         grid.clear();
@@ -239,6 +301,7 @@ struct PointCloud {
             ++linenum;
             getline(datafile, line);
             if (line.empty() || boost::starts_with(line,"#") || boost::starts_with(line,";") || boost::starts_with(line,"!") || boost::starts_with(line,"//")) continue;
+            if (lines) lines->push_back(line);
             stringstream linereader(line);
             PointType point;
             FloatType value;
@@ -284,8 +347,8 @@ struct PointCloud {
         }
         datafile.close();
     }
-    inline void load_txt(std::string s, std::vector<std::vector<FloatType> >* additionalInfo = 0) {
-        load_txt(s.c_str(), additionalInfo);
+    inline void load_txt(std::string s, std::vector<std::vector<FloatType> >* additionalInfo = 0, std::vector<std::string> *lines = 0) {
+        load_txt(s.c_str(), additionalInfo, lines);
     }
 
     // TODO: save_bin / load_bin if txt files take too long to load

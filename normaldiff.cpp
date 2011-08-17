@@ -35,6 +35,7 @@
 #include <boost/random/variate_generator.hpp>
 #include <boost/random/uniform_int.hpp>
 #include <boost/random/normal_distribution.hpp>
+#include <boost/tokenizer.hpp>
 
 #include <boost/format.hpp>
 
@@ -73,13 +74,16 @@ normaldiff scales... : p1.xyz p2.xyz cores.xyz extpts.xyz result.txt[:format] [o
                          # to orient normals. The closest point in the set is used to orient the\n\
                          # normal a each core point. The exterior points shall be exterior to\n\
                          # both p1 and p2...\n\
-  outputs: result.txt[:e1,e2,e3...]\n\
+  outputs: result.txt[,e1,e2,e3:res2.txt,e4,...]\n\
                          # A file containing as many result lines as core points\n\
                          # All these results are influenced by the bootstrapping process except\n\
                          # the scale values that are fixed before the bootstrapping.\n\
                          # Each line contains space separated entries, that can be\n\
-                         # specified in order by their names below (ex: c1,diff). The\n\
-                         # default is to use all entries in this order:\n\
+                         # specified in order by their names below (ex: c1,diff).\n\
+                         # Several output files may be specified separated by ':',\n\
+                         # each with their own optional comma separated entry\n\
+                         # specifications (see the syntax above)\n\
+                         # The default is to use all entries in this order:\n\
                          # - c1.x c1.y c1.z: core point coordinates, shifted to surface of p1.\n\
                          #   The surface is defined by a mean position (default) or by a median position (option \"q\").\n\
                          #   Use the format name \"c1\", all three entries are then given.\n\
@@ -109,6 +113,7 @@ normaldiff scales... : p1.xyz p2.xyz cores.xyz extpts.xyz result.txt[:format] [o
                          #  1: Shift the core point on both clouds using the normal computed on the first cloud\n\
                          #     The default is to shift the core point for each cloud using the normal computed on that cloud.\n\
                          #  2: Shift the core point on both clouds using the normal computed on the second cloud.\n\
+                         #  m: Shift the core point on both clouds using the mean of both normals.\n\
                          #  e: provide the standard deviation of the Error on the point positions\n\
                          #     in p1 and p2 as extra info. This is a parameter provided by the device\n\
                          #     used for measuring p1 and p2. It is incorporated in the bootstrapping.\n\
@@ -197,32 +202,42 @@ int main(int argc, char** argv) {
     string p2fname = argv[separator+2];
     string corefname = argv[separator+3];
     string extptsfname = argv[separator+4];
-    string resultfname = argv[separator+5];
+    string resultarg = argv[separator+5];
+    
+    vector<string> result_filenames;
+    vector<vector<string> > result_formats;
     
     const char* all_result_formats[] = {"c1", "c2", "n1", "n2", "sn1", "sn2", "sc1", "sc2", "dev1", "dev2", "np1", "np2", "diff", "diff_dev"};
     const int nresformats = 14;
-    int resformatsep = resultfname.find(':');
-    vector<string> result_formats;
-    if (resformatsep!=string::npos) {
-        string truerfname = resultfname.substr(0,resformatsep);
-        int prevsep = resformatsep;
-        while(true) {
-            int commasep = resultfname.find(',',prevsep+1);
-            string format = resultfname.substr(prevsep+1,commasep-prevsep-1);
+    
+    char_separator<char> colsep(":");
+    char_separator<char> commasep(",");
+    typedef boost::tokenizer<boost::char_separator<char> > tokenizer;
+    tokenizer resfile_tokenizer(resultarg, colsep);
+    for (tokenizer::iterator ftokit = resfile_tokenizer.begin(); ftokit != resfile_tokenizer.end(); ++ftokit) {
+        // get each file specification
+        tokenizer spec_tokenizer(*ftokit, commasep);
+        tokenizer::iterator stokit = spec_tokenizer.begin();
+        if (stokit == spec_tokenizer.end()) return help("Invalid result file format");
+        // first token is the file name
+        result_filenames.push_back(*stokit);
+        vector<string> formats;
+        // next are the format specifications
+        for(++stokit; stokit!=spec_tokenizer.end(); ++stokit) {
+            string format = *stokit;
             bool found = false;
             for (int i=0; i<nresformats; ++i) if (format==all_result_formats[i]) {
                 found = true;
                 break;
             }
             if (!found) return help(("Invalid result file format: "+format).c_str());
-            result_formats.push_back(format);
-            if (commasep==string::npos) break;
-            prevsep = commasep;
+            formats.push_back(format);
         }
-        resultfname = truerfname;
-    }
-    if (result_formats.empty()) {
-        for (int i=0; i<nresformats; ++i) result_formats.push_back(all_result_formats[i]);
+        // default is to output all fields
+        if (formats.empty()) {
+            for (int i=0; i<nresformats; ++i) formats.push_back(all_result_formats[i]);
+        }
+        result_formats.push_back(formats);
     }
     
     bool force_horizontal = false;
@@ -232,6 +247,7 @@ int main(int argc, char** argv) {
     bool use_median = false;
     bool shift_first = false;
     bool shift_second = false;
+    bool shift_mean = false;
     double pos_dev = 0;
     double max_core_shift_distance = numeric_limits<double>::max();
     int num_bootstrap_iter = 100;
@@ -243,6 +259,7 @@ int main(int argc, char** argv) {
             switch(*opt) {
                 case '1': shift_first = true; break;
                 case '2': shift_second = true; break;
+                case 'm': shift_mean = true; break;
                 case 'q': use_median = true; break;
                 case 'h': force_horizontal = true; break;
                 case 'v': force_vertical = true; break;
@@ -269,7 +286,10 @@ int main(int argc, char** argv) {
         }
     }
     
-    if (shift_first && shift_first) return help("Conflicting 1 and 2 options for shifting core points.");
+    if (shift_first && shift_second) return help("Conflicting 1 and 2 options for shifting core points.");
+    if (shift_first && shift_mean) return help("Conflicting 1 and m options for shifting core points.");
+    if (shift_mean && shift_second) return help("Conflicting 2 and m options for shifting core points.");
+    
     if (force_horizontal && force_vertical) return help("Cannot force normals to be both horizontal and vertical!");
     
     if (num_bootstrap_iter<=0) {
@@ -365,9 +385,19 @@ int main(int argc, char** argv) {
         if (i==argc-1) cout << endl;
     }
     
-    cout << "Computing result file: " << resultfname << endl;
+    cout << "Computing result files: " << endl;
+    for (int i=0; i<result_filenames.size(); ++i) {
+        cout << "  " << result_filenames[i] << ":";
+        vector<string>& formats = result_formats[i];
+        for (int j=0; j<formats.size(); ++j) cout << " " << formats[j];
+        cout << endl;
+    }
 
-    ofstream resultfile(resultfname.c_str());
+    vector<ofstream*> resultfiles(result_filenames.size());
+    for (int i=0; i<result_filenames.size(); ++i) {
+        resultfiles[i] = new ofstream(result_filenames[i].c_str());
+    }
+    
     
     cout << "Percent complete: 0" << flush;
     
@@ -656,9 +686,13 @@ int main(int argc, char** argv) {
 
             // once the normal has been added to the bootstrap above,
             // we can freely replace the local iteration value
-            // for the options "1" and "2"
+            // for the options "1", "2", and "m"
             if (shift_first) normal_bs_2 = normal_bs_1;
             if (shift_second) normal_bs_1 = normal_bs_2;
+            if (shift_mean) {
+                normal_bs_1 = (normal_bs_1 + normal_bs_2) * 0.5;
+                normal_bs_2 = normal_bs_1;
+            }
                 
             for (int ref12_idx = 0; ref12_idx < 2; ++ref12_idx) {
                 Point& normal = *normal_bs_ref[ref12_idx];
@@ -753,29 +787,32 @@ int main(int argc, char** argv) {
         
         Point core1 = corepoints[ptidx] + core_shift_1;
         Point core2 = corepoints[ptidx] + core_shift_2;
-        
-        for (int i=0; i<result_formats.size(); ++i) {
-            if (i>0) resultfile << " ";
-            if (result_formats[i] == "c1") resultfile << core1.x << " " << core1.y << " " << core1.z;
-            else if (result_formats[i] == "c2") resultfile << core2.x << " " << core2.y << " " << core2.z;
-            else if (result_formats[i] == "n1") resultfile << normal_1.x << " " << normal_1.y << " " << normal_1.z;
-            else if (result_formats[i] == "n2") resultfile << normal_2.x << " " << normal_2.y << " " << normal_2.z;
-            else if (result_formats[i] == "sn1") resultfile << scalesvec[normal_scale_idx_1];
-            else if (result_formats[i] == "sn2") resultfile << scalesvec[normal_scale_idx_2];
-            else if (result_formats[i] == "sc1") resultfile << scalesvec[core_scale_idx_1];
-            else if (result_formats[i] == "sc2") resultfile << scalesvec[core_scale_idx_2];
-            else if (result_formats[i] == "dev1") resultfile << plane_dev_1;
-            else if (result_formats[i] == "dev2") resultfile << plane_dev_2;
-            else if (result_formats[i] == "np1") resultfile << plane_nump_1;
-            else if (result_formats[i] == "np2") resultfile << plane_nump_2;
-            else if (result_formats[i] == "diff") resultfile << diff;
-            else if (result_formats[i] == "diff_dev") resultfile << diff_dev;
-            else {
-                if (ptidx==0) cout << "Invalid result format \"" << result_formats[i] << "\" is ignored." << endl;
-            }
-        }        
-        resultfile << endl;
-        
+
+        for (int i=0; i<resultfiles.size(); ++i) {
+            ofstream& resultfile = *resultfiles[i];
+            vector<string>& formats = result_formats[i];
+            for (int j=0; j<formats.size(); ++j) {
+                if (j>0) resultfile << " ";
+                if (formats[j] == "c1") resultfile << core1.x << " " << core1.y << " " << core1.z;
+                else if (formats[j] == "c2") resultfile << core2.x << " " << core2.y << " " << core2.z;
+                else if (formats[j] == "n1") resultfile << normal_1.x << " " << normal_1.y << " " << normal_1.z;
+                else if (formats[j] == "n2") resultfile << normal_2.x << " " << normal_2.y << " " << normal_2.z;
+                else if (formats[j] == "sn1") resultfile << scalesvec[normal_scale_idx_1];
+                else if (formats[j] == "sn2") resultfile << scalesvec[normal_scale_idx_2];
+                else if (formats[j] == "sc1") resultfile << scalesvec[core_scale_idx_1];
+                else if (formats[j] == "sc2") resultfile << scalesvec[core_scale_idx_2];
+                else if (formats[j] == "dev1") resultfile << plane_dev_1;
+                else if (formats[j] == "dev2") resultfile << plane_dev_2;
+                else if (formats[j] == "np1") resultfile << plane_nump_1;
+                else if (formats[j] == "np2") resultfile << plane_nump_2;
+                else if (formats[j] == "diff") resultfile << diff;
+                else if (formats[j] == "diff_dev") resultfile << diff_dev;
+                else {
+                    if (ptidx==0) cout << "Invalid result format \"" << formats[j] << "\" is ignored." << endl;
+                }
+            }        
+            resultfile << endl;
+        }
         
         core_global_diff_mean += diff;
         core_global_diff_min = min(core_global_diff_min, diff);
@@ -785,8 +822,8 @@ int main(int argc, char** argv) {
     
     core_global_diff_mean /= corepoints.size();
     cout << "Global diff min / mean / max on all core points: " << core_global_diff_min << " / " << core_global_diff_mean << " / " << core_global_diff_max << endl;
-    
-    resultfile.close();
 
+    for (int i=0; i<resultfiles.size(); ++i) resultfiles[i]->close();
+        
     return 0;
 }
