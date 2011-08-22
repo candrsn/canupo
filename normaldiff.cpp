@@ -307,7 +307,7 @@ int main(int argc, char** argv) {
     } else {
         // most 2D scale may be any, including the largest one
         // we need to find all neighbors in the cylinder
-        diagscale = sqrt(2)*scalesvec[0];
+        diagscale = sqrt((FloatType)2.)*scalesvec[0];
     }
     // recompute the scales now
     scales.insert(diagscale);
@@ -386,15 +386,15 @@ int main(int argc, char** argv) {
     }
     
     cout << "Computing result files: " << endl;
-    for (int i=0; i<result_filenames.size(); ++i) {
+    for (int i=0; i<(int)result_filenames.size(); ++i) {
         cout << "  " << result_filenames[i] << ":";
         vector<string>& formats = result_formats[i];
-        for (int j=0; j<formats.size(); ++j) cout << " " << formats[j];
+        for (int j=0; j<(int)formats.size(); ++j) cout << " " << formats[j];
         cout << endl;
     }
 
     vector<ofstream*> resultfiles(result_filenames.size());
-    for (int i=0; i<result_filenames.size(); ++i) {
+    for (int i=0; i<(int)result_filenames.size(); ++i) {
         resultfiles[i] = new ofstream(result_filenames[i].c_str());
     }
     
@@ -407,7 +407,7 @@ int main(int argc, char** argv) {
     
     // for each core point
     int nextpercentcomplete = 5;
-    for (int ptidx = 0; ptidx < corepoints.size(); ++ptidx) {
+    for (int ptidx = 0; ptidx < (int)corepoints.size(); ++ptidx) {
         int percentcomplete = ((ptidx+1) * 100) / corepoints.size();
         if (percentcomplete>=nextpercentcomplete) {
             if (percentcomplete>=nextpercentcomplete) {
@@ -445,10 +445,10 @@ int main(int argc, char** argv) {
                 // so we might as well share the intermediates to lower levels
                 neighsums_1.resize(neighbors_1.size());
                 if (!neighbors_1.empty()) neighsums_1[0] = *neighbors_1[0].pt;
-                for (int i=1; i<neighbors_1.size(); ++i) neighsums_1[i] = neighsums_1[i-1] + *neighbors_1[i].pt;
+                for (int i=1; i<(int)neighbors_1.size(); ++i) neighsums_1[i] = neighsums_1[i-1] + *neighbors_1[i].pt;
                 neighsums_2.resize(neighbors_2.size());
                 if (!neighbors_2.empty()) neighsums_2[0] = *neighbors_2[0].pt;
-                for (int i=1; i<neighbors_2.size(); ++i) neighsums_2[i] = neighsums_2[i-1] + *neighbors_2[i].pt;
+                for (int i=1; i<(int)neighbors_2.size(); ++i) neighsums_2[i] = neighsums_2[i-1] + *neighbors_2[i].pt;
             }
             // lower scale : restrict previously found neighbors to the new distance
             else {
@@ -551,7 +551,7 @@ int main(int argc, char** argv) {
         // non-empty set => valid index
         int nearestidx = -1;
         FloatType mindist = numeric_limits<FloatType>::max();
-        for (int i=0; i<refpoints.size(); ++i) {
+        for (int i=0; i<(int)refpoints.size(); ++i) {
             FloatType d = dist2(refpoints[i],corepoints[ptidx]);
             if (d<mindist) {
                 mindist = d;
@@ -705,7 +705,7 @@ int main(int argc, char** argv) {
                 // The cylinder is centered on the original core point
                 // Look for a plane parallel to the cylinder base that is
                 // placed at the median of the distribution of densities of points.
-                FloatType max_core_shift_within_cylinder = min(0.5 * scalesvec[*normal_scale_idx_ref[ref12_idx]], max_core_shift_distance);
+                FloatType max_core_shift_within_cylinder = min((FloatType)(0.5 * scalesvec[*normal_scale_idx_ref[ref12_idx]]), (FloatType)max_core_shift_distance);
                 FloatType core_radius = 0.5 * scalesvec[*core_scale_idx_ref[ref12_idx]];
                 FloatType core_radius_sq = core_radius * core_radius;
                 // for median computations, if any
@@ -788,10 +788,10 @@ int main(int argc, char** argv) {
         Point core1 = corepoints[ptidx] + core_shift_1;
         Point core2 = corepoints[ptidx] + core_shift_2;
 
-        for (int i=0; i<resultfiles.size(); ++i) {
+        for (int i=0; i<(int)resultfiles.size(); ++i) {
             ofstream& resultfile = *resultfiles[i];
             vector<string>& formats = result_formats[i];
-            for (int j=0; j<formats.size(); ++j) {
+            for (int j=0; j<(int)formats.size(); ++j) {
                 if (j>0) resultfile << " ";
                 if (formats[j] == "c1") resultfile << core1.x << " " << core1.y << " " << core1.z;
                 else if (formats[j] == "c2") resultfile << core2.x << " " << core2.y << " " << core2.z;
@@ -815,15 +815,15 @@ int main(int argc, char** argv) {
         }
         
         core_global_diff_mean += diff;
-        core_global_diff_min = min(core_global_diff_min, diff);
-        core_global_diff_max = max(core_global_diff_min, diff);
+        core_global_diff_min = min((FloatType)core_global_diff_min, (FloatType)diff);
+        core_global_diff_max = max((FloatType)core_global_diff_min, (FloatType)diff);
     }
     cout << endl;
     
     core_global_diff_mean /= corepoints.size();
     cout << "Global diff min / mean / max on all core points: " << core_global_diff_min << " / " << core_global_diff_mean << " / " << core_global_diff_max << endl;
 
-    for (int i=0; i<resultfiles.size(); ++i) resultfiles[i]->close();
+    for (int i=0; i<(int)resultfiles.size(); ++i) resultfiles[i]->close();
         
     return 0;
 }

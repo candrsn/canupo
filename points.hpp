@@ -78,7 +78,7 @@ struct PointTemplate : public Base, boost::addable<PointTemplate<Base>, boost::s
     inline FloatType norm() const {return sqrt(norm2());}
     inline FloatType dot(const PointTemplate& v) const {return x*v.x + y*v.y + z*v.z;}
     inline PointTemplate cross(const PointTemplate& v) const {return PointTemplate(y*v.z-z*v.y, z*v.x-x*v.z, x*v.y-y*v.x);}
-    inline FloatType normalize() {double n = norm(); if (n>0) *this /= n;}
+    inline void normalize() {double n = norm(); if (n>0) *this /= n;}
 
     enum {dim = 3};
 };
@@ -202,7 +202,7 @@ struct PointCloud {
         links.resize(npts);
         grid.resize(ncellx * ncelly);
         for (int i=0; i<npts; ++i) links[i] = IndexType(-1);
-        for (int i=0; i<grid.size(); ++i) grid[i] = IndexType(-1);
+        for (int i=0; i<(int)grid.size(); ++i) grid[i] = IndexType(-1);
         nextptidx = 0;
     }
 
