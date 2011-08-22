@@ -38,14 +38,18 @@ using namespace boost;
 
 int help(const char* errmsg = 0) {
 cout << "\
-resample cloud.xyz result.xyz flag parameter]\n\
+resample cloud.xyz result.xyz flag parameter [opt_param]\n\
   input: cloud.xyz          # raw point cloud to process\n\
   output: result.xyz        # resulting resampled cloud\n\
   input: flag               # Either \"r\" or \"s\" for a random or a spatial\n\
-                            # supsampling\n\
-  input: parameter          # subsampling factor (retain one every X points)\n\
-                            # for the random mode, or minimum distance between\n\
-                            # two points for the spatial mode\n\
+                            # supsampling, or both for subsampling first at random\n\
+                            # (faster load time) then spatially.\n\
+  input: parameter          # subsampling factor (retain one every X points on average)\n\
+                            # for the random mode and when both \"r\" and \"s\"\n\
+                            # are specified, or minimum distance between\n\
+                            # two points for the spatial mode.\n\
+  input: opt_param          # minimum distance between two points when both\n\
+                            # \"r\" and \"s\" are specified.\n\
 "<<endl;
     if (errmsg) cout << "Error: " << errmsg << endl;
     return 0;
@@ -60,62 +64,46 @@ int main(int argc, char** argv) {
 
     if (argc<5) return help();
 
-    bool random_mode = false;
-    if (strcmp(argv[3],"r")==0) random_mode = true;
-    else if (strcmp(argv[3],"s")!=0) return help("invalid flag");
-    
+    bool random_mode = false, spatial_mode = false;
+    if (strstr(argv[3],"r")!=0) random_mode = true;
+    if (strstr(argv[3],"s")!=0) spatial_mode = true;
+    if (!random_mode && !spatial_mode) return help("invalid flag");
+
     int subsampling_factor = 0;
     FloatType minimum_distance = 0;
+    int spatial_argi = 4;
     if (random_mode) {
         subsampling_factor = atoi(argv[4]);
         if (subsampling_factor<=0) return help("invalid subsampling factor");
+        spatial_argi = 5;
     }
-    else {
-        minimum_distance = atof(argv[4]);
+    if (spatial_mode) {
+        if (argc<=spatial_argi) return help();
+        minimum_distance = atof(argv[spatial_argi]);
         if (minimum_distance<=0) return help("invalid minimum distance");
     }
 
     ofstream resultfile(argv[2]);
-    
-    boost::mt19937 rng;
-        
-    if (random_mode) {
 
-        // just load all data lines in a big string array
-        // for later writing exactly the same entries
-        cout << "Loading data cloud: " << argv[1] << endl;
+    boost::mt19937 rng;
+
+    if (random_mode) {
+        // random mode: retain lines at random when loading the cloud
+        cout << "Sampling data cloud: " << argv[1] << " into " << argv[2] << endl;
         ifstream datafile(argv[1]);
-        vector<string> lines;
         string line;
+        long numretained = 0;
+        long nlines = 0;
         while (datafile && !datafile.eof()) {
+            ++nlines;
             getline(datafile, line);
             if (line.empty() || starts_with(line,"#") || starts_with(line,";") || starts_with(line,"!") || starts_with(line,"//")) continue;
-            lines.push_back(line);
+            if (rng() % subsampling_factor >0) continue;
+            ++numretained;
+            resultfile << line << endl;
         }
         datafile.close();
-
-        // randomly output some of the lines now
-        cout << "Percent complete: 0" << flush;
-        int final_size = lines.size() / subsampling_factor;
-        int nextpercentcomplete = 5;
-        for (int i=0; i<final_size; ++i) {
-            int percentcomplete = ((i+1) * 100) / final_size;
-            if (percentcomplete>=nextpercentcomplete) {
-                if (percentcomplete>=nextpercentcomplete) {
-                    nextpercentcomplete+=5;
-                    if (percentcomplete % 10 == 0) cout << percentcomplete << flush;
-                    else if (percentcomplete % 5 == 0) cout << "." << flush;
-                }
-            }
-
-            boost::uniform_int<int> int_dist(0, lines.size()-1);
-            boost::variate_generator<boost::mt19937&, boost::uniform_int<int> > randint(rng, int_dist);
-            int selected_point = randint();
-            resultfile << lines[selected_point] << endl;
-            lines[selected_point] = lines.back();
-            lines.pop_back();
-        }
-        cout << endl;
+        cout << "Retained " << numretained << " lines out of " << nlines << " (effective sampling ratio 1/" << (double)nlines / (double)numretained << ")" << endl;
         // done!
         return 0;
     }
@@ -125,10 +113,10 @@ int main(int argc, char** argv) {
     vector<string> lines;
     PointCloud<PointIdx> cloud;
     cout << "Loading data cloud: " << argv[1] << endl;
-    cloud.load_txt(argv[1],0,&lines);
-    // make the link between both data sets
+    size_t original_number_of_lines = cloud.load_txt(argv[1],0,&lines,subsampling_factor);
+    // make the link between both data sets: data and lines vector
     for (int i=0; i<cloud.data.size(); ++i) cloud.data[i].idx = i;
-    
+
     // algo: select a point at random.
     //       output the corresponding line
     //       remove all neighbors in the given radius (including itself)
@@ -136,7 +124,7 @@ int main(int argc, char** argv) {
     cout << "Processing spatial resampling." << endl;
     cout << "Percent complete: 0" << flush;
     int nextpercentcomplete = 5;
-    int num_retained = 0;
+    size_t num_retained = 0;
     while (!cloud.data.empty()) {
         int percentcomplete = (lines.size() - cloud.data.size()) * 100 / lines.size();
         if (percentcomplete>=nextpercentcomplete) {
@@ -168,7 +156,7 @@ int main(int argc, char** argv) {
     }
     if (nextpercentcomplete==100) cout << 100;
     cout << endl;
-    cout << "Retained " << num_retained << " out of " << lines.size() << " initial data points (subsampling ratio = 1/" << (double)lines.size()/(double)num_retained << ")" << endl;
+    cout << "Retained " << num_retained << " out of " << original_number_of_lines << " initial data points (subsampling ratio = 1/" << (double)original_number_of_lines/(double)num_retained << ")" << endl;
 
     return 0;
 }

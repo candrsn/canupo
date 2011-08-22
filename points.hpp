@@ -34,6 +34,7 @@
 
 #include <boost/operators.hpp>
 #include <boost/algorithm/string.hpp>
+#include <boost/random/mersenne_twister.hpp>
 
 #include <math.h>
 #include <stdlib.h>
@@ -185,7 +186,7 @@ struct PointCloud {
     std::vector<IndexType> grid; // cell lists are embedded in the points vector
     IndexType nextptidx;
 
-    void prepare(FloatType _xmin, FloatType _xmax, FloatType _ymin, FloatType _ymax, int npts) {
+    void prepare(FloatType _xmin, FloatType _xmax, FloatType _ymin, FloatType _ymax, size_t npts) {
         xmin = _xmin; xmax = _xmax;
         ymin = _ymin; ymax = _ymax;
         if (xmin==xmax) {xmin -= 0.5; xmax += 0.5;}
@@ -198,7 +199,7 @@ struct PointCloud {
         ncelly = floor(sizey / cellside) + 1;
         
         // instanciate the points
-        data.resize(npts);
+        data.resize(npts); // without effect if data is already the correct size
         links.resize(npts);
         grid.resize(ncellx * ncelly);
         for (int i=0; i<npts; ++i) links[i] = IndexType(-1);
@@ -206,18 +207,21 @@ struct PointCloud {
         nextptidx = 0;
     }
 
+    void insert_data_at_index(size_t dataidx) {
+        // add this point to the cell grid list
+        int cellx = floor((data[dataidx].x - xmin) / cellside);
+        int celly = floor((data[dataidx].y - ymin) / cellside);
+        //data[nextptidx].next = grid[celly * ncellx + cellx];
+        //grid[celly * ncellx + cellx] = &data[nextptidx];
+        links[dataidx] = grid[celly * ncellx + cellx];
+        grid[celly * ncellx + cellx] = dataidx;
+    }
+
     void insert(const PointType& point) {
         // TODO: if necessary, reallocate data and update pointers. For now just assert
         assert(nextptidx<data.size());
         data[nextptidx] = point;
-        // add this point to the cell grid list
-        int cellx = floor((data[nextptidx].x - xmin) / cellside);
-        int celly = floor((data[nextptidx].y - ymin) / cellside);
-        
-        //data[nextptidx].next = grid[celly * ncellx + cellx];
-        //grid[celly * ncellx + cellx] = &data[nextptidx];
-        links[nextptidx] = grid[celly * ncellx + cellx];
-        grid[celly * ncellx + cellx] = nextptidx;
+        insert_data_at_index(nextptidx);
         ++nextptidx;
     }
 
@@ -283,72 +287,51 @@ struct PointCloud {
         nextptidx = lastpos;
     }
 
-    void load_txt(const char* filename, std::vector<std::vector<FloatType> >* additionalInfo = 0, std::vector<std::string> *lines = 0) {
+    size_t load_txt(const char* filename, std::vector<std::vector<FloatType> >* additionalInfo = 0, std::vector<std::string> *lines = 0, int subsampling_factor = 0) {
         using namespace std;
         data.clear();
         grid.clear();
         ifstream datafile(filename);
         string line;
-        int npts = 0;
         // first pass to get the number of points and the bounds
         xmin = numeric_limits<FloatType>::max();
         xmax = -numeric_limits<FloatType>::max();
         ymin = numeric_limits<FloatType>::max();
         ymax = -numeric_limits<FloatType>::max();
-        int linenum = 0;
-        bool use4 = false;
+        size_t linenum = 0;
+        boost::mt19937* rng = 0;
+        if (subsampling_factor) rng = new boost::mt19937;
         while (datafile && !datafile.eof()) {
             ++linenum;
             getline(datafile, line);
             if (line.empty() || boost::starts_with(line,"#") || boost::starts_with(line,";") || boost::starts_with(line,"!") || boost::starts_with(line,"//")) continue;
+            if (subsampling_factor && ((*rng)()%subsampling_factor>0)) continue;
             if (lines) lines->push_back(line);
+            if (additionalInfo) additionalInfo->push_back(std::vector<FloatType>());
             stringstream linereader(line);
             PointType point;
             FloatType value;
             int i = 0;
             while (linereader >> value) {
                 if (i<Point::dim) point[i] = value;
-                if (++i==4) break;
-            }
-            if (i==4 && additionalInfo) {
-                if (use4==false && !data.empty()) {
-                    cout << "Warning: 4rth value met at line " << linenum << " but it was not present before." << endl;
+                else if (additionalInfo) {
+                    additionalInfo->back().push_back(value);
                 }
-                use4 = true;
+                ++i;
             }
+            data.push_back(point);
             xmin = min(xmin, point[0]);
             xmax = max(xmax, point[0]);
             ymin = min(ymin, point[1]);
             ymax = max(ymax, point[1]);
-            ++npts;
         }
-        
-        prepare(xmin, xmax, ymin, ymax, npts);
-        if (additionalInfo) additionalInfo->resize(npts);
-        
-        // second pass to load the data structure in place
-        datafile.close();
-        datafile.open(filename);
-        while (datafile && !datafile.eof()) {
-            getline(datafile, line);
-            if (line.empty() || boost::starts_with(line,"#") || boost::starts_with(line,";") || boost::starts_with(line,"!") || boost::starts_with(line,"//")) continue;
-            stringstream linereader(line);
-            PointType point;
-            FloatType value;
-            int i = 0;
-            while (linereader >> value) {
-                if (i<Point::dim) point[i] = value;
-                if (i>=Point::dim && additionalInfo!=0) {
-                    (*additionalInfo)[nextptidx].push_back(value);
-                }
-                ++i;
-            }
-            insert(point);
-        }
-        datafile.close();
+        prepare(xmin, xmax, ymin, ymax, data.size());
+        nextptidx = data.size();
+        for (size_t i = 0; i<data.size(); ++i) insert_data_at_index(i);
+        return linenum;
     }
-    inline void load_txt(std::string s, std::vector<std::vector<FloatType> >* additionalInfo = 0, std::vector<std::string> *lines = 0) {
-        load_txt(s.c_str(), additionalInfo, lines);
+    inline size_t load_txt(std::string s, std::vector<std::vector<FloatType> >* additionalInfo = 0, std::vector<std::string> *lines = 0, int subsampling_factor = 0) {
+        return load_txt(s.c_str(), additionalInfo, lines, subsampling_factor);
     }
 
     // TODO: save_bin / load_bin if txt files take too long to load
