@@ -52,7 +52,6 @@ resample:
 	$(CXX) $(CXXFLAGS) resample.cpp -o resample
 
 clean:
-<<<<<<< HEAD:Makefile
 	rm -f canupo normaldiff display_normals density suggest_classifier_svm suggest_classifier_lda msc_tool validate_classifier combine_classifier classify filter resample
 
 .PHONY: canupo normaldiff display_normals density suggest_classifier_svm suggest_classifier_lda msc_tool validate_classifier combine_classifier classify filter resample
