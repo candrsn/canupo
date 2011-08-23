@@ -34,6 +34,7 @@
 
 #include <boost/operators.hpp>
 #include <boost/algorithm/string.hpp>
+#include <boost/random/mersenne_twister.hpp>
 
 #include <math.h>
 #include <stdlib.h>
@@ -42,7 +43,10 @@
 
 /// SOME USER-ADAPTABLE PARAMETERS
 
-typedef float FloatType;
+#ifndef FLOAT_TYPE
+#define FLOAT_TYPE float
+#endif
+typedef FLOAT_TYPE FloatType;
 
 static const int TargetAveragePointDensityPerGridCell = 10;
 
@@ -59,7 +63,7 @@ struct PointTemplate : public Base, boost::addable<PointTemplate<Base>, boost::s
     FloatType x,y,z;
 
     inline FloatType& operator[](int idx) {
-        return reinterpret_cast<FloatType*>(this)[idx];
+        return reinterpret_cast<FloatType*>(&x)[idx];
     }
     PointTemplate() : x(0),y(0),z(0) {}
     PointTemplate(FloatType _x, FloatType _y, FloatType _z) : x(_x),y(_y),z(_z) {}
@@ -75,7 +79,7 @@ struct PointTemplate : public Base, boost::addable<PointTemplate<Base>, boost::s
     inline FloatType norm() const {return sqrt(norm2());}
     inline FloatType dot(const PointTemplate& v) const {return x*v.x + y*v.y + z*v.z;}
     inline PointTemplate cross(const PointTemplate& v) const {return PointTemplate(y*v.z-z*v.y, z*v.x-x*v.z, x*v.y-y*v.x);}
-    inline FloatType normalize() {double n = norm(); if (n>0) *this /= n;}
+    inline void normalize() {double n = norm(); if (n>0) *this /= n;}
 
     enum {dim = 3};
 };
@@ -182,9 +186,11 @@ struct PointCloud {
     std::vector<IndexType> grid; // cell lists are embedded in the points vector
     IndexType nextptidx;
 
-    void prepare(FloatType _xmin, FloatType _xmax, FloatType _ymin, FloatType _ymax, int npts) {
+    void prepare(FloatType _xmin, FloatType _xmax, FloatType _ymin, FloatType _ymax, size_t npts) {
         xmin = _xmin; xmax = _xmax;
         ymin = _ymin; ymax = _ymax;
+        if (xmin==xmax) {xmin -= 0.5; xmax += 0.5;}
+        if (ymin==ymax) {ymin -= 0.5; ymax += 0.5;}
         FloatType sizex = xmax - xmin;
         FloatType sizey = ymax - ymin;
         
@@ -193,94 +199,139 @@ struct PointCloud {
         ncelly = floor(sizey / cellside) + 1;
         
         // instanciate the points
-        data.resize(npts);
+        data.resize(npts); // without effect if data is already the correct size
         links.resize(npts);
         grid.resize(ncellx * ncelly);
         for (int i=0; i<npts; ++i) links[i] = IndexType(-1);
-        for (int i=0; i<grid.size(); ++i) grid[i] = IndexType(-1);
+        for (int i=0; i<(int)grid.size(); ++i) grid[i] = IndexType(-1);
         nextptidx = 0;
+    }
+
+    void insert_data_at_index(size_t dataidx) {
+        // add this point to the cell grid list
+        int cellx = floor((data[dataidx].x - xmin) / cellside);
+        int celly = floor((data[dataidx].y - ymin) / cellside);
+        //data[nextptidx].next = grid[celly * ncellx + cellx];
+        //grid[celly * ncellx + cellx] = &data[nextptidx];
+        links[dataidx] = grid[celly * ncellx + cellx];
+        grid[celly * ncellx + cellx] = dataidx;
     }
 
     void insert(const PointType& point) {
         // TODO: if necessary, reallocate data and update pointers. For now just assert
         assert(nextptidx<data.size());
         data[nextptidx] = point;
-        // add this point to the cell grid list
-        int cellx = floor((data[nextptidx].x - xmin) / cellside);
-        int celly = floor((data[nextptidx].y - ymin) / cellside);
-        
-        //data[nextptidx].next = grid[celly * ncellx + cellx];
-        //grid[celly * ncellx + cellx] = &data[nextptidx];
-        links[nextptidx] = grid[celly * ncellx + cellx];
-        grid[celly * ncellx + cellx] = nextptidx;
+        insert_data_at_index(nextptidx);
         ++nextptidx;
     }
 
-    void load_txt(const char* filename, std::vector<std::vector<FloatType> >* additionalInfo = 0) {
+    void remove(int dataidx) {
+        int cellx = floor((data[dataidx].x - xmin) / cellside);
+        int celly = floor((data[dataidx].y - ymin) / cellside);
+        
+        // run through links list to find a good index
+        // is this the list head ?
+        if (grid[celly * ncellx + cellx]==dataidx) {
+            // easy, just walk along
+            grid[celly * ncellx + cellx] = links[dataidx];
+        } else {
+            // run through list, starting second pos
+            IndexType previdx = grid[celly * ncellx + cellx];
+            for (IndexType idx = links[previdx]; idx != IndexType(-1); previdx = idx, idx=links[idx]) {
+                // found? => remove from list
+                if (idx==dataidx) {
+                    links[previdx] = links[idx];
+                    break;
+                }
+            }
+        }
+
+        // now the tricky part.
+        // we just removed an element, but it is still in the data vector
+        // it may be free from links by anything, not appearing in the grid,
+        // but still it pollutes the data vector.
+        // => swap it with the last pos, reduce data vector
+        // BUT we then need to update links using that last element
+        // to use its new index
+        
+        // prepare the linkage at new pos
+        int lastpos = data.size()-1;
+        // process only if useful
+        if (lastpos!=dataidx) {
+            links[dataidx] = links[lastpos];
+            // need to find previous element in list...
+            cellx = floor((data[lastpos].x - xmin) / cellside);
+            celly = floor((data[lastpos].y - ymin) / cellside);
+            // run through links list to find a good index
+            // is this the list head ?
+            if (grid[celly * ncellx + cellx] == lastpos) {
+                // update it to new pos
+                grid[celly * ncellx + cellx] = dataidx;
+            } else {
+                // run through list, starting second pos
+                IndexType previdx = grid[celly * ncellx + cellx];
+                for (IndexType idx = links[previdx]; idx != IndexType(-1); previdx = idx, idx=links[idx]) {
+                    // found? => update
+                    if (idx==lastpos) {
+                        links[previdx] = dataidx;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // now we can finally update the data vector
+        data[dataidx] = data[lastpos];
+        data.pop_back();
+        links.pop_back();
+        nextptidx = lastpos;
+    }
+
+    size_t load_txt(const char* filename, std::vector<std::vector<FloatType> >* additionalInfo = 0, std::vector<size_t> *line_numbers = 0, int subsampling_factor = 0) {
         using namespace std;
         data.clear();
         grid.clear();
         ifstream datafile(filename);
         string line;
-        int npts = 0;
         // first pass to get the number of points and the bounds
         xmin = numeric_limits<FloatType>::max();
         xmax = -numeric_limits<FloatType>::max();
         ymin = numeric_limits<FloatType>::max();
         ymax = -numeric_limits<FloatType>::max();
-        int linenum = 0;
-        bool use4 = false;
+        size_t linenum = 0;
+        boost::mt19937* rng = 0;
+        if (subsampling_factor) rng = new boost::mt19937;
         while (datafile && !datafile.eof()) {
             ++linenum;
             getline(datafile, line);
             if (line.empty() || boost::starts_with(line,"#") || boost::starts_with(line,";") || boost::starts_with(line,"!") || boost::starts_with(line,"//")) continue;
+            if (subsampling_factor && ((*rng)()%subsampling_factor>0)) continue;
+            if (line_numbers) line_numbers->push_back(linenum);
+            if (additionalInfo) additionalInfo->push_back(std::vector<FloatType>());
             stringstream linereader(line);
             PointType point;
             FloatType value;
             int i = 0;
             while (linereader >> value) {
                 if (i<Point::dim) point[i] = value;
-                if (++i==4) break;
-            }
-            if (i==4 && additionalInfo) {
-                if (use4==false && !data.empty()) {
-                    cout << "Warning: 4rth value met at line " << linenum << " but it was not present before." << endl;
+                else if (additionalInfo) {
+                    additionalInfo->back().push_back(value);
                 }
-                use4 = true;
+                ++i;
             }
+            data.push_back(point);
             xmin = min(xmin, point[0]);
             xmax = max(xmax, point[0]);
             ymin = min(ymin, point[1]);
             ymax = max(ymax, point[1]);
-            ++npts;
         }
-        
-        prepare(xmin, xmax, ymin, ymax, npts);
-        if (additionalInfo) additionalInfo->resize(npts);
-        
-        // second pass to load the data structure in place
-        datafile.close();
-        datafile.open(filename);
-        while (datafile && !datafile.eof()) {
-            getline(datafile, line);
-            if (line.empty() || boost::starts_with(line,"#") || boost::starts_with(line,";") || boost::starts_with(line,"!") || boost::starts_with(line,"//")) continue;
-            stringstream linereader(line);
-            PointType point;
-            FloatType value;
-            int i = 0;
-            while (linereader >> value) {
-                if (i<Point::dim) point[i] = value;
-                if (i>=Point::dim && additionalInfo!=0) {
-                    (*additionalInfo)[nextptidx].push_back(value);
-                }
-                ++i;
-            }
-            insert(point);
-        }
-        datafile.close();
+        prepare(xmin, xmax, ymin, ymax, data.size());
+        nextptidx = data.size();
+        for (size_t i = 0; i<data.size(); ++i) insert_data_at_index(i);
+        return linenum;
     }
-    inline void load_txt(std::string s, std::vector<std::vector<FloatType> >* additionalInfo = 0) {
-        load_txt(s.c_str(), additionalInfo);
+    inline size_t load_txt(std::string s, std::vector<std::vector<FloatType> >* additionalInfo = 0, std::vector<size_t> *line_numbers = 0, int subsampling_factor = 0) {
+        return load_txt(s.c_str(), additionalInfo, line_numbers, subsampling_factor);
     }
 
     // TODO: save_bin / load_bin if txt files take too long to load

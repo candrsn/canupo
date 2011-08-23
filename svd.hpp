@@ -72,7 +72,7 @@ void svd(int nrows, int ncols, double* A, double* S, bool projectObservations = 
     int info = 0;
     double Dummy; int ld_Dummy = 1;
     int lwork = -1;
-    double tmpwork[ncols]; // in case of failure, elements 1:ncols-1 are referenced
+    double *tmpwork = new double[ncols]; // in case of failure, elements 1:ncols-1 are referenced
     dgesvd_(projectObservations?"O":"N", B==0?"N":"S", &nrows, &ncols, A, &nrows, S, &Dummy, &ld_Dummy, B==0 ? &Dummy : B, &ncols, tmpwork, &lwork, &info);
     if (info) {
         std::cerr << "Could not retreive the work array size for lapack" << std::endl;
@@ -85,6 +85,7 @@ void svd(int nrows, int ncols, double* A, double* S, bool projectObservations = 
         std::cerr << "Error in dgesvd: " << info << std::endl;
         exit(1);
     }
+    delete [] tmpwork;
     delete [] work;
 #ifndef LAPACK_IS_THREAD_SAFE
 }
@@ -100,7 +101,7 @@ void svd(int nrows, int ncols, float* A, float* S, bool projectObservations = fa
     int info = 0;
     float Dummy; int ld_Dummy = 1;
     int lwork = -1;
-    float tmpwork[ncols]; // in case of failure, elements 1:ncols-1 are referenced
+    float *tmpwork = new float[ncols]; // in case of failure, elements 1:ncols-1 are referenced
     sgesvd_(projectObservations?"O":"N", B==0?"N":"S", &nrows, &ncols, A, &nrows, S, &Dummy, &ld_Dummy, B==0 ? &Dummy : B, &ncols, tmpwork, &lwork, &info);
     if (info) {
         std::cerr << "Could not retreive the work array size for lapack" << std::endl;
@@ -113,6 +114,7 @@ void svd(int nrows, int ncols, float* A, float* S, bool projectObservations = fa
         std::cerr << "Error in sgesvd: " << info << std::endl;
         exit(1);
     }
+    delete [] tmpwork;
     delete [] work;
 #ifndef LAPACK_IS_THREAD_SAFE
 }
