@@ -287,7 +287,7 @@ struct PointCloud {
         nextptidx = lastpos;
     }
 
-    size_t load_txt(const char* filename, std::vector<std::vector<FloatType> >* additionalInfo = 0, std::vector<std::string> *lines = 0, int subsampling_factor = 0) {
+    size_t load_txt(const char* filename, std::vector<std::vector<FloatType> >* additionalInfo = 0, std::vector<size_t> *line_numbers = 0, int subsampling_factor = 0) {
         using namespace std;
         data.clear();
         grid.clear();
@@ -306,7 +306,7 @@ struct PointCloud {
             getline(datafile, line);
             if (line.empty() || boost::starts_with(line,"#") || boost::starts_with(line,";") || boost::starts_with(line,"!") || boost::starts_with(line,"//")) continue;
             if (subsampling_factor && ((*rng)()%subsampling_factor>0)) continue;
-            if (lines) lines->push_back(line);
+            if (line_numbers) line_numbers->push_back(linenum);
             if (additionalInfo) additionalInfo->push_back(std::vector<FloatType>());
             stringstream linereader(line);
             PointType point;
@@ -330,8 +330,8 @@ struct PointCloud {
         for (size_t i = 0; i<data.size(); ++i) insert_data_at_index(i);
         return linenum;
     }
-    inline size_t load_txt(std::string s, std::vector<std::vector<FloatType> >* additionalInfo = 0, std::vector<std::string> *lines = 0, int subsampling_factor = 0) {
-        return load_txt(s.c_str(), additionalInfo, lines, subsampling_factor);
+    inline size_t load_txt(std::string s, std::vector<std::vector<FloatType> >* additionalInfo = 0, std::vector<size_t> *line_numbers = 0, int subsampling_factor = 0) {
+        return load_txt(s.c_str(), additionalInfo, line_numbers, subsampling_factor);
     }
 
     // TODO: save_bin / load_bin if txt files take too long to load

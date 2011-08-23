@@ -87,7 +87,7 @@ int main(int argc, char** argv) {
 
     boost::mt19937 rng;
 
-    if (random_mode) {
+    if (random_mode && !spatial_mode) {
         // random mode: retain lines at random when loading the cloud
         cout << "Sampling data cloud: " << argv[1] << " into " << argv[2] << endl;
         ifstream datafile(argv[1]);
@@ -110,12 +110,14 @@ int main(int argc, char** argv) {
 
     // spatial subsampling mode - harder
     // reload with parsing and spatial indexation
-    vector<string> lines;
     PointCloud<PointIdx> cloud;
+    vector<size_t> *line_numbers = new vector<size_t>();
     cout << "Loading data cloud: " << argv[1] << endl;
-    size_t original_number_of_lines = cloud.load_txt(argv[1],0,&lines,subsampling_factor);
-    // make the link between both data sets: data and lines vector
-    for (int i=0; i<cloud.data.size(); ++i) cloud.data[i].idx = i;
+    size_t original_number_of_lines = cloud.load_txt(argv[1],0,line_numbers,subsampling_factor);
+    // make the link data set and line numbers
+    for (int i=0; i<cloud.data.size(); ++i) cloud.data[i].idx = (*line_numbers)[i];
+    // free redundant memory
+    delete line_numbers;
 
     // algo: select a point at random.
     //       output the corresponding line
@@ -124,9 +126,10 @@ int main(int argc, char** argv) {
     cout << "Processing spatial resampling." << endl;
     cout << "Percent complete: 0" << flush;
     int nextpercentcomplete = 5;
-    size_t num_retained = 0;
+    vector<size_t> retained_lines;
+    size_t initial_data_size = cloud.data.size();
     while (!cloud.data.empty()) {
-        int percentcomplete = (lines.size() - cloud.data.size()) * 100 / lines.size();
+        int percentcomplete = (initial_data_size - cloud.data.size()) * 100 / initial_data_size;
         if (percentcomplete>=nextpercentcomplete) {
             if (percentcomplete>=nextpercentcomplete) {
                 nextpercentcomplete+=5;
@@ -134,29 +137,47 @@ int main(int argc, char** argv) {
                 else if (percentcomplete % 5 == 0) cout << "." << flush;
             }
         }
-        
+
         boost::uniform_int<int> int_dist(0, cloud.data.size()-1);
         boost::variate_generator<boost::mt19937&, boost::uniform_int<int> > randint(rng, int_dist);
-        int selected_point = randint();
+        size_t selected_point = randint();
         // WARNING: selected_point is the index of the data in the cloud.data vector
-        // the index in the lines vector is given by the idx field of the data
-        resultfile << lines[cloud.data[selected_point].idx] << endl;
-        vector<DistPoint<PointIdx> > neighbors;
-        cloud.findNeighbors(back_inserter(neighbors), cloud.data[selected_point], minimum_distance);
+        // the line number is given by the idx field of the data
+        retained_lines.push_back(cloud.data[selected_point].idx);
         // now remove the neighbors. The indices of the data points in the data vector
         // may change. This does not matter for the indices in the lines as these
         // are saved within the points themselves. However removal shall be done
         // from highest index to lowest index as elements are swapped with the last
         // entry in the data vector during a removel (lower indices are unchanged)
+        vector<DistPoint<PointIdx> > neighbors;
+        cloud.findNeighbors(back_inserter(neighbors), cloud.data[selected_point], minimum_distance);
         vector<int> data_indices(neighbors.size());
         for (int i=0; i<neighbors.size(); ++i) data_indices[i] = neighbors[i].pt - &cloud.data[0];
         sort(data_indices.begin(), data_indices.end(), greater<int>());
         for (int i=0; i<neighbors.size(); ++i) cloud.remove(data_indices[i]);
-        ++num_retained;
     }
     if (nextpercentcomplete==100) cout << 100;
     cout << endl;
-    cout << "Retained " << num_retained << " out of " << original_number_of_lines << " initial data points (subsampling ratio = 1/" << (double)original_number_of_lines/(double)num_retained << ")" << endl;
+
+    cout << "Sorting indices to retain" << endl;
+    sort(retained_lines.begin(), retained_lines.end());
+
+    cout << "Writing output file" << endl;
+    ifstream datafile(argv[1]);
+    string line;
+    size_t linenum = 0, retained_idx = 0;
+    while (datafile && !datafile.eof()) {
+        ++linenum;
+        getline(datafile, line);
+        if (line.empty() || starts_with(line,"#") || starts_with(line,";") || starts_with(line,"!") || starts_with(line,"//")) continue;
+        if (linenum==retained_lines[retained_idx]) {
+            resultfile << line << endl;
+            ++retained_idx;
+        }
+    }
+    datafile.close();
+
+    cout << "Retained " << retained_idx << " out of " << original_number_of_lines << " initial data points (subsampling ratio = 1/" << (double)original_number_of_lines/(double)retained_idx << ")" << endl;
 
     return 0;
 }
