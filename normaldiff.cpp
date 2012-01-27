@@ -55,14 +55,28 @@ using namespace boost;
 
 int help(const char* errmsg = 0) {
 cout << "\
-normaldiff scales... : p1.xyz p2.xyz cores.xyz extpts.xyz result.txt[:format] [opt_flags [extra_info]]\n\
-  inputs: scales         # list of scales at which to perform the analysis\n\
-                         # The syntax minscale:increment:maxscale is also accepted\n\
+normaldiff normal_scale(s) : [cylinder_base : [cylinder_length : ]] p1.xyz[:p1reduced.xyz] p2.xyz[:p2reduced.xyz] cores.xyz extpts.xyz result.txt[:format] [opt_flags [extra_info]]\n\
+  input: normal_scale(s) # The scale at which to compute the normal. If multiple scales\n\
+                         # are given the one at which the cloud looks most 2D is used.\n\
+                         # The syntax minscale:increment:maxscale is also accepted.\n\
                          # Use : to indicate the end of the list of scales\n\
-                         # A scale correspond to a diameter for neighbor research.\n\
+  input: cylinder_base   # Optional. If given, the search cylinder for projecting the core\n\
+                         # points in the normal direction is build with this base diameter\n\
+                         # Default is to use the minimal scale given above.\n\
+  input: cylinder_length # Optional. If given, the search cylinder for projecting the core\n\
+                         # extends up to that distance in length.\n\
+                         # Default is to use the maximal scale given above.\n\
   input: p1.xyz          # first whole raw point cloud to process\n\
   input: p2.xyz          # second whole raw point cloud to process, possibly the same as p1\n\
                          # if you only care for the normal computation and core point shifting.\n\
+  input: p1reduced.xyz   # Optional: use this subsampled cloud for performing the normal\n\
+                         # computations instead of p1.xyz. The projection is still performed\n\
+                         # with the full-resolution cloud, but you may drastically accelerate\n\
+                         # the computations by using a subsampled cloud if the scale at which\n\
+                         # the normals are computed is very large.\n\
+  input: p2.xyz          # second whole raw point cloud to process, possibly the same as p1\n\
+                         # if you only care for the normal computation and core point shifting.\n\
+  input: p2reduced.xyz   # Optional: See p1reduced.xyz.\n\
   input: cores.xyz       # points near which to do the computation. It is not necessary that these\n\
                          # points match entries in either cloud. A regular grid is OK for example.\n\
                          # You can also take exactly the same file, or put more core points than\n\
@@ -92,7 +106,6 @@ normaldiff scales... : p1.xyz p2.xyz cores.xyz extpts.xyz result.txt[:format] [o
                          #   Use the format name \"n1\", all three entries are then given.\n\
                          # - n2.x n2.y n2.z: surface normal vector coordinates for p2\n\
                          # - sn1 sn2: scales at which the normals were computed in p1 and p2\n\
-                         # - sc1 sc2: scales at which the core points were computed in p1 and p2\n\
                          # - dev1 dev2: standard deviation of the distance between: the points\n\
                          #              surrounding c1 and c2 at scales sc1 and sc2; and the\n\
                          #              \"surface\" planes defined by the normals at c1 and c2.\n\
@@ -103,13 +116,11 @@ normaldiff scales... : p1.xyz p2.xyz cores.xyz extpts.xyz result.txt[:format] [o
                          #         not null when p1=p2, in that case it can be interpreted as\n\
                          #         a measure of the error made in shifting c to c1/2.\n\
                          # - diff_dev: deviation of the diff value, estimated by bootstrapping.\n\
-  input: opt_flags       # Optional flags. Some may be combined together. Ex: \"hnc\".\n\
+  input: opt_flags       # Optional flags. Some may be combined together. Ex: \"hqb\".\n\
                          # Available flags are:\n\
                          #  q: Use the interquartile range and the median instead of standard deviation and mean, in order to define the new core point.\n\
                          #  h: make the resulting normals purely Horizontal (null z component).\n\
                          #  v: make the resulting normals purely Vertical (so, all normals are either +z or -z depending on the reference points).\n\
-                         #  n: compute the Normal only at the max given scale (default is the scale at which the cloud is most 2D)\n\
-                         #  c: compute the shifted Core point only at the lowest given scale (default is the scale at which the cloud is most 2D)\n\
                          #  1: Shift the core point on both clouds using the normal computed on the first cloud\n\
                          #     The default is to shift the core point for each cloud using the normal computed on that cloud.\n\
                          #  2: Shift the core point on both clouds using the normal computed on the second cloud.\n\
@@ -117,11 +128,10 @@ normaldiff scales... : p1.xyz p2.xyz cores.xyz extpts.xyz result.txt[:format] [o
                          #  e: provide the standard deviation of the Error on the point positions\n\
                          #     in p1 and p2 as extra info. This is a parameter provided by the device\n\
                          #     used for measuring p1 and p2. It is incorporated in the bootstrapping.\n\
-                         #  b: Number of bootstrap iterations (default is 100). 0 disables\n\
+                         #  b: Number of bootstrap iterations. 0 (the default) disables\n\
                          #     bootstrapping: you won't get diff_dev and diff is the sample mean.\n\
-                         #  d: Limiting distance for translating the original core point.\n\
-  input: extra_info      # Extra parameters for the \"e\", \"s\", \"b\" and \"d\" flags, given in the\n\
-                         # same order as these flags were specified.\n\
+  input: extra_info      # Extra parameters for the \"e\", \"s\" and \"b\" flags, given in\n\
+                         # the same order as these flags were specified.\n\
                          # Ex: normaldiff (all other opts) ehb 1e-2 1000\n\
                          # The flags are \"e\", \"h\" and \"b\". \"h\" has no extra parameter.\n\
                          # So, in this order: e=1e-2 and b=1000\n\
@@ -151,8 +161,6 @@ int main(int argc, char** argv) {
         break;
     }
     if (separator==0) return help();
-    
-    if (argc<separator+6) return help();
 
     // get all unique scales from large to small, for later processing of neighborhoods
     typedef set<FloatType, greater<FloatType> > ScaleSet;
@@ -191,15 +199,65 @@ int main(int argc, char** argv) {
     int nscales = scalesvec.size();
     
     if (scales.empty()) return help();
+    
+    FloatType cylinder_base = scalesvec.back(); // smallest
+    FloatType cylinder_length = scalesvec[0];   // largest
+    
+    int separator_next = 0;
+    for (int i=separator+1; i<argc; ++i) if (!strcmp(":",argv[i])) {
+        separator_next = i;
+        break;
+    }
+    if (separator_next!=0) {
+        if (separator_next != separator+2) return help();
+        cylinder_base = atof(argv[separator+1]);
+        separator = separator_next;
+        separator_next = 0;
+        for (int i=separator+1; i<argc; ++i) if (!strcmp(":",argv[i])) {
+            separator_next = i;
+            break;
+        }
+        if (separator_next!=0) {
+            if (separator_next != separator+2) return help();
+            cylinder_length = atof(argv[separator+1]);
+            separator = separator_next;
+        }
+    }
+    
+    // cylinder is split in segments using small balls, covering up the whole length
+    // Analysis of the volume of the balls outside the cylinder wrt the number of balls
+    // and their diameters required for covering the cylinder shows a minimum
+    // Use twice the length as we also look for negative shifts
+    int num_cyl_balls = floor(2.*cylinder_length*sqrt(2.)/cylinder_base);
+    double cyl_section_length = cylinder_length/num_cyl_balls; 
+    double cyl_ball_radius = 0.5*sqrt(cyl_section_length*cyl_section_length + cylinder_base*cylinder_base);
+    double cylinder_base_radius_sq = cylinder_base * cylinder_base * 0.25;
+    
+    if (argc<separator+6) return help();
 
-    cout << "Selected scales:";
+    cout << "Scale" << (scales.size()==1?"":"s") << " for normals computation:";
     for (ScaleSet::iterator it = scales.begin(); it!=scales.end(); ++it) {
         cout << " " << *it;
     }
     cout << endl;
-
+    cout << "Base of projection/search cylinder: " << cylinder_base << endl;
+    cout << "Length of projection/search cylinder: " << cylinder_length << endl;
+    
     string p1fname = argv[separator+1];
+    string p1reducedfname;
+    int p1redpos = p1fname.find(':');
+    if (p1redpos>=0) {
+        p1reducedfname = p1fname.substr(p1redpos+1);
+        p1fname = p1fname.substr(0,p1redpos);
+    }
     string p2fname = argv[separator+2];
+    string p2reducedfname;
+    int p2redpos = p2fname.find(':');
+    if (p2redpos>=0) {
+        p2reducedfname = p2fname.substr(p2redpos+1);
+        p2fname = p2fname.substr(0,p2redpos);
+    }
+    
     string corefname = argv[separator+3];
     string extptsfname = argv[separator+4];
     string resultarg = argv[separator+5];
@@ -207,8 +265,8 @@ int main(int argc, char** argv) {
     vector<string> result_filenames;
     vector<vector<string> > result_formats;
     
-    const char* all_result_formats[] = {"c1", "c2", "n1", "n2", "sn1", "sn2", "sc1", "sc2", "dev1", "dev2", "np1", "np2", "diff", "diff_dev"};
-    const int nresformats = 14;
+    const char* all_result_formats[] = {"c1", "c2", "n1", "n2", "sn1", "sn2", "dev1", "dev2", "np1", "np2", "diff", "diff_dev"};
+    const int nresformats = 12;
     
     char_separator<char> colsep(":");
     char_separator<char> commasep(",");
@@ -242,15 +300,13 @@ int main(int argc, char** argv) {
     
     bool force_horizontal = false;
     bool force_vertical = false;
-    bool normal_max_scale = false;
-    bool core_min_scale = false;
     bool use_median = false;
     bool shift_first = false;
     bool shift_second = false;
     bool shift_mean = false;
     double pos_dev = 0;
     double max_core_shift_distance = numeric_limits<double>::max();
-    int num_bootstrap_iter = 100;
+    int num_bootstrap_iter = 1;
 //    Point systematic_error(0,0,0);
     
     if (argc>separator+6) {
@@ -263,11 +319,6 @@ int main(int argc, char** argv) {
                 case 'q': use_median = true; break;
                 case 'h': force_horizontal = true; break;
                 case 'v': force_vertical = true; break;
-                case 'n': normal_max_scale = true; break;
-                case 'c': core_min_scale = true; break;
-                case 'd': if (++extra_info_idx<argc) {
-                    max_core_shift_distance = atof(argv[extra_info_idx]); break;
-                } else return help("Missing value for the d flag");
                 case 'e': if (++extra_info_idx<argc) {
                     pos_dev = atof(argv[extra_info_idx]); break;
                 } else return help("Missing value for the e flag");
@@ -298,39 +349,27 @@ int main(int argc, char** argv) {
         pos_dev = 0;
     }
     
-    // "diagonal" scale for the cylinder search.
-    // worse-case when looking for the most 2D scale
-    // exact when both n and c are specified
-    FloatType diagscale;
-    if (normal_max_scale && core_min_scale) {
-        diagscale = sqrt(scalesvec[0]*scalesvec[0] + scalesvec.back()*scalesvec.back());
-    } else {
-        // most 2D scale may be any, including the largest one
-        // we need to find all neighbors in the cylinder
-        diagscale = sqrt((FloatType)2.)*scalesvec[0];
-    }
-    // recompute the scales now
-    scales.insert(diagscale);
-    // new scale is largest, necessarily at vector index 0
-    // before the original scales
-    ++nscales;
-    scalesvec.resize(nscales);
-    for (int i=scalesvec.size()-1; i>0; --i) scalesvec[i] = scalesvec[i-1];
-    scalesvec[0] = diagscale;
-    
     boost::mt19937 rng;
     boost::normal_distribution<FloatType> poserr_dist(0, pos_dev);
     boost::variate_generator<boost::mt19937&, boost::normal_distribution<FloatType> > poserr_rand(rng, poserr_dist);
 
     cout << "Loading cloud 1: " << p1fname << endl;
     
-    PointCloud<Point> p1;
+    PointCloud<Point> p1, p1reduced;
     p1.load_txt(p1fname);
+    if (!p1reducedfname.empty()) {
+        cout << "Loading subsampled cloud 1: " << p1reducedfname << endl;
+        p1reduced.load_txt(p1reducedfname);
+    }
     
     cout << "Loading cloud 2: " << p2fname << endl;
     
-    PointCloud<Point> p2;
+    PointCloud<Point> p2, p2reduced;
     p2.load_txt(p2fname);
+    if (!p2reducedfname.empty()) {
+        cout << "Loading subsampled cloud 2: " << p2reducedfname << endl;
+        p2reduced.load_txt(p2reducedfname);
+    }
         
     cout << "Loading core points: " << corefname << endl;
     
@@ -398,6 +437,9 @@ int main(int argc, char** argv) {
         resultfiles[i] = new ofstream(result_filenames[i].c_str());
     }
     
+
+    
+/// ALL THINGS LOADED, NOW THE REAL WORK !!! ///
     
     cout << "Percent complete: 0" << flush;
     
@@ -434,8 +476,14 @@ int main(int argc, char** argv) {
             if (scaleidx==0) {
                 // we have all neighbors, unsorted, but with distances computed already
                 // use scales = diameters, not radius
-                p1.findNeighbors(back_inserter(neighbors_1), corepoints[ptidx], scalesvec[scaleidx] * 0.5);
-                p2.findNeighbors(back_inserter(neighbors_2), corepoints[ptidx], scalesvec[scaleidx] * 0.5);
+                if (p1reducedfname.empty())
+                    p1.findNeighbors(back_inserter(neighbors_1), corepoints[ptidx], scalesvec[scaleidx] * 0.5);
+                else 
+                    p1reduced.findNeighbors(back_inserter(neighbors_1), corepoints[ptidx], scalesvec[scaleidx] * 0.5);
+                if (p2reducedfname.empty())
+                    p2.findNeighbors(back_inserter(neighbors_2), corepoints[ptidx], scalesvec[scaleidx] * 0.5);
+                else
+                    p2reduced.findNeighbors(back_inserter(neighbors_2), corepoints[ptidx], scalesvec[scaleidx] * 0.5);
                 // Sort the neighbors from closest to farthest, so we can process all lower scales easily
                 sort(neighbors_1.begin(), neighbors_1.end());
                 sort(neighbors_2.begin(), neighbors_2.end());
@@ -480,72 +528,62 @@ int main(int argc, char** argv) {
             }
         }
 
-
         // The most planar scale is only computed once if needed
         // bootstrapping is then done on that scale for the normal computations
-        int core_scale_idx_1 = nscales-1, core_scale_idx_2 = nscales-1;
-        // largest original scale has index 1, the diagonal has index 0
-        int normal_scale_idx_1 = 1, normal_scale_idx_2 = 1;
-        // if either flag is not set, we must compute the most 2D scale now
-        if (!normal_max_scale || !core_min_scale) {
-            
-            FloatType svalues[3];
-            // avoid code dup below
-            // but some dup in bootstrapping as I'm lazy to get rid of it
-            int* core_scale_idx_ref[2] = {&core_scale_idx_1, &core_scale_idx_2};
-            int* normal_scale_idx_ref[2] = {&normal_scale_idx_1, &normal_scale_idx_2};
-            vector<DistPoint<Point> >* neighbors_ref[2] = {&neighbors_1, &neighbors_2};
-            vector<int>* neigh_num_ref[2] = {&neigh_num_1, &neigh_num_2};
-            vector<Point>* neighsums_ref[2] = {&neighsums_1, &neighsums_2};
-            // loop on both pt sets
-            for (int ref12_idx = 0; ref12_idx < 2; ++ref12_idx) {
-                vector<DistPoint<Point> >& neighbors = *neighbors_ref[ref12_idx];
-                FloatType maxbarycoord = -numeric_limits<FloatType>::max();
-                // skip the diagonal scale at index 0
-                for (int sidx=1; sidx<nscales; ++sidx) {
-                    int npts = (*neigh_num_ref[ref12_idx])[sidx];
-                    if (npts>=3) {
-                        // use the pre-computed sums to get the average point
-                        Point avg = (*neighsums_ref[ref12_idx])[npts-1] / npts;
-                        // compute PCA on the neighbors at this scale
-                        // a copy is needed as LAPACK destroys the matrix, and the center changes anyway
-                        // => cannot keep the points from one scale to the lower, need to rebuild the matrix
-                        vector<FloatType> A(npts * 3);
-                        for (int i=0; i<npts; ++i) {
-                            // A is column-major
-                            A[i] = neighbors[i].pt->x - avg.x;
-                            A[i+npts] = neighbors[i].pt->y - avg.y;
-                            A[i+npts*2] = neighbors[i].pt->z - avg.z;
-                        }
-                        svd(npts, 3, &A[0], &svalues[0]);
-                        // The most 2D scale. For the criterion for how "2D" a scale is, see canupo
-                        // Ideally first and second eigenvalue are equal
-                        // convert to percent variance explained by each dim
-                        FloatType totalvar = 0;
-                        for (int i=0; i<3; ++i) {
-                            // singular values are squared roots of eigenvalues
-                            svalues[i] = svalues[i] * svalues[i]; // / (neighbors.size() - 1);
-                            totalvar += svalues[i];
-                        }
-                        for (int i=0; i<3; ++i) svalues[i] /= totalvar;
-                        // ideally, 2D means first and second entries are both 1/2 and third is 0
-                        // convert to barycentric coordinates and take the coefficient of the 2D
-                        // corner as a quality measure.
-                        // Use barycentric coordinates : a for 1D, b for 2D and c for 3D
-                        // Formula on wikipedia page for barycentric coordinates
-                        // using directly the triangle in %variance space, they simplify a lot
-                        //FloatType c = 1 - a - b; // they sum to 1
-                        // a = svalues[0] - svalues[1];
-                        FloatType b = 2 * svalues[0] + 4 * svalues[1] - 2;
-                        if (b > maxbarycoord) {
-                            maxbarycoord = b;
-                            if (!core_min_scale) *core_scale_idx_ref[ref12_idx] = sidx;
-                            if (!normal_max_scale) *normal_scale_idx_ref[ref12_idx] = sidx;
-                        }
-                    }                    
-                }
-            } //ref12 loop
-        }
+        int normal_scale_idx_1 = 0, normal_scale_idx_2 = 0;
+        FloatType svalues[3];
+        // avoid code dup below
+        // but some dup in bootstrapping as I'm lazy to get rid of it
+        int* normal_scale_idx_ref[2] = {&normal_scale_idx_1, &normal_scale_idx_2};
+        vector<DistPoint<Point> >* neighbors_ref[2] = {&neighbors_1, &neighbors_2};
+        vector<int>* neigh_num_ref[2] = {&neigh_num_1, &neigh_num_2};
+        vector<Point>* neighsums_ref[2] = {&neighsums_1, &neighsums_2};
+        // loop on both pt sets
+        for (int ref12_idx = 0; ref12_idx < 2; ++ref12_idx) {
+            vector<DistPoint<Point> >& neighbors = *neighbors_ref[ref12_idx];
+            FloatType maxbarycoord = -numeric_limits<FloatType>::max();
+            for (int sidx=0; sidx<nscales; ++sidx) {
+                int npts = (*neigh_num_ref[ref12_idx])[sidx];
+                if (npts>=3) {
+                    // use the pre-computed sums to get the average point
+                    Point avg = (*neighsums_ref[ref12_idx])[npts-1] / npts;
+                    // compute PCA on the neighbors at this scale
+                    // a copy is needed as LAPACK destroys the matrix, and the center changes anyway
+                    // => cannot keep the points from one scale to the lower, need to rebuild the matrix
+                    vector<FloatType> A(npts * 3);
+                    for (int i=0; i<npts; ++i) {
+                        // A is column-major
+                        A[i] = neighbors[i].pt->x - avg.x;
+                        A[i+npts] = neighbors[i].pt->y - avg.y;
+                        A[i+npts*2] = neighbors[i].pt->z - avg.z;
+                    }
+                    svd(npts, 3, &A[0], &svalues[0]);
+                    // The most 2D scale. For the criterion for how "2D" a scale is, see canupo
+                    // Ideally first and second eigenvalue are equal
+                    // convert to percent variance explained by each dim
+                    FloatType totalvar = 0;
+                    for (int i=0; i<3; ++i) {
+                        // singular values are squared roots of eigenvalues
+                        svalues[i] = svalues[i] * svalues[i]; // / (neighbors.size() - 1);
+                        totalvar += svalues[i];
+                    }
+                    for (int i=0; i<3; ++i) svalues[i] /= totalvar;
+                    // ideally, 2D means first and second entries are both 1/2 and third is 0
+                    // convert to barycentric coordinates and take the coefficient of the 2D
+                    // corner as a quality measure.
+                    // Use barycentric coordinates : a for 1D, b for 2D and c for 3D
+                    // Formula on wikipedia page for barycentric coordinates
+                    // using directly the triangle in %variance space, they simplify a lot
+                    //FloatType c = 1 - a - b; // they sum to 1
+                    // a = svalues[0] - svalues[1];
+                    FloatType b = 2 * svalues[0] + 4 * svalues[1] - 2;
+                    if (b > maxbarycoord) {
+                        maxbarycoord = b;
+                        *normal_scale_idx_ref[ref12_idx] = sidx;
+                    }
+                }                    
+            }
+        } //ref12 loop
 
         // closest ref point is also shared for all bootstrap iterations for efficiency
         // non-empty set => valid index
@@ -585,7 +623,6 @@ int main(int argc, char** argv) {
             vector<Point> resampled_neighbors_1, resampled_neighbors_2;
             // avoid code dup below
             int* npts_scale0_bs_ref[2] = {&npts_scale0_bs_1, &npts_scale0_bs_2};
-            int* core_scale_idx_ref[2] = {&core_scale_idx_1, &core_scale_idx_2};
             int* normal_scale_idx_ref[2] = {&normal_scale_idx_1, &normal_scale_idx_2};
             Point* normal_ref[2] = {&normal_1, &normal_2};
             Point* normal_bs_ref[2] = {&normal_bs_1, &normal_bs_2};
@@ -620,7 +657,7 @@ int main(int argc, char** argv) {
                     if (num_bootstrap_iter==1) selected_idx = i;
                     resampled_neighbors[i] = *neighbors[selected_idx].pt;
                     // add some gaussian noise with dev specified by the user on each coordinate
-                    if (num_bootstrap_iter>1) {
+                    if (pos_dev>0) {
                         resampled_neighbors[i].x += poserr_rand(); //poserr_dist(rng);
                         resampled_neighbors[i].y += poserr_rand();
                         resampled_neighbors[i].z += poserr_rand();
@@ -696,42 +733,53 @@ int main(int argc, char** argv) {
                 
             for (int ref12_idx = 0; ref12_idx < 2; ++ref12_idx) {
                 Point& normal = *normal_bs_ref[ref12_idx];
-                int& npts_scale0 = *npts_scale0_bs_ref[ref12_idx];
-                vector<Point>& resampled_neighbors = *resampled_neighbors_ref[ref12_idx];
-                
-                // projection of the core point along a cylinder in the normal direction
-                // The cylinder base diameter is core_scale
-                // The cylinder height is normal_scale
-                // The cylinder is centered on the original core point
-                // Look for a plane parallel to the cylinder base that is
-                // placed at the median of the distribution of densities of points.
-                FloatType max_core_shift_within_cylinder = min((FloatType)(0.5 * scalesvec[*normal_scale_idx_ref[ref12_idx]]), (FloatType)max_core_shift_distance);
-                FloatType core_radius = 0.5 * scalesvec[*core_scale_idx_ref[ref12_idx]];
-                FloatType core_radius_sq = core_radius * core_radius;
+
+                // cylinder is split in segments using small balls, covering up the whole length
                 // for median computations, if any
                 vector<FloatType> all_dists_along_axis;
                 // mean/dev
                 FloatType mean_dist = 0;
                 FloatType dev_dist = 0;
                 int npts_in_cylinder = 0;
-                for (int i=0; i<npts_scale0; ++i) {
-                    Point delta = resampled_neighbors[i] - corepoints[ptidx];
-                    FloatType dist_along_axis = delta.dot(normal);
-                    FloatType dist_to_axis_sq = (delta - dist_along_axis * normal).norm2();
-                    // ignore points outside the cylinder
-                    if (dist_to_axis_sq > core_radius_sq) continue;
-                    // ignore points too far away
-                    if (fabs(dist_along_axis) > max_core_shift_within_cylinder) continue;
-                    if (use_median) all_dists_along_axis.push_back(dist_along_axis);
-                    mean_dist += dist_along_axis;
-                    dev_dist += dist_along_axis * dist_along_axis;
-                    ++npts_in_cylinder;
+                
+                // the number of segments includes negative shifts
+                for (int cylsec=0; cylsec<num_cyl_balls; ++cylsec) {
+                    
+                    // first segment center starts at +0.5 from min neg shift
+                    Point base_segment_center = corepoints[ptidx] + (cyl_section_length*0.5-cylinder_length) * normal;
+
+                    FloatType min_dist_along_axis = cylsec * cyl_section_length - cylinder_length;
+                    FloatType max_dist_along_axis = min_dist_along_axis + cyl_section_length;
+                    
+                    // find full-res points in the current cylinder section
+                    p1.applyToNeighbors(
+                        // long life to C++11 lambdas !
+                        [&](FloatType d2, Point* p) {
+                            Point delta = *p - corepoints[ptidx];
+                            FloatType dist_along_axis = delta.dot(normal);
+                            FloatType dist_to_axis_sq = (delta - dist_along_axis * normal).norm2();
+                            // check the point is in this cylinder section
+                            if (dist_to_axis_sq>cylinder_base_radius_sq) return;
+                            if (dist_along_axis<min_dist_along_axis) return;
+                            if (dist_along_axis>=max_dist_along_axis) return;
+                            if (use_median) all_dists_along_axis.push_back(dist_along_axis);
+                            else {
+                                mean_dist += dist_along_axis;
+                                dev_dist += dist_along_axis * dist_along_axis;
+                                ++npts_in_cylinder;
+                            }
+                        },
+                        base_segment_center + (cylsec * cyl_section_length) * normal,
+                        cyl_ball_radius
+                    );
                 }
+                
                 // process average / median
                 FloatType avgd = 0, devd = 0;
                 if (use_median) {
                     sort(all_dists_along_axis.begin(), all_dists_along_axis.end());
                     // median instead of average
+                    npts_in_cylinder = all_dists_along_axis.size();
                     avgd = median(&all_dists_along_axis[0], npts_in_cylinder);
                     // interquartile range
                     //   there are several ways to compute it, with no standard
@@ -799,8 +847,6 @@ int main(int argc, char** argv) {
                 else if (formats[j] == "n2") resultfile << normal_2.x << " " << normal_2.y << " " << normal_2.z;
                 else if (formats[j] == "sn1") resultfile << scalesvec[normal_scale_idx_1];
                 else if (formats[j] == "sn2") resultfile << scalesvec[normal_scale_idx_2];
-                else if (formats[j] == "sc1") resultfile << scalesvec[core_scale_idx_1];
-                else if (formats[j] == "sc2") resultfile << scalesvec[core_scale_idx_2];
                 else if (formats[j] == "dev1") resultfile << plane_dev_1;
                 else if (formats[j] == "dev2") resultfile << plane_dev_2;
                 else if (formats[j] == "np1") resultfile << plane_nump_1;

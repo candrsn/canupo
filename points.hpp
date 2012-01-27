@@ -338,6 +338,14 @@ struct PointCloud {
     
     template<typename OutputIterator, class SomePointType>
     void findNeighbors(OutputIterator outit, const SomePointType& center, FloatType radius) {
+        
+        // experimenting with C++Ox11 lambda expressions...
+        applyToNeighbors(
+            [&outit](FloatType d2, PointType* p) {(*outit++) = DistPoint<PointType>(d2,p);},
+            center,
+            radius
+        );
+/*
         int cx1 = floor((center.x - radius - xmin) / cellside);
         int cx2 = floor((center.x + radius - xmin) / cellside);
         int cy1 = floor((center.y - radius - ymin) / cellside);
@@ -351,6 +359,26 @@ struct PointCloud {
             for (IndexType p = grid[cy * ncellx + cx]; p!=IndexType(-1); p=links[p]) {
                 FloatType d2 = dist2(center,data[p]);
                 if (d2<=r2) (*outit++) = DistPoint<PointType>(d2,&data[p]);
+            }
+        }
+*/
+    }
+    
+    template<typename FunctorType, class SomePointType>
+    void applyToNeighbors(FunctorType functor, const SomePointType& center, FloatType radius) {
+        int cx1 = floor((center.x - radius - xmin) / cellside);
+        int cx2 = floor((center.x + radius - xmin) / cellside);
+        int cy1 = floor((center.y - radius - ymin) / cellside);
+        int cy2 = floor((center.y + radius - ymin) / cellside);
+        if (cx1<0) cx1=0;
+        if (cx2>=ncellx) cx2=ncellx-1;
+        if (cy1<0) cy1=0;
+        if (cy2>=ncelly) cy2=ncelly-1;
+        double r2 = radius * radius;
+        for (int cy = cy1; cy <= cy2; ++cy) for (int cx = cx1; cx <= cx2; ++cx) {
+            for (IndexType p = grid[cy * ncellx + cx]; p!=IndexType(-1); p=links[p]) {
+                FloatType d2 = dist2(center,data[p]);
+                if (d2<=r2) functor(d2,&data[p]);
             }
         }
     }

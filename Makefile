@@ -19,7 +19,7 @@ canupo:
 	$(CXX) $(CXXFLAGS) canupo.cpp $(LAPACK) $(LDFLAGS) -o canupo
 
 normaldiff:
-	$(CXX) $(CXXFLAGS) normaldiff.cpp $(LAPACK) -o normaldiff
+	$(CXX) $(CXXFLAGS) -std=c++0x normaldiff.cpp $(LAPACK) -o normaldiff
 
 display_normals:
 	$(CXX) $(CXXFLAGS) display_normals.cpp -losg -losgViewer -losgGA -o display_normals
