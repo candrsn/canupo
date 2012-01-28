@@ -168,6 +168,82 @@ struct DistPoint {
     DistPoint() : distsq(0), pt(0) {}
 };
 
+// only classic notation supported, no fancy hex or the like that atof can handle
+inline FloatType fast_atof_next_token(char* &str) {
+    while ((*str==' ')||(*str=='\t')||(*str=='\n')||(*str=='\r')) {
+        ++str; if (*str==0) return 0;
+    }
+    FloatType value = 0;
+    FloatType neg = 1;
+    for (;;++str) {
+        switch(*str) {
+            default: ++str;// break on invalid characters
+            case 0: return value*neg; // end of string
+            case '-': neg = -1; continue;
+            case '+': continue;
+            case '0': value *= 10; continue;
+            case '1': value = value * 10 + 1; continue;
+            case '2': value = value * 10 + 2; continue;
+            case '3': value = value * 10 + 3; continue;
+            case '4': value = value * 10 + 4; continue;
+            case '5': value = value * 10 + 5; continue;
+            case '6': value = value * 10 + 6; continue;
+            case '7': value = value * 10 + 7; continue;
+            case '8': value = value * 10 + 8; continue;
+            case '9': value = value * 10 + 9; continue;
+            case '.': {
+                ++str; if (*str==0) return value*neg; // useless terminal .
+                FloatType tenpow = 10;
+                while ((*str>='0')&&(*str<='9')) {
+                    value += (*str - '0') / tenpow;
+                    tenpow *= 10;
+                    ++str; if (*str==0) return value*neg;
+                } 
+                // ignore unknown characters other than e or E
+                if (*str!='e'&&*str!='E') return value*neg;
+            }
+            case 'e':
+            case 'E': {
+                int exponum = 0;
+                bool div = false;
+                for (++str;;++str) {
+                    switch(*str) {
+                        default:
+                        case 0: {
+                            // non-recursive fast-exponentiation
+                            // TODO: IEEE754 tricks... dependent of FloatType
+                            FloatType expoval = 1;
+                            FloatType tenpow = 10;
+                            while (exponum!=0) {
+                                if ((exponum&1)!=0) expoval *= tenpow;
+                                tenpow *= tenpow;
+                                exponum /= 2;
+                            }
+                            if (div) return value*neg/expoval; return value*neg*expoval;
+                        }
+                        case '-': div = true; continue;
+                        case '0': exponum *= 10; continue;
+                        case '1': exponum = exponum * 10 + 1; continue;
+                        case '2': exponum = exponum * 10 + 2; continue;
+                        case '3': exponum = exponum * 10 + 3; continue;
+                        case '4': exponum = exponum * 10 + 4; continue;
+                        case '5': exponum = exponum * 10 + 5; continue;
+                        case '6': exponum = exponum * 10 + 6; continue;
+                        case '7': exponum = exponum * 10 + 7; continue;
+                        case '8': exponum = exponum * 10 + 8; continue;
+                        case '9': exponum = exponum * 10 + 9; continue;
+                    }
+                }
+                // shall never reach this point
+                if (div) return value*neg;
+                return value*neg;
+            }
+        }
+    }
+    // shall never reach this point
+    return value*neg;
+}
+
 template<class PointType>
 struct PointCloud {
     std::vector<PointType> data; // avoids many mem allocations for individual points
@@ -286,37 +362,39 @@ struct PointCloud {
         links.pop_back();
         nextptidx = lastpos;
     }
-
+    
     size_t load_txt(const char* filename, std::vector<std::vector<FloatType> >* additionalInfo = 0, std::vector<size_t> *line_numbers = 0, int subsampling_factor = 0) {
         using namespace std;
         data.clear();
         grid.clear();
-        ifstream datafile(filename);
-        string line;
+        FILE* fp = fopen(filename, "r");
+        if (!fp) {std::cerr << "Could not load file: " << filename << std::endl; return 0;}
         // first pass to get the number of points and the bounds
         xmin = numeric_limits<FloatType>::max();
         xmax = -numeric_limits<FloatType>::max();
         ymin = numeric_limits<FloatType>::max();
         ymax = -numeric_limits<FloatType>::max();
+        char* line = 0;
+        size_t linelen = 0;
+        int num_read = 0;
         size_t linenum = 0;
         boost::mt19937* rng = 0;
         if (subsampling_factor) rng = new boost::mt19937;
-        while (datafile && !datafile.eof()) {
+        while ((num_read = getline(&line, &linelen, fp)) != -1) {
             ++linenum;
-            getline(datafile, line);
-            if (line.empty() || boost::starts_with(line,"#") || boost::starts_with(line,";") || boost::starts_with(line,"!") || boost::starts_with(line,"//")) continue;
+            if (linelen==0 || line[0]=='#') continue;
             if (subsampling_factor && ((*rng)()%subsampling_factor>0)) continue;
             if (line_numbers) line_numbers->push_back(linenum);
             if (additionalInfo) additionalInfo->push_back(std::vector<FloatType>());
-            stringstream linereader(line);
             PointType point;
-            FloatType value;
             int i = 0;
-            while (linereader >> value) {
+            // atof & strtok are really too slow, not to mention alternatives...
+            for (char* x = line; *x!=0;) {
+                FloatType value = fast_atof_next_token(x);
                 if (i<Point::dim) point[i] = value;
                 else if (additionalInfo) {
                     additionalInfo->back().push_back(value);
-                }
+                } else break;
                 ++i;
             }
             data.push_back(point);
@@ -325,6 +403,7 @@ struct PointCloud {
             ymin = min(ymin, point[1]);
             ymax = max(ymax, point[1]);
         }
+        fclose(fp);
         prepare(xmin, xmax, ymin, ymax, data.size());
         nextptidx = data.size();
         for (size_t i = 0; i<data.size(); ++i) insert_data_at_index(i);
@@ -338,30 +417,11 @@ struct PointCloud {
     
     template<typename OutputIterator, class SomePointType>
     void findNeighbors(OutputIterator outit, const SomePointType& center, FloatType radius) {
-        
-        // experimenting with C++Ox11 lambda expressions...
         applyToNeighbors(
             [&outit](FloatType d2, PointType* p) {(*outit++) = DistPoint<PointType>(d2,p);},
             center,
             radius
         );
-/*
-        int cx1 = floor((center.x - radius - xmin) / cellside);
-        int cx2 = floor((center.x + radius - xmin) / cellside);
-        int cy1 = floor((center.y - radius - ymin) / cellside);
-        int cy2 = floor((center.y + radius - ymin) / cellside);
-        if (cx1<0) cx1=0;
-        if (cx2>=ncellx) cx2=ncellx-1;
-        if (cy1<0) cy1=0;
-        if (cy2>=ncelly) cy2=ncelly-1;
-        double r2 = radius * radius;
-        for (int cy = cy1; cy <= cy2; ++cy) for (int cx = cx1; cx <= cx2; ++cx) {
-            for (IndexType p = grid[cy * ncellx + cx]; p!=IndexType(-1); p=links[p]) {
-                FloatType d2 = dist2(center,data[p]);
-                if (d2<=r2) (*outit++) = DistPoint<PointType>(d2,&data[p]);
-            }
-        }
-*/
     }
     
     template<typename FunctorType, class SomePointType>

@@ -373,48 +373,46 @@ int main(int argc, char** argv) {
         
     cout << "Loading core points: " << corefname << endl;
     
-    ifstream corepointsfile(corefname.c_str());
-    string line;
+    FILE* corepointsfile = fopen(corefname.c_str(), "r");
+    if (!corepointsfile) {std::cerr << "Could not load file: " << corefname << std::endl; return 1;}
+    char* line = 0; size_t linelen = 0; int num_read = 0;
     int linenum = 0;
     vector<Point> corepoints;
-    while (corepointsfile && !corepointsfile.eof()) {
+    while ((num_read = getline(&line, &linelen, corepointsfile)) != -1) {
         ++linenum;
-        getline(corepointsfile, line);
-        if (line.empty() || starts_with(line,"#") || starts_with(line,";") || starts_with(line,"!") || starts_with(line,"//")) continue;
-        stringstream linereader(line);
+        if (linelen==0 || line[0]=='#') continue;
         Point point;
-        FloatType value;
         int i = 0;
-        while (linereader >> value) {
+        for (char* x = line; *x!=0;) {
+            FloatType value = fast_atof_next_token(x);
             if (i<Point::dim) point[i++] = value;
             else break;
         }
         if (i<3) return help(str(boost::format("Error in the core points file line %d") % (linenum+1)).c_str());
         corepoints.push_back(point);
     }
-    corepointsfile.close();
+    fclose(corepointsfile);
 
     cout << "Loading external reference points: " << extptsfname << endl;
     
-    ifstream refpointsfile(extptsfname.c_str());
+    FILE* refpointsfile = fopen(extptsfname.c_str(), "r");
+    if (!refpointsfile) {std::cerr << "Could not load file: " << extptsfname << std::endl; return 1;}
     linenum = 0;
     vector<Point> refpoints;
-    while (refpointsfile && !refpointsfile.eof()) {
+    while ((num_read = getline(&line, &linelen, refpointsfile)) != -1) {
         ++linenum;
-        getline(refpointsfile, line);
-        if (line.empty() || starts_with(line,"#") || starts_with(line,";") || starts_with(line,"!") || starts_with(line,"//")) continue;
-        stringstream linereader(line);
+        if (linelen==0 || line[0]=='#') continue;
         Point point;
-        FloatType value;
         int i = 0;
-        while (linereader >> value) {
+        for (char* x = line; *x!=0;) {
+            FloatType value = fast_atof_next_token(x);
             if (i<Point::dim) point[i++] = value;
             else break;
         }
         if (i<3) return help(str(boost::format("Error in the reference points file line %d") % (linenum+1)).c_str());
         refpoints.push_back(point);
     }
-    refpointsfile.close();
+    fclose(refpointsfile);
     
     if (refpoints.empty()) return help("Please provide at least one reference point");
     
@@ -437,9 +435,8 @@ int main(int argc, char** argv) {
         resultfiles[i] = new ofstream(result_filenames[i].c_str());
     }
     
-
     
-/// ALL THINGS LOADED, NOW THE REAL WORK !!! ///
+    // parameters and files loaded, now the real work
     
     cout << "Percent complete: 0" << flush;
     
