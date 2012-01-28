@@ -374,7 +374,7 @@ int main(int argc, char** argv) {
     cout << "Loading core points: " << corefname << endl;
     
     FILE* corepointsfile = fopen(corefname.c_str(), "r");
-    if (!corepointsfile) {std::cerr << "Could not load file: " << corefname << std::endl; return 1;}
+    if (!corepointsfile) {cerr << "Could not load file: " << corefname << endl; return 1;}
     char* line = 0; size_t linelen = 0; int num_read = 0;
     int linenum = 0;
     vector<Point> corepoints;
@@ -388,7 +388,7 @@ int main(int argc, char** argv) {
             if (i<Point::dim) point[i++] = value;
             else break;
         }
-        if (i<3) return help(str(boost::format("Error in the core points file line %d") % (linenum+1)).c_str());
+        if (i<3) {cerr << "Error in the core points file" << corefname << " line " << (linenum+1) << endl; continue;}
         corepoints.push_back(point);
     }
     fclose(corepointsfile);

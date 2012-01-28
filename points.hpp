@@ -36,6 +36,7 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/random/mersenne_twister.hpp>
 
+#include <stdio.h>
 #include <math.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -47,6 +48,10 @@
 #define FLOAT_TYPE float
 #endif
 typedef FLOAT_TYPE FloatType;
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 static const int TargetAveragePointDensityPerGridCell = 10;
 
@@ -243,6 +248,38 @@ inline FloatType fast_atof_next_token(char* &str) {
     // shall never reach this point
     return value*neg;
 }
+
+// argh, not all implementations have the newer getline, simulate it here
+#ifdef DEFINE_GETLINE
+    // implement the spec with minimal compliance for our needs...
+    ssize_t getline(char **lineptr, size_t *n, FILE *stream) {
+        static const int chunck = 80;
+        if (*lineptr==0) {
+            *lineptr = (char*)malloc(chunck);
+            *n = chunck;
+        }
+        int offset = 0;
+        while (true) {
+            int c = fgetc(stream);
+            if (c==EOF) return -1;
+            if (offset>=*n) {
+                *n += chunck;
+                *lineptr = (char*)realloc(*lineptr,*n);
+                if (!*lineptr) return -1; // out of mem, shall set errno...
+            }
+            (*lineptr)[offset++]=(char)c;
+            if (c=='\n') break;
+        }
+        // terminal 0
+        if (offset>=*n) {
+            *n += chunck;
+            *lineptr = (char*)realloc(*lineptr,*n);
+            if (!*lineptr) return -1; // out of mem, shall set errno...
+        }
+        (*lineptr)[offset]=0;
+        return offset;
+    }
+#endif
 
 template<class PointType>
 struct PointCloud {

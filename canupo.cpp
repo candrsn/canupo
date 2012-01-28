@@ -136,31 +136,20 @@ int main(int argc, char** argv) {
     PointCloud<Point> cloud;
     cloud.load_txt(datafilename);
     
-    ifstream corepointsfile(corepointsfilename.c_str());
-    string line;
+    FILE* corepointsfile = fopen(corepointsfilename.c_str(), "r");
     bool use4 = false;
     int linenum = 0;
-    while (corepointsfile && !corepointsfile.eof()) {
-        ++linenum;
-        getline(corepointsfile, line);
-    }
-    corepointsfile.close();
-    // much better to reserve the memory than to let push_back double it!
     vector<Point> corepoints;
-    corepoints.reserve(linenum);
     vector<FloatType> additionalInfo;
-    additionalInfo.reserve(linenum);
-    corepointsfile.open(corepointsfilename.c_str());
-    linenum = 0;
-    while (corepointsfile && !corepointsfile.eof()) {
+    char* line = 0; size_t linelen = 0; int num_read = 0;
+    while ((num_read = getline(&line, &linelen, corepointsfile)) != -1) {
         ++linenum;
-        getline(corepointsfile, line);
-        if (line.empty() || starts_with(line,"#") || starts_with(line,";") || starts_with(line,"!") || starts_with(line,"//")) continue;
-        stringstream linereader(line);
+        if (linelen==0 || line[0]=='#') continue;
         Point point;
-        FloatType value;
+        FloatType value = 0;
         int i = 0;
-        while (linereader >> value) {
+        for (char* x = line; *x!=0;) {
+            value = fast_atof_next_token(x);
             if (i<Point::dim) point[i] = value;
             if (++i==4) break;
         }
@@ -178,6 +167,7 @@ int main(int argc, char** argv) {
         }
         corepoints.push_back(point);
     }
+    fclose(corepointsfile);
     assert(additionalInfo.empty() || additionalInfo.size() == corepoints.size());
 
     ofstream mscfile(mscfilename.c_str(), ofstream::binary);

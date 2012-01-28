@@ -29,6 +29,8 @@
 #include <string.h>
 #include <stdlib.h>
 
+#include "points.hpp"
+
 using namespace std;
 
 int help(const char* msg = 0, int ret = 0) {
@@ -53,7 +55,7 @@ int main(int argc, char** argv) {
 
     vector<Constraint> constraints;
 
-    ifstream input_file(argv[1]);
+    FILE* input_file = fopen(argv[1], "r");
     ofstream output_file(argv[2]);
 
     for (int argi=3; argi<argc; ++argi) {
@@ -74,16 +76,14 @@ int main(int argc, char** argv) {
         }
     }
     
-    string line;
     int linenum = 0;
     int nvalues = -1;
-    while (input_file && !input_file.eof()) {
+    char* line = 0; size_t linelen = 0; int num_read = 0;
+    while ((num_read = getline(&line, &linelen, input_file)) != -1) {
         ++linenum;
-        getline(input_file, line);
-        if (line.empty() || line[0]=='#') continue;
-        stringstream linereader(line);
+        if (linelen==0 || line[0]=='#') continue;
         vector<double> values;
-        for (double value; linereader >> value; ) values.push_back(value);
+        for (char* x = line; *x!=0;) values.push_back(fast_atof_next_token(x));
         bool ok = true;
         for (unsigned int i=0; i<constraints.size(); ++i) {
             if (constraints[i].varnum>=values.size()) {ok = false; break;}

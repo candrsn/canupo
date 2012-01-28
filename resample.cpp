@@ -90,19 +90,19 @@ int main(int argc, char** argv) {
     if (random_mode && !spatial_mode) {
         // random mode: retain lines at random when loading the cloud
         cout << "Sampling data cloud: " << argv[1] << " into " << argv[2] << endl;
-        ifstream datafile(argv[1]);
-        string line;
+        FILE* datafile = fopen(argv[1], "r");
+        if (!datafile) {std::cerr << "Could not load file: " << argv[1] << std::endl; return 1;}
+        char* line = 0; size_t linelen = 0; int num_read = 0;
         long numretained = 0;
         long nlines = 0;
-        while (datafile && !datafile.eof()) {
+        while ((num_read = getline(&line, &linelen, datafile)) != -1) {
             ++nlines;
-            getline(datafile, line);
-            if (line.empty() || starts_with(line,"#") || starts_with(line,";") || starts_with(line,"!") || starts_with(line,"//")) continue;
+            if (linelen==0 || line[0]=='#') continue;
             if (rng() % subsampling_factor >0) continue;
             ++numretained;
-            resultfile << line << endl;
+            resultfile << line;
         }
-        datafile.close();
+        fclose(datafile);
         cout << "Retained " << numretained << " lines out of " << nlines << " (effective sampling ratio 1/" << (double)nlines / (double)numretained << ")" << endl;
         // done!
         return 0;
@@ -163,19 +163,19 @@ int main(int argc, char** argv) {
     sort(retained_lines.begin(), retained_lines.end());
 
     cout << "Writing output file" << endl;
-    ifstream datafile(argv[1]);
-    string line;
+    FILE* datafile = fopen(argv[1], "r");
+    if (!datafile) {std::cerr << "Could not load file: " << argv[1] << std::endl; return 1;}
+    char* line = 0; size_t linelen = 0; int num_read = 0;
     size_t linenum = 0, retained_idx = 0;
-    while (datafile && !datafile.eof()) {
+    while ((num_read = getline(&line, &linelen, datafile)) != -1) {
         ++linenum;
-        getline(datafile, line);
-        if (line.empty() || starts_with(line,"#") || starts_with(line,";") || starts_with(line,"!") || starts_with(line,"//")) continue;
+        if (linelen==0 || line[0]=='#') continue;
         if (linenum==retained_lines[retained_idx]) {
-            resultfile << line << endl;
+            resultfile << line;
             ++retained_idx;
         }
     }
-    datafile.close();
+    fclose(datafile);
 
     cout << "Retained " << retained_idx << " out of " << original_number_of_lines << " initial data points (subsampling ratio = 1/" << (double)original_number_of_lines/(double)retained_idx << ")" << endl;
 
