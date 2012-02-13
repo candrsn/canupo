@@ -229,7 +229,7 @@ int main(int argc, char** argv) {
     // and their diameters required for covering the cylinder shows a minimum
     // Use twice the length as we also look for negative shifts
     int num_cyl_balls = floor(2.*cylinder_length*sqrt(2.)/cylinder_base);
-    double cyl_section_length = cylinder_length/num_cyl_balls; 
+    double cyl_section_length = 2.*cylinder_length/num_cyl_balls; 
     double cyl_ball_radius = 0.5*sqrt(cyl_section_length*cyl_section_length + cylinder_base*cylinder_base);
     double cylinder_base_radius_sq = cylinder_base * cylinder_base * 0.25;
     
@@ -738,7 +738,6 @@ int main(int argc, char** argv) {
                 FloatType mean_dist = 0;
                 FloatType dev_dist = 0;
                 int npts_in_cylinder = 0;
-                
                 // the number of segments includes negative shifts
                 for (int cylsec=0; cylsec<num_cyl_balls; ++cylsec) {
                     
@@ -749,7 +748,7 @@ int main(int argc, char** argv) {
                     FloatType max_dist_along_axis = min_dist_along_axis + cyl_section_length;
                     
                     // find full-res points in the current cylinder section
-                    p1.applyToNeighbors(
+                    ((ref12_idx==0)?p1:p2).applyToNeighbors(
                         // long life to C++11 lambdas !
                         [&](FloatType d2, Point* p) {
                             Point delta = *p - corepoints[ptidx];
