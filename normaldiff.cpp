@@ -717,15 +717,45 @@ int main(int argc, char** argv) {
                 
                 *normal_ref[ref12_idx] += normal;
             }
-
+            
             // once the normal has been added to the bootstrap above,
             // we can freely replace the local iteration value
             // for the options "1", "2", and "m"
-            if (shift_first) normal_bs_2 = normal_bs_1;
-            if (shift_second) normal_bs_1 = normal_bs_2;
+            if (shift_first) {
+                if (normal_bs_1.norm2()==0) {
+                    cout << "Warning: null normal on Cloud 1 and option \"1\" was specified, using normal 2 for core point " << (ptidx+1) << endl;
+                    normal_bs_1 = normal_bs_2;
+                }
+                else normal_bs_2 = normal_bs_1;
+            }
+            if (shift_second) {
+                if (normal_bs_2.norm2()==0) {
+                    cout << "Warning: null normal on Cloud 2 and option \"2\" was specified, using normal 1 for core point " << (ptidx+1) << endl;
+                    normal_bs_2 = normal_bs_1;
+                }
+                else normal_bs_1 = normal_bs_2;
+            }
             if (shift_mean) {
+                if (normal_bs_1.norm2()==0) {
+                    cout << "Warning: null normal on Cloud 1 for core point " << (ptidx+1) << endl;
+                    normal_bs_1 = normal_bs_2;
+                }
+                if (normal_bs_2.norm2()==0) {
+                    cout << "Warning: null normal on Cloud 2 for core point " << (ptidx+1) << endl;
+                    normal_bs_2 = normal_bs_1;
+                }
                 normal_bs_1 = (normal_bs_1 + normal_bs_2) * 0.5;
                 normal_bs_2 = normal_bs_1;
+            }
+            else {
+                if (normal_bs_1.norm2()==0) {
+                    cout << "Warning: null normal on Cloud 1 for core point " << (ptidx+1) << ", setting it to the normal computed on Cloud 2" << endl;
+                    normal_bs_1 = normal_bs_2;
+                }
+                if (normal_bs_2.norm2()==0) {
+                    cout << "Warning: null normal on Cloud 2 for core point " << (ptidx+1) << ", setting it to the normal computed on Cloud 1" << endl;
+                    normal_bs_2 = normal_bs_1;
+                }
             }
                 
             for (int ref12_idx = 0; ref12_idx < 2; ++ref12_idx) {
