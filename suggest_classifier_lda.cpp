@@ -42,6 +42,8 @@
 #include "dlib/matrix.h"
 #include "dlib/svm.h"
 
+#include "pngutil.hpp"
+
 using namespace std;
 
 typedef dlib::matrix<FloatType, 0, 1> sample_type;
@@ -137,29 +139,6 @@ void read_msc_data(ifstream& mscfile, int nscales, int npts, sample_type* data, 
         for (int i=0; i<nscales; ++i) mscfile.read((char*)&foof, sizeof(FloatType));*/
         ++data;
     }
-}
-
-int ppmwrite(cairo_surface_t *surface, const char* filename) {
-    int height = cairo_image_surface_get_height(surface);
-    int width = cairo_image_surface_get_width(surface);
-    int stride = cairo_image_surface_get_stride(surface);
-    unsigned char* data = cairo_image_surface_get_data(surface);
-    ofstream ppmfile(filename);
-    ppmfile << "P3 " << width << " " << height << " " << 255 << endl;
-    for (int row = 0; row<height; ++row) {
-        for (int col = 0; col<width*4; col+=4) {
-            ppmfile << (int)data[col+2] << " " << (int)data[col+1] << " " << (int)data[col+0] << " ";
-        }
-        data += stride;
-    }
-}
-
-cairo_status_t png_copier(void *closure, const unsigned char *data, unsigned int length) {
-    std::vector<char>* pngdata = (std::vector<char>*)closure;
-    int cursize = pngdata->size();
-    pngdata->resize(cursize + length); // use reserve() before, or this will be slow
-    memcpy(&(*pngdata)[cursize], data, length);
-    return CAIRO_STATUS_SUCCESS;
 }
 
 void GramSchmidt(dlib::matrix<dlib::matrix<FloatType,0,1>,0,1>& basis, dlib::matrix<FloatType,0,1>& newX) {
@@ -852,16 +831,20 @@ int main(int argc, char** argv) {
     svgfile << "<!-- params " << &base64commentdata[0] << " -->" << endl;
 #endif
 
-#ifdef CANUPO_NO_PNG
+    
+/*#ifdef CANUPO_NO_PNG
     string filename = argv[arg_shift+1];
     filename.replace(filename.size()-3,3,"ppm");
     ppmwrite(surface,filename.c_str());
     svgfile << "<image xlink:href=\""<< filename << "\" width=\""<<svgSize<<"\" height=\""<<svgSize<<"\" x=\"0\" y=\"0\" style=\"z-index:0\" />" << endl;
 #else
+*/
+
     //cairo_surface_write_to_png (surface, argv[arg_shift+1]);
     std::vector<char> pngdata;
-    pngdata.reserve(800*800*3); // need only large enough init size
-    cairo_surface_write_to_png_stream(surface, png_copier, &pngdata);
+//    pngdata.reserve(800*800*3); // need only large enough init size
+//    cairo_surface_write_to_png_stream(surface, png_copier, &pngdata);
+    surface_to_png(surface, pngdata);
 
     // encode the png data into base64
     std::vector<char> base64pngdata(codec.get_max_encoded_size(pngdata.size()));
@@ -872,7 +855,7 @@ int main(int argc, char** argv) {
     // include the image inline    
     svgfile << "<image xlink:href=\"data:image/png;base64,"<< &base64pngdata[0]
             << "\" width=\""<<svgSize<<"\" height=\""<<svgSize<<"\" x=\"0\" y=\"0\" style=\"z-index:0\" />" << endl;
-#endif
+//#endif
     
     // include the reference points
     svgfile << "<circle cx=\""<< (refpt_pos.x*scaleFactor+halfSvgSize) <<"\" cy=\""<< (halfSvgSize-refpt_pos.y*scaleFactor) <<"\" r=\"2\" style=\"fill:none;stroke:#000000;stroke-width:1px;z-index:1;\" />" << endl;

@@ -711,6 +711,24 @@ namespace dlib
     }
 
 // ----------------------------------------------------------------------------------------
+    template <typename funct>
+    class local_negate_function_object 
+    {
+    public:
+        local_negate_function_object(const funct& f_) : f(f_){}
+
+        template <typename T>
+        double operator()(const T& x) const
+        {
+            return -f(x);
+        }
+
+    private:
+        const funct& f;
+    };
+
+    template <typename funct>
+    const local_negate_function_object<funct> local_negate_function(const funct& f) { return local_negate_function_object<funct>(f); }
 
     template <typename funct>
     double find_max_single_variable (
@@ -729,7 +747,7 @@ namespace dlib
         // invoked through a reference)
         COMPILE_TIME_ASSERT(is_function<funct>::value == false);
 
-        return -find_min_single_variable(negate_function(f), starting_point, begin, end, eps, max_iter);
+        return -find_min_single_variable(local_negate_function(f), starting_point, begin, end, eps, max_iter);
     }
 
 // ----------------------------------------------------------------------------------------

@@ -25,6 +25,7 @@ ifdef static
     CAIRO=-lcairo -lpixman-1 -lpng -lz -lfontconfig -lfreetype -lexpat
     LAPACK=./liblapack.a ./libblas.a -lgfortran
     PACKDIR=canupo_linux_static_64bits
+    CXX=g++-4.6
 endif
 
 ifdef win32
@@ -45,7 +46,9 @@ else
     STRIP=/bin/true
 endif
 
-ALL=canupo$(EXT) density$(EXT) suggest_classifier_svm$(EXT) suggest_classifier_lda$(EXT) msc_tool$(EXT) validate_classifier$(EXT) combine_classifiers$(EXT) classify$(EXT) filter$(EXT) normaldiff$(EXT) resample$(EXT)
+PACKED_CANUPO=canupo$(EXT) density$(EXT) suggest_classifier_svm$(EXT) suggest_classifier_lda$(EXT) msc_tool$(EXT) validate_classifier$(EXT) combine_classifiers$(EXT) classify$(EXT) filter$(EXT) resample$(EXT) prm_info$(EXT)
+
+ALL=$(PACKED_CANUPO) normaldiff$(EXT)
 
 all: $(ALL)
 
@@ -54,7 +57,7 @@ all: $(ALL)
 pack:
 	rm -rf $(PACKDIR)
 	mkdir -p $(PACKDIR)
-	cp $(ALL) README.txt $(PACKDIR)
+	cp $(PACKED_CANUPO) README.txt $(PACKDIR)
 	rm -f $(PACKDIR)$(PACKEXT)
 	$(PACKCMD) $(PACKDIR)$(PACKEXT) $(PACKDIR)
 
@@ -85,6 +88,10 @@ suggest_classifier_lda$(EXT):
 msc_tool$(EXT):
 	$(CXX) $(CXXFLAGS) msc_tool.cpp $(CAIRO) -o msc_tool$(EXT)
 	@$(STRIP) msc_tool$(EXT)
+
+prm_info$(EXT):
+	$(CXX) $(CXXFLAGS) prm_info.cpp -o prm_info$(EXT)
+	@$(STRIP) prm_info$(EXT)
 
 validate_classifier$(EXT):
 	$(CXX) $(CXXFLAGS) validate_classifier.cpp -o validate_classifier$(EXT)

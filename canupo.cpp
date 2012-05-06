@@ -49,9 +49,10 @@ int help(const char* errmsg = 0) {
 cout << "\
 canupo scales... : data.xyz data_core.xyz data_core.msc [flag]\n\
   inputs: scales         # list of scales at which to perform the analysis\n\
-                         # The syntax minscale:increment:maxscale is also accepted\n\
-                         # Use : to indicate the end of the list of scales\n\
                          # A scale correspond to a diameter for neighbor research.\n\
+                         # The syntax minscale:increment:maxscale is accepted.\n\
+                         # Any other non-numeric values is interpreted as a classifier\n\
+                         # parameter file (.prm) from which scales are loaded.\n\
   input: data.xyz        # whole raw point cloud to process\n\
   input: data_core.xyz   # points at which to do the computation. It is not necessary that these\n\
                          # points match entries in data.xyz: This means data_core.xyz need not be\n\
@@ -82,32 +83,48 @@ int main(int argc, char** argv) {
     typedef set<FloatType, greater<FloatType> > ScaleSet;
     ScaleSet scales;
     for (int i=1; i<separator; ++i) {
+        bool tryprm = false;
         // perhaps it has the minscale:increment:maxscale syntax
         char* col1 = strchr(argv[i],':');
         char* col2 = strrchr(argv[i],':');
         if (col1==0 || col2==0 || col1==col2) {
             FloatType scale = atof(argv[i]);
-            if (scale<=0) return help("Invalid scale");
-            scales.insert(scale);
+            if (scale<=0) tryprm = true;
+            else scales.insert(scale);
         } else {
             *col1++=0;
             FloatType minscale = atof(argv[i]);
             *col2++=0;
             FloatType increment = atof(col1);
             FloatType maxscale = atof(col2);
-            if (minscale<=0 || maxscale<=0) return help("Invalid scale range");
-            bool validRange = false;
-            if ((minscale - maxscale) * increment > 0) return help("Invalid range specification");
-            if (minscale<=maxscale) for (FloatType scale = minscale; scale < maxscale*(1-1e-6); scale += increment) {
-                validRange = true;
-                scales.insert(scale);
-            } else for (FloatType scale = minscale; scale > maxscale*(1+1e-6); scale += increment) {
-                validRange = true;
-                scales.insert(scale);
+            if (minscale<=0 || maxscale<=0) tryprm = true;
+            else {
+                bool validRange = false;
+                if ((minscale - maxscale) * increment > 0) return help("Invalid range specification");
+                if (minscale<=maxscale) for (FloatType scale = minscale; scale < maxscale*(1-1e-6); scale += increment) {
+                    validRange = true;
+                    scales.insert(scale);
+                } else for (FloatType scale = minscale; scale > maxscale*(1+1e-6); scale += increment) {
+                    validRange = true;
+                    scales.insert(scale);
+                }
+                // compensate roundoff errors for loop bounds
+                scales.insert(minscale); scales.insert(maxscale);
+                if (!validRange) return help("Invalid range specification");
             }
-            // compensate roundoff errors for loop bounds
-            scales.insert(minscale); scales.insert(maxscale);
-            if (!validRange) return help("Invalid range specification");
+        }
+        
+        if (tryprm) {
+            ifstream classifparamsfile(argv[i], ifstream::binary);
+            int nscales_prm;
+            classifparamsfile.read((char*)&nscales_prm, sizeof(int));
+            if (nscales_prm>10000) return help("Invalid scale and/or prm file");
+            for (int s=0; s<nscales_prm; ++s) {
+                FloatType thescale = -1;
+                classifparamsfile.read((char*)&thescale, sizeof(FloatType));
+                if (thescale<=0) return help("Invalid scale within prm file");
+                scales.insert(thescale);
+            }
         }
     }
     

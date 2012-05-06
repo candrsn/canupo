@@ -40,7 +40,7 @@ int help(const char* errmsg = 0) {
     if (errmsg) cout << "Error: " << errmsg << endl;
 cout << "\
 classify features.prm scene.xyz scene_core.msc scene_annotated.xyz [pok [usage_flag]]\n\
-  input: features.prm         # Features computed by the make_features program\n\
+  input: features.prm         # Classifier parameters computed by validate_classifier\n\
   input: scene.xyz            # Point cloud to classify/annotate with each class\n\
                               # Text file, lines starting with #,!,;,// or with\n\
                               # less than 3 numeric values are ignored\n\
