@@ -1,7 +1,3 @@
-ifndef no_openmp
-    CXXFLAGS+=-fopenmp -lpthread
-endif
-
 ifdef debug
     CXXFLAGS+=-g
 else
@@ -21,11 +17,16 @@ PACKEXT=.tar.gz
 PACKDIR=canupo_linux_static_64bits
 
 ifdef static
-    CXXFLAGS+=-static
-    CAIRO=-lcairo -lpixman-1 -lpng -lz -lfontconfig -lfreetype -lexpat
+    CXXFLAGS+=-static -lpthread
+    CAIRO=-lcairo -lpixman-1 -lpng -lz -lfontconfig -lfreetype -lexpat -lpthread
     LAPACK=./liblapack.a ./libblas.a -lgfortran
     PACKDIR=canupo_linux_static_64bits
     CXX=g++-4.6
+    no_openmp=1
+endif
+
+ifndef no_openmp
+    CXXFLAGS+=-fopenmp -lpthread
 endif
 
 ifdef win32
@@ -58,6 +59,9 @@ pack:
 	rm -rf $(PACKDIR)
 	mkdir -p $(PACKDIR)
 	cp $(PACKED_CANUPO) README.txt $(PACKDIR)
+	mkdir -p $(PACKDIR)/tutorial
+	cp tutorial/floor.xyz tutorial/vegetation.xyz tutorial/scene.xyz $(PACKDIR)/tutorial/
+	inkscape --export-pdf=$(PACKDIR)/tutorial/overview.pdf tutorial/overview.svg
 	rm -f $(PACKDIR)$(PACKEXT)
 	$(PACKCMD) $(PACKDIR)$(PACKEXT) $(PACKDIR)
 
