@@ -120,7 +120,7 @@ int read_msc_header(MSCFile& mscfile, std::vector<FloatType>& scales, int& ptnpa
     }
     vector<FloatType> scales_thisfile(nscales_thisfile);
     for (int si=0; si<nscales_thisfile; ++si) mscfile.read(scales_thisfile[si]);
-    
+
     // all files must be consistant
     if (scales.size() == 0) {
         scales = scales_thisfile;

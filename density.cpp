@@ -86,12 +86,12 @@ string scaleColorMap(const int* density, const vector<FloatType>& lmind, const v
     //     => interpolate in complement space, then take complement again
     static const FloatType classColors[] = {
         0.5f, 0.5f, 0.5f, // unlabeled data
-        1,1,0,  // class 0 = blue complement
-        0,1,1,  // class 1 = red complement
-        1,0,1,  // class 2 = green complement
-        0,1,0,  // class 3 = magenta complement
-        0,0,1,  // class 4 = yellow complement
-        1,0,0  // class 5 = cyan complement
+        1,1,0,  // class 0 = blue inverted
+        0,1,1,  // class 1 = red inverted
+        1,0,1,  // class 2 = green inverted
+        0,1,0,  // class 3 = magenta
+        1,0,0,  // class 4 = cyan
+        0,0,1,  // class 5 = yellow
     };
     int nclasses = lmind.size();
     if (nclasses>6+(int)hasUnlabelled) {
@@ -102,7 +102,7 @@ string scaleColorMap(const int* density, const vector<FloatType>& lmind, const v
     // convert the densities to log space and between 0 and 1 for each class first
     for (int i=0; i<nclasses; ++i) {
         FloatType coef = (log(density[i]+1) - lmind[i]) / (lmaxd[i] - lmind[i]);
-        for (int j=0; j<3; ++j) color[j] += coef * classColors[i*3+j + (1-hasUnlabelled)];
+        for (int j=0; j<3; ++j) color[j] += coef * classColors[(i+(1-hasUnlabelled))*3+j];
     }
     // bound check and take complement
     for (int j=0; j<3; ++j) color[j] = 1 - min(1.0, max((double)color[j], 0.0));
@@ -179,15 +179,6 @@ int main(int argc, char** argv) {
         }
     }
     
-    //if (scalesSet.empty()) return help();
-    vector<FloatType> scales(scalesSet.begin(), scalesSet.end());
-    if (scalesSet.empty()) cout << "Selecting all scales in the multiscale files" << endl;
-    else {
-        cout << "Selected scales:";
-        for (int i=0; i<(int)scales.size(); ++i) cout << " " << scales[i];
-        cout << endl;
-    }
-    
     // Is there another separator and an unlabelled file in between ?
     bool hasUnlabelled = false;
     for (int i=separator+1; i<argc; ++i) if (!strcmp(":",argv[i])) {
@@ -203,6 +194,7 @@ int main(int argc, char** argv) {
 
     cout << "reading file headers" << endl;
     
+    vector<FloatType> scales;
     // read headers and ensures all files are consistent
     for (int argi = separator+1; argi<argc; ++argi) {
         if (!strcmp("-",argv[argi]) || !strcmp(":",argv[argi])) {
@@ -219,9 +211,29 @@ int main(int argc, char** argv) {
     classboundaries.push_back(total_pts);
     
     int nscales = scales.size();
-    
     // number of features
-    int fdim = nscales * 2;
+    int fdim = scales.size() * 2;
+    
+    //if (scalesSet.empty()) return help();
+    if (scalesSet.empty()) {
+        cout << "Selecting all scales in the multiscale files" << endl;
+        scalesSet.insert(scales.begin(), scales.end());
+    }
+    else {
+        // check for consistency
+        for (auto f : scalesSet) {
+            bool is_in_file = false;
+            for (auto s : scales) {
+                if (fpeq(f,s)) {is_in_file = true; break;}
+            }
+            if (!is_in_file) {
+                cout << "Warning: requested scale " << f << " is not present in the multiscale files, ignored" << endl;
+            }
+        }
+        cout << "Selected scales:";
+    }
+    for (int i=0; i<(int)scales.size(); ++i) cout << " " << scales[i];
+    cout << endl;
     
     cout << "reading data in memory" << endl;
     
@@ -232,8 +244,9 @@ int main(int argc, char** argv) {
     for (int argi = separator+1; argi<argc; ++argi) {
         if (!strcmp("-",argv[argi]) || !strcmp(":",argv[argi])) continue;
         MSCFile mscfile(argv[argi]);
+        vector<FloatType> scales_dummy;
         // read the file header again
-        int npts = read_msc_header(mscfile, scales, ptnparams);
+        int npts = read_msc_header(mscfile, scales_dummy, ptnparams);
         // read data
         read_msc_data(mscfile,nscales,npts,&data[base_pt * fdim], ptnparams);
         base_pt += npts;
@@ -270,6 +283,12 @@ int main(int argc, char** argv) {
     
     cout << "outputting result files" << endl;
     for (int si=0; si<nscales; ++si) {
+        bool is_selected = false;
+        for (auto f : scalesSet) {
+            if (fpeq(f,scales[si])) {is_selected = true; break;}
+        }
+        if (!is_selected) continue;
+        
         vector<int> minDensity(nclasses, numeric_limits<int>::max());
         vector<int> maxDensity(nclasses, 0);
     

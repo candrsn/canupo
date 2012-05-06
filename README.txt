@@ -68,6 +68,10 @@ binaries are available at the project home page:
 
 ==== Advanced Usage ====
 
+- The "canupo" program can read the list of scales from a previously generated
+  .prm classifier parameter file. This is especially handy for processing
+  a new scene with classifier that is known to work well on similar scenes.
+
 - Use the "density" program to investigate how the samples and the scene
   look like in the dimensionality space at various scales. This may help you
   select some scales offering a discriminative power, and ignore scales
@@ -102,4 +106,5 @@ binaries are available at the project home page:
 
 
 Nicolas Brodu <nicolas.brodu@numerimoire.net>
-July 2011
+May 2012
+
