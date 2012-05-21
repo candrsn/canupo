@@ -90,7 +90,7 @@ int main(int argc, char** argv) {
             if (values[constraints[i].varnum] < constraints[i].minval) {ok = false; break;}
             if (values[constraints[i].varnum] > constraints[i].maxval) {ok = false; break;}
         }
-        if (ok) output_file << line << endl;
+        if (ok) output_file << line;
     }
     
     return 0;

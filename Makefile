@@ -60,7 +60,7 @@ pack:
 	mkdir -p $(PACKDIR)
 	cp $(PACKED_CANUPO) README.txt $(PACKDIR)
 	mkdir -p $(PACKDIR)/tutorial
-	cp tutorial/floor.xyz tutorial/vegetation.xyz tutorial/scene.xyz $(PACKDIR)/tutorial/
+	cp tutorial/floor.xyz tutorial/vegetation.xyz tutorial/scene.xyz tutorial/tutorial.pdf $(PACKDIR)/tutorial/
 	inkscape --export-pdf=$(PACKDIR)/tutorial/overview.pdf tutorial/overview.svg
 	rm -f $(PACKDIR)$(PACKEXT)
 	$(PACKCMD) $(PACKDIR)$(PACKEXT) $(PACKDIR)
