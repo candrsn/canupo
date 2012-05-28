@@ -90,14 +90,21 @@ normaldiff normal_scale(s) : [cylinder_base : [cylinder_length : ]] p1.xyz[:p1re
                          # both p1 and p2...\n\
   outputs: result.txt[,e1,e2,e3:res2.txt,e4,...]\n\
                          # A file containing as many result lines as core points\n\
-                         # All these results are influenced by the bootstrapping process except\n\
-                         # the scale values that are fixed before the bootstrapping.\n\
                          # Each line contains space separated entries, that can be\n\
                          # specified in order by their names below (ex: c1,diff).\n\
                          # Several output files may be specified separated by ':',\n\
                          # each with their own optional comma separated entry\n\
                          # specifications (see the syntax above)\n\
                          # The default is to use all entries in this order:\n\
+                         # - diff: point cloud difference. \n\
+                         #         value of the signed distance c2 - c1, possibly averaged\n\
+                         #         by the statistical bootstrapping technique.\n\
+                         # - dev1 dev2: standard deviation of the distance between: the points\n\
+                         #              surrounding c1 and c2 at scales sc1 and sc2; and the\n\
+                         #              \"surface\" planes defined by the normals at c1 and c2.\n\
+                         #         This value is possibly averaged by bootstrap.\n\
+                         #              When option \"q\" is activated the interquartile ranges are used instead of standard deviations.\n\
+                         # - shift1 shift2: signed distance the core points were shifted along the normals. This value is possibly averaged by bootstrap.\n\
                          # - c1.x c1.y c1.z: core point coordinates, shifted to surface of p1.\n\
                          #   The surface is defined by a mean position (default) or by a median position (option \"q\").\n\
                          #   Use the format name \"c1\", all three entries are then given.\n\
@@ -106,16 +113,11 @@ normaldiff normal_scale(s) : [cylinder_base : [cylinder_length : ]] p1.xyz[:p1re
                          #   Use the format name \"n1\", all three entries are then given.\n\
                          # - n2.x n2.y n2.z: surface normal vector coordinates for p2\n\
                          # - sn1 sn2: scales at which the normals were computed in p1 and p2\n\
-                         # - dev1 dev2: standard deviation of the distance between: the points\n\
-                         #              surrounding c1 and c2 at scales sc1 and sc2; and the\n\
-                         #              \"surface\" planes defined by the normals at c1 and c2.\n\
-                         #              This can be seen as a quality measure of the plane fitting. When option \"q\" is activated the interquartile ranges are used instead of standard deviations.\n\
-                         # - np1 np2: number of points in these surroundings\n\
-                         # - diff: average value of the signed distance c2 - c1, estimated by\n\
-                         #         the statistical bootstrapping technique. Hence this value is\n\
-                         #         not null when p1=p2, in that case it can be interpreted as\n\
-                         #         a measure of the error made in shifting c to c1/2.\n\
-                         # - diff_dev: deviation of the diff value, estimated by bootstrapping.\n\
+                         # - np1 np2: number of points in the cylinders\n\
+                         # - diff_bsdev: deviation of the diff value, estimated by bootstrapping.\n\
+                         # - shift1_bsdev shift2_bsdev: deviation of the shift values, estimated by bootstrapping.\n\
+                         # - ksi1 ksi2: a shortcut for sn1/dev1 and sn2/dev2\n\
+                         # - n1angle_bs n2angle_bs: average angle (in degrees) between the normals and their mean value during normal bootstrapping. This can be seen as a kind of mean angular deviation around the normal, and is an indicator of how the normal is stable at that point. Requires the \"n\" flag.\n\
   input: opt_flags       # Optional flags. Some may be combined together. Ex: \"hqb\".\n\
                          # Available flags are:\n\
                          #  q: Use the interquartile range and the median instead of standard deviation and mean, in order to define the new core point.\n\
@@ -173,6 +175,27 @@ FloatType interquartile(FloatType* values, int num) {
     return q3 - q1;
 }
 
+vector<uint32_t> randtable;
+int randtableidx = 0;
+static const int rand_table_size = 0x8000; // 32768
+
+void randinit() {
+    randtable.resize(rand_table_size);
+    boost::mt11213b rng;
+    for (uint32_t& x : randtable) x = (uint32_t)rng();
+}
+
+int randint(const int nint) {
+    randtableidx = (randtableidx+1) & 0x7FFF;
+    return randtable[randtableidx] % nint;
+}
+
+void resample(const vector<FloatType>& original, vector<FloatType>& resampled) {
+    const int nint = original.size();
+    for (FloatType& sample : resampled) sample = original[randint(nint)];
+}
+
+/*
 boost::mt11213b rng;
 
 void resample(const vector<FloatType>& original, vector<FloatType>& resampled) {
@@ -181,6 +204,7 @@ void resample(const vector<FloatType>& original, vector<FloatType>& resampled) {
     boost::variate_generator<boost::mt11213b&, boost::uniform_int<int> > randint(rng, int_dist);
     for (FloatType& sample : resampled) sample = original[randint()];
 }
+*/
 
 int main(int argc, char** argv) {
 
@@ -296,8 +320,7 @@ int main(int argc, char** argv) {
     vector<string> result_filenames;
     vector<vector<string> > result_formats;
     
-    const char* all_result_formats[] = {"c1", "c2", "n1", "n2", "sn1", "sn2", "np1", "np2", "shift1", "shift2", "dev1", "dev2", "diff", "diff_bsdev", "shift1_bsdev", "shift2_bsdev", "ksi1", "ksi2", "n1angle_bs", "n2angle_bs"};
-    // TODO: dev on normal direction = quality of normal estimation
+    const char* all_result_formats[] = {"diff", "dev1", "dev2", "shift1", "shift2", "c1", "c2", "n1", "n2", "sn1", "sn2", "np1", "np2", "diff_bsdev", "shift1_bsdev", "shift2_bsdev", "ksi1", "ksi2", "n1angle_bs", "n2angle_bs"};
     const int nresformats = 20;
     bool compute_normal_angles = false, compute_shift_bsdev = false;
     FloatType n1angle_bs = 0, n2angle_bs = 0;
@@ -384,17 +407,20 @@ int main(int argc, char** argv) {
     
     if (num_bootstrap_iter<=0) {
         if (pos_dev>0) return help("e flag is ignored when there is no bootstrap");
-        if (compute_shift_bsdev) return help("Cannot compute the shift bootstrap deviation without bootstrapping, set the b flag.");
+        if (compute_shift_bsdev) cout << "Warning: cannot compute the shift bootstrap deviation without bootstrapping, set the b flag." << endl;
         num_bootstrap_iter = 1;
         pos_dev = 0;
     }
     
     if (num_normal_bootstrap_iter<=0) num_normal_bootstrap_iter = 1;
-    if (compute_normal_angles && (num_normal_bootstrap_iter==1)) return help("Cannot compute the normal angle deviations without bootstraping the normals, set the n flag.");
+    if (compute_normal_angles && (num_normal_bootstrap_iter==1)) cout << "Warning: cannot compute the normal angle deviations without bootstraping the normals, set the n flag." << endl;
     
+    boost::mt11213b rng;
     boost::normal_distribution<FloatType> poserr_dist(0, pos_dev);
     boost::variate_generator<boost::mt11213b&, boost::normal_distribution<FloatType> > poserr_rand(rng, poserr_dist);
 
+    if (num_bootstrap_iter>1 || num_normal_bootstrap_iter>1) randinit();
+    
     cout << "Loading cloud 1: " << p1fname << endl;
     
     PointCloud<Point> p1, p1reduced;
@@ -530,8 +556,10 @@ int main(int argc, char** argv) {
                 else
                     p2reduced.findNeighbors(back_inserter(neighbors_2), corepoints[ptidx], scalesvec[scaleidx] * 0.5);
                 // Sort the neighbors from closest to farthest, so we can process all lower scales easily
-                sort(neighbors_1.begin(), neighbors_1.end());
-                sort(neighbors_2.begin(), neighbors_2.end());
+                if (nscales>1) {
+                    sort(neighbors_1.begin(), neighbors_1.end());
+                    sort(neighbors_2.begin(), neighbors_2.end());
+                }
                 neigh_num_1[scaleidx] = neighbors_1.size();
                 neigh_num_2[scaleidx] = neighbors_2.size();
                 // pre-compute cumulated sums
@@ -697,8 +725,10 @@ int main(int argc, char** argv) {
                 Point avg = 0;
                 vector<FloatType> A(npts_scale0 * 3);
                 //int_dist(rng); // boost 1.47 is so much better :(
+                /*
                 boost::uniform_int<int> int_dist(0, npts_scale0-1);
                 boost::variate_generator<boost::mt11213b&, boost::uniform_int<int> > randint(rng, int_dist);
+                */
                 int normal_sidx = *normal_scale_idx_ref[ref12_idx];
                 int npts_scaleN = 0;
                 FloatType radiussq = scalesvec[normal_sidx] * scalesvec[normal_sidx] * 0.25;
@@ -706,7 +736,8 @@ int main(int argc, char** argv) {
                 for (int i=0; i<npts_scale0; ++i) {
                     Point* pt = neighbors[i].pt;
                     if (num_normal_bootstrap_iter>1) {
-                        int selectedidx = randint();
+                        //int selectedidx = randint();
+                        int selectedidx = randint(npts_scale0);
                         pt = neighbors[selectedidx].pt;
                         // add some gaussian noise with dev specified by the user on each coordinate
                         if (pos_dev>0) {
