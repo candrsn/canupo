@@ -128,16 +128,28 @@ normaldiff normal_scale(s) : [cylinder_base : [cylinder_length : ]] p1.xyz[:p1re
                          #  e: provide the standard deviation of the Error on the point positions\n\
                          #     in p1 and p2 as extra info. This is a parameter provided by the device\n\
                          #     used for measuring p1 and p2. It is incorporated in the bootstrapping.\n\
-                         #  b: Number of bootstrap iterations. 0 (the default) disables\n\
-                         #     bootstrapping: you won't get diff_dev and diff is the sample mean.\n\
-  input: extra_info      # Extra parameters for the \"e\", \"s\" and \"b\" flags, given in\n\
-                         # the same order as these flags were specified.\n\
+                         #  b: Number of bootstrap iterations for the standard deviation around the shifted position of the core points. 0 (the default) disables this bootstrapping\n\
+                         #  n: Number of bootstrap iterations for the estimation of the normals. 0 (the default) disables this bootstrapping. This option is useless when the normal is fixed to be vertical.\n\
+  input: extra_info      # Extra parameters for the \"e\", \"s\", \"b\" and \"n\" flags,\n\
+                         # given in the same order as these flags were specified.\n\
                          # Ex: normaldiff (all other opts) ehb 1e-2 1000\n\
                          # The flags are \"e\", \"h\" and \"b\". \"h\" has no extra parameter.\n\
                          # So, in this order: e=1e-2 and b=1000\n\
 "<<endl;
     if (errmsg) cout << "Error: " << errmsg << endl;
     return 0;
+}
+
+void mean_dev(FloatType* values, int num, FloatType& mean, FloatType& dev) {
+    if (num<1) {mean = dev = numeric_limits<FloatType>::quiet_NaN(); return;}
+    FloatType sum = 0, ssq = 0;
+    for (int i=0; i<num; ++i) {
+        sum += values[i];
+        ssq += values[i] * values[i];
+    }
+    mean = sum / num;
+    if (num>1) dev = sqrt( (ssq - mean*mean*num)/(num-1.0) );
+    else dev = 0;
 }
 
 // median: common definition using mid-point average in the even case
@@ -149,6 +161,25 @@ FloatType median(FloatType* values, int num) {
         med = (med + values[nd2-1]) * 0.5;
     }
     return med;
+}
+// interquartile range
+//   there are several ways to compute it, with no standard
+//   commonly accepted definition. Use that of mathworld
+FloatType interquartile(FloatType* values, int num) {
+    int num_pts_each_half = (num+1)/2;
+    int offset_second_half = num/2;
+    FloatType q1 = median(values, num_pts_each_half);
+    FloatType q3 = median(values + offset_second_half, num_pts_each_half);
+    return q3 - q1;
+}
+
+boost::mt11213b rng;
+
+void resample(const vector<FloatType>& original, vector<FloatType>& resampled) {
+    // resampling with replacement
+    boost::uniform_int<int> int_dist(0, original.size()-1);
+    boost::variate_generator<boost::mt11213b&, boost::uniform_int<int> > randint(rng, int_dist);
+    for (FloatType& sample : resampled) sample = original[randint()];
 }
 
 int main(int argc, char** argv) {
@@ -265,8 +296,11 @@ int main(int argc, char** argv) {
     vector<string> result_filenames;
     vector<vector<string> > result_formats;
     
-    const char* all_result_formats[] = {"c1", "c2", "n1", "n2", "sn1", "sn2", "dev1", "dev2", "np1", "np2", "diff", "diff_dev"};
-    const int nresformats = 12;
+    const char* all_result_formats[] = {"c1", "c2", "n1", "n2", "sn1", "sn2", "np1", "np2", "shift1", "shift2", "dev1", "dev2", "diff", "diff_bsdev", "shift1_bsdev", "shift2_bsdev", "ksi1", "ksi2", "n1angle_bs", "n2angle_bs"};
+    // TODO: dev on normal direction = quality of normal estimation
+    const int nresformats = 20;
+    bool compute_normal_angles = false, compute_shift_bsdev = false;
+    FloatType n1angle_bs = 0, n2angle_bs = 0;
     
     char_separator<char> colsep(":");
     char_separator<char> commasep(",");
@@ -290,6 +324,8 @@ int main(int argc, char** argv) {
             }
             if (!found) return help(("Invalid result file format: "+format).c_str());
             formats.push_back(format);
+            if (format=="n1angle_bs" || format=="n2angle_bs") compute_normal_angles = true;
+            if (format=="shift1_bsdev" || format=="shift2_bsdev") compute_shift_bsdev = true;
         }
         // default is to output all fields
         if (formats.empty()) {
@@ -306,7 +342,7 @@ int main(int argc, char** argv) {
     bool shift_mean = false;
     double pos_dev = 0;
     double max_core_shift_distance = numeric_limits<double>::max();
-    int num_bootstrap_iter = 1;
+    int num_bootstrap_iter = 1, num_normal_bootstrap_iter = 1;
 //    Point systematic_error(0,0,0);
     
     if (argc>separator+6) {
@@ -325,6 +361,9 @@ int main(int argc, char** argv) {
                 case 'b': if (++extra_info_idx<argc) {
                     num_bootstrap_iter = atoi(argv[extra_info_idx]); break;
                 } else return help("Missing value for the b flag");
+                case 'n': if (++extra_info_idx<argc) {
+                    num_normal_bootstrap_iter = atoi(argv[extra_info_idx]); break;
+                } else return help("Missing value for the n flag");
 /*                case 's': if (extra_info_idx+3<argc) {
                     systematic_error.x = atof(argv[++extra_info_idx]);
                     systematic_error.y = atof(argv[++extra_info_idx]);
@@ -344,14 +383,17 @@ int main(int argc, char** argv) {
     if (force_horizontal && force_vertical) return help("Cannot force normals to be both horizontal and vertical!");
     
     if (num_bootstrap_iter<=0) {
-        if (pos_dev>0) cout << "Warning: e flag is ignored when there is no bootstrap" << endl;
+        if (pos_dev>0) return help("e flag is ignored when there is no bootstrap");
+        if (compute_shift_bsdev) return help("Cannot compute the shift bootstrap deviation without bootstrapping, set the b flag.");
         num_bootstrap_iter = 1;
         pos_dev = 0;
     }
     
-    boost::mt19937 rng;
+    if (num_normal_bootstrap_iter<=0) num_normal_bootstrap_iter = 1;
+    if (compute_normal_angles && (num_normal_bootstrap_iter==1)) return help("Cannot compute the normal angle deviations without bootstraping the normals, set the n flag.");
+    
     boost::normal_distribution<FloatType> poserr_dist(0, pos_dev);
-    boost::variate_generator<boost::mt19937&, boost::normal_distribution<FloatType> > poserr_rand(rng, poserr_dist);
+    boost::variate_generator<boost::mt11213b&, boost::normal_distribution<FloatType> > poserr_rand(rng, poserr_dist);
 
     cout << "Loading cloud 1: " << p1fname << endl;
     
@@ -359,7 +401,10 @@ int main(int argc, char** argv) {
     p1.load_txt(p1fname);
     if (!p1reducedfname.empty()) {
         cout << "Loading subsampled cloud 1: " << p1reducedfname << endl;
-        p1reduced.load_txt(p1reducedfname);
+        if (p1reduced.load_txt(p1reducedfname)==0) {
+            cout << "Bad or empty subsampled cloud 1: " << p1reducedfname << endl;
+            return -1;
+        }
     }
     
     cout << "Loading cloud 2: " << p2fname << endl;
@@ -368,7 +413,10 @@ int main(int argc, char** argv) {
     p2.load_txt(p2fname);
     if (!p2reducedfname.empty()) {
         cout << "Loading subsampled cloud 2: " << p2reducedfname << endl;
-        p2reduced.load_txt(p2reducedfname);
+        if (p2reduced.load_txt(p2reducedfname)==0) {
+            cout << "Bad or empty subsampled cloud 2: " << p2reducedfname << endl;
+            return -1;
+        }
     }
         
     cout << "Loading core points: " << corefname << endl;
@@ -528,59 +576,62 @@ int main(int argc, char** argv) {
         // The most planar scale is only computed once if needed
         // bootstrapping is then done on that scale for the normal computations
         int normal_scale_idx_1 = 0, normal_scale_idx_2 = 0;
-        FloatType svalues[3];
-        // avoid code dup below
-        // but some dup in bootstrapping as I'm lazy to get rid of it
-        int* normal_scale_idx_ref[2] = {&normal_scale_idx_1, &normal_scale_idx_2};
-        vector<DistPoint<Point> >* neighbors_ref[2] = {&neighbors_1, &neighbors_2};
-        vector<int>* neigh_num_ref[2] = {&neigh_num_1, &neigh_num_2};
-        vector<Point>* neighsums_ref[2] = {&neighsums_1, &neighsums_2};
-        // loop on both pt sets
-        for (int ref12_idx = 0; ref12_idx < 2; ++ref12_idx) {
-            vector<DistPoint<Point> >& neighbors = *neighbors_ref[ref12_idx];
-            FloatType maxbarycoord = -numeric_limits<FloatType>::max();
-            for (int sidx=0; sidx<nscales; ++sidx) {
-                int npts = (*neigh_num_ref[ref12_idx])[sidx];
-                if (npts>=3) {
-                    // use the pre-computed sums to get the average point
-                    Point avg = (*neighsums_ref[ref12_idx])[npts-1] / npts;
-                    // compute PCA on the neighbors at this scale
-                    // a copy is needed as LAPACK destroys the matrix, and the center changes anyway
-                    // => cannot keep the points from one scale to the lower, need to rebuild the matrix
-                    vector<FloatType> A(npts * 3);
-                    for (int i=0; i<npts; ++i) {
-                        // A is column-major
-                        A[i] = neighbors[i].pt->x - avg.x;
-                        A[i+npts] = neighbors[i].pt->y - avg.y;
-                        A[i+npts*2] = neighbors[i].pt->z - avg.z;
-                    }
-                    svd(npts, 3, &A[0], &svalues[0]);
-                    // The most 2D scale. For the criterion for how "2D" a scale is, see canupo
-                    // Ideally first and second eigenvalue are equal
-                    // convert to percent variance explained by each dim
-                    FloatType totalvar = 0;
-                    for (int i=0; i<3; ++i) {
-                        // singular values are squared roots of eigenvalues
-                        svalues[i] = svalues[i] * svalues[i]; // / (neighbors.size() - 1);
-                        totalvar += svalues[i];
-                    }
-                    for (int i=0; i<3; ++i) svalues[i] /= totalvar;
-                    // ideally, 2D means first and second entries are both 1/2 and third is 0
-                    // convert to barycentric coordinates and take the coefficient of the 2D
-                    // corner as a quality measure.
-                    // Use barycentric coordinates : a for 1D, b for 2D and c for 3D
-                    // Formula on wikipedia page for barycentric coordinates
-                    // using directly the triangle in %variance space, they simplify a lot
-                    //FloatType c = 1 - a - b; // they sum to 1
-                    // a = svalues[0] - svalues[1];
-                    FloatType b = 2 * svalues[0] + 4 * svalues[1] - 2;
-                    if (b > maxbarycoord) {
-                        maxbarycoord = b;
-                        *normal_scale_idx_ref[ref12_idx] = sidx;
-                    }
-                }                    
-            }
-        } //ref12 loop
+        
+        if (nscales>1) {
+            FloatType svalues[3];
+            // avoid code dup below
+            // but some dup in bootstrapping as I'm lazy to get rid of it
+            int* normal_scale_idx_ref[2] = {&normal_scale_idx_1, &normal_scale_idx_2};
+            vector<DistPoint<Point> >* neighbors_ref[2] = {&neighbors_1, &neighbors_2};
+            vector<int>* neigh_num_ref[2] = {&neigh_num_1, &neigh_num_2};
+            vector<Point>* neighsums_ref[2] = {&neighsums_1, &neighsums_2};
+            // loop on both pt sets
+            for (int ref12_idx = 0; ref12_idx < 2; ++ref12_idx) {
+                vector<DistPoint<Point> >& neighbors = *neighbors_ref[ref12_idx];
+                FloatType maxbarycoord = -numeric_limits<FloatType>::max();
+                for (int sidx=0; sidx<nscales; ++sidx) {
+                    int npts = (*neigh_num_ref[ref12_idx])[sidx];
+                    if (npts>=3) {
+                        // use the pre-computed sums to get the average point
+                        Point avg = (*neighsums_ref[ref12_idx])[npts-1] / npts;
+                        // compute PCA on the neighbors at this scale
+                        // a copy is needed as LAPACK destroys the matrix, and the center changes anyway
+                        // => cannot keep the points from one scale to the lower, need to rebuild the matrix
+                        vector<FloatType> A(npts * 3);
+                        for (int i=0; i<npts; ++i) {
+                            // A is column-major
+                            A[i] = neighbors[i].pt->x - avg.x;
+                            A[i+npts] = neighbors[i].pt->y - avg.y;
+                            A[i+npts*2] = neighbors[i].pt->z - avg.z;
+                        }
+                        svd(npts, 3, &A[0], &svalues[0]);
+                        // The most 2D scale. For the criterion for how "2D" a scale is, see canupo
+                        // Ideally first and second eigenvalue are equal
+                        // convert to percent variance explained by each dim
+                        FloatType totalvar = 0;
+                        for (int i=0; i<3; ++i) {
+                            // singular values are squared roots of eigenvalues
+                            svalues[i] = svalues[i] * svalues[i]; // / (neighbors.size() - 1);
+                            totalvar += svalues[i];
+                        }
+                        for (int i=0; i<3; ++i) svalues[i] /= totalvar;
+                        // ideally, 2D means first and second entries are both 1/2 and third is 0
+                        // convert to barycentric coordinates and take the coefficient of the 2D
+                        // corner as a quality measure.
+                        // Use barycentric coordinates : a for 1D, b for 2D and c for 3D
+                        // Formula on wikipedia page for barycentric coordinates
+                        // using directly the triangle in %variance space, they simplify a lot
+                        //FloatType c = 1 - a - b; // they sum to 1
+                        // a = svalues[0] - svalues[1];
+                        FloatType b = 2 * svalues[0] + 4 * svalues[1] - 2;
+                        if (b > maxbarycoord) {
+                            maxbarycoord = b;
+                            *normal_scale_idx_ref[ref12_idx] = sidx;
+                        }
+                    }                    
+                }
+            } //ref12 loop
+        }
 
         // closest ref point is also shared for all bootstrap iterations for efficiency
         // non-empty set => valid index
@@ -600,17 +651,19 @@ int main(int argc, char** argv) {
         deltaref.normalize();
             
         Point normal_1, normal_2;
-        Point core_shift_1, core_shift_2;
-        FloatType plane_dev_1 = 0, plane_dev_2 = 0;
-        FloatType plane_nump_1 = 0, plane_nump_2 = 0;
-        double diff = 0, diff_dev = 0;
+        
+        vector<Point> *normal_bs_sample1 = 0;
+        vector<Point> *normal_bs_sample2 = 0;
+        if (compute_normal_angles) {
+            normal_bs_sample1 = new vector<Point>(num_normal_bootstrap_iter);
+            normal_bs_sample2 = new vector<Point>(num_normal_bootstrap_iter);
+        }
 
         // We have all core point neighbors at all scales in each data set
         // and the correct scales for the computation
         // Now bootstrapping...
-        for (int bootstrap_iter = 0; bootstrap_iter < num_bootstrap_iter; ++bootstrap_iter) {
+        for (int n_bootstrap_iter = 0; n_bootstrap_iter < num_normal_bootstrap_iter; ++n_bootstrap_iter) {
             
-            Point core_shift_bs_1, core_shift_bs_2;
             Point normal_bs_1, normal_bs_2;
             int npts_scale0_bs_1, npts_scale0_bs_2;
             
@@ -623,104 +676,98 @@ int main(int argc, char** argv) {
             int* normal_scale_idx_ref[2] = {&normal_scale_idx_1, &normal_scale_idx_2};
             Point* normal_ref[2] = {&normal_1, &normal_2};
             Point* normal_bs_ref[2] = {&normal_bs_1, &normal_bs_2};
-            Point* core_shift_ref[2] = {&core_shift_1, &core_shift_2};
-            Point* core_shift_bs_ref[2] = {&core_shift_bs_1, &core_shift_bs_2};
-            FloatType* plane_dev_ref[2] = {&plane_dev_1, &plane_dev_2};
-            FloatType* plane_nump_ref[2] = {&plane_nump_1, &plane_nump_2};
             vector<DistPoint<Point> >* neighbors_ref[2] = {&neighbors_1, &neighbors_2};
             vector<int>* neigh_num_ref[2] = {&neigh_num_1, &neigh_num_2};
             vector<Point>* resampled_neighbors_ref[2] = {&resampled_neighbors_1, &resampled_neighbors_2};
+            
             // loop on both pt sets
             for (int ref12_idx = 0; ref12_idx < 2; ++ref12_idx) {
+                Point& normal = *normal_bs_ref[ref12_idx];
+                // vertical normals need none of the SVD business
+                if (force_vertical) {
+                    normal.z = (deltaref.z<0) ? -1 : 1;
+                    continue;                    
+                }
+
                 vector<DistPoint<Point> >& neighbors = *neighbors_ref[ref12_idx];
-                vector<Point>& resampled_neighbors = *resampled_neighbors_ref[ref12_idx];
                 int& npts_scale0 = *npts_scale0_bs_ref[ref12_idx];
-                npts_scale0 = (*neigh_num_ref[ref12_idx])[0]; // ensured >=3 at this point
-                resampled_neighbors.resize(npts_scale0);
-                if (npts_scale0==0) continue;
+                npts_scale0 = (*neigh_num_ref[ref12_idx])[0];
+                //if (npts_scale0==0) continue; // ensured >=3 at this point
                 // resampling with replacement
                 Point avg = 0;
                 vector<FloatType> A(npts_scale0 * 3);
+                //int_dist(rng); // boost 1.47 is so much better :(
                 boost::uniform_int<int> int_dist(0, npts_scale0-1);
-                boost::variate_generator<boost::mt19937&, boost::uniform_int<int> > randint(rng, int_dist);
+                boost::variate_generator<boost::mt11213b&, boost::uniform_int<int> > randint(rng, int_dist);
                 int normal_sidx = *normal_scale_idx_ref[ref12_idx];
                 int npts_scaleN = 0;
                 FloatType radiussq = scalesvec[normal_sidx] * scalesvec[normal_sidx] * 0.25;
-                
+                Point bspt;
                 for (int i=0; i<npts_scale0; ++i) {
-                    //int_dist(rng); // boost 1.47 is so much better :(
-                    int selected_idx = randint();
-                    // actually no boostrap => keep the original points
-                    if (num_bootstrap_iter==1) selected_idx = i;
-                    resampled_neighbors[i] = *neighbors[selected_idx].pt;
-                    // add some gaussian noise with dev specified by the user on each coordinate
-                    if (pos_dev>0) {
-                        resampled_neighbors[i].x += poserr_rand(); //poserr_dist(rng);
-                        resampled_neighbors[i].y += poserr_rand();
-                        resampled_neighbors[i].z += poserr_rand();
+                    Point* pt = neighbors[i].pt;
+                    if (num_normal_bootstrap_iter>1) {
+                        int selectedidx = randint();
+                        pt = neighbors[selectedidx].pt;
+                        // add some gaussian noise with dev specified by the user on each coordinate
+                        if (pos_dev>0) {
+                            bspt = *pt;
+                            bspt.x += poserr_rand(); //poserr_dist(rng);
+                            bspt.y += poserr_rand();
+                            bspt.z += poserr_rand();
+                            pt = &bspt;
+                        }
                     }
-                    if (force_vertical) continue;
                     // filter only the points within normal scale for the normal
                     // computation below
-                    if ((corepoints[ptidx] - resampled_neighbors[i]).norm2()>=radiussq) continue;
+                    if ((corepoints[ptidx] - *pt).norm2()>=radiussq) continue;
                     ++npts_scaleN;
-                    avg += resampled_neighbors[i];
-                    A[i] = resampled_neighbors[i].x;
-                    A[i+npts_scale0] = resampled_neighbors[i].y;
-                    A[i+npts_scale0*2] = resampled_neighbors[i].z;
+                    avg += *pt;
+                    A[i] = pt->x;
+                    A[i+npts_scale0] = pt->y;
+                    A[i+npts_scale0*2] = pt->z;
                 }
-            
-                Point& normal = *normal_bs_ref[ref12_idx];
                 
-                // vertical normals need none of the SVD business
-                if (force_vertical) normal.z = 1;
-                else {
-                    // need to reshape A, colomn-major for Fortran :(
-                    if (npts_scaleN<npts_scale0) {
-                        for (int i=0; i<npts_scaleN; ++i) A[i+npts_scaleN] = A[i+npts_scale0];
-                        for (int i=0; i<npts_scaleN; ++i) A[i+npts_scaleN*2] = A[i+npts_scale0*2];
-                    }
-                    // now finish the averaging
-                    avg /= npts_scaleN;
-                    for (int i=0; i<npts_scaleN; ++i) {
-                        A[i] -= avg.x;
-                        A[i+npts_scaleN] -= avg.y;
-                        A[i+npts_scaleN*2] -= avg.z;
-                    }
-                    if (force_horizontal) {
-                        if (npts_scaleN<2 && bootstrap_iter==0) {
-                            cout << "Warning: Invalid core point / data file / scale combination: less than 2 points at max scale for core point " << (ptidx+1) << " in data set " << ref12_idx+1 << endl;
-                        } else {
-                            // column-wise A: no need to reshape so as to skip z
-                            // SVD decomposition handled by LAPACK
-                            svd(npts_scaleN, 2, &A[0], &svalues[0], false, &eigenvectors[0]);
-                            // The total least squares solution in the horizontal plane
-                            // is given by the singular vector with minimal singular value
-                            int mins = 0; if (svalues[1]<svalues[0]) mins = 1;
-                            normal = Point(eigenvectors[mins], eigenvectors[2+mins], 0);
-                        }
+                // need to reshape A, colomn-major for Fortran :(
+                if (npts_scaleN<npts_scale0) {
+                    for (int i=0; i<npts_scaleN; ++i) A[i+npts_scaleN] = A[i+npts_scale0];
+                    for (int i=0; i<npts_scaleN; ++i) A[i+npts_scaleN*2] = A[i+npts_scale0*2];
+                }
+                // now finish the averaging
+                avg /= npts_scaleN;
+                for (int i=0; i<npts_scaleN; ++i) {
+                    A[i] -= avg.x;
+                    A[i+npts_scaleN] -= avg.y;
+                    A[i+npts_scaleN*2] -= avg.z;
+                }
+                if (force_horizontal) {
+                    if (npts_scaleN<2 && n_bootstrap_iter==0) {
+                        cout << "Warning: Invalid core point / data file / scale combination: less than 2 points at max scale for core point " << (ptidx+1) << " in data set " << ref12_idx+1 << endl;
                     } else {
-                        if (npts_scaleN<3 && bootstrap_iter==0) {
-                            cout << "Warning: Invalid core point / data file / scale combination: less than 3 points at max scale for core point " << (ptidx+1) << " in data set " << ref12_idx+1 << endl;
-                        } else {
-                            svd(npts_scaleN, 3, &A[0], &svalues[0], false, &eigenvectors[0]);
-                            // column-major matrix, eigenvectors as rows
-                            Point e1(eigenvectors[0], eigenvectors[3], eigenvectors[6]);
-                            Point e2(eigenvectors[1], eigenvectors[4], eigenvectors[7]);
-                            normal = e1.cross(e2);
-                        }
+                        // column-wise A: no need to reshape so as to skip z
+                        // SVD decomposition handled by LAPACK
+                        svd(npts_scaleN, 2, &A[0], &svalues[0], false, &eigenvectors[0]);
+                        // The total least squares solution in the horizontal plane
+                        // is given by the singular vector with minimal singular value
+                        int mins = 0; if (svalues[1]<svalues[0]) mins = 1;
+                        normal = Point(eigenvectors[mins], eigenvectors[2+mins], 0);
+                    }
+                } else {
+                    if (npts_scaleN<3 && n_bootstrap_iter==0) {
+                        cout << "Warning: Invalid core point / data file / scale combination: less than 3 points at max scale for core point " << (ptidx+1) << " in data set " << ref12_idx+1 << endl;
+                    } else {
+                        svd(npts_scaleN, 3, &A[0], &svalues[0], false, &eigenvectors[0]);
+                        // column-major matrix, eigenvectors as rows
+                        Point e1(eigenvectors[0], eigenvectors[3], eigenvectors[6]);
+                        Point e2(eigenvectors[1], eigenvectors[4], eigenvectors[7]);
+                        normal = e1.cross(e2);
                     }
                 }
                 
                 // normal orientation... simple with external help
                 if (normal.dot(deltaref)<0) normal *= -1;
-                
-                *normal_ref[ref12_idx] += normal;
             }
             
-            // once the normal has been added to the bootstrap above,
-            // we can freely replace the local iteration value
-            // for the options "1", "2", and "m"
+            // replace the local iteration value for the options "1", "2", and "m"
             if (shift_first) {
                 if (normal_bs_1.norm2()==0) {
                     cout << "Warning: null normal on Cloud 1 and option \"1\" was specified, using normal 2 for core point " << (ptidx+1) << endl;
@@ -758,109 +805,145 @@ int main(int argc, char** argv) {
                 }
             }
                 
-            for (int ref12_idx = 0; ref12_idx < 2; ++ref12_idx) {
-                Point& normal = *normal_bs_ref[ref12_idx];
-
-                // cylinder is split in segments using small balls, covering up the whole length
-                // for median computations, if any
-                vector<FloatType> all_dists_along_axis;
-                // mean/dev
-                FloatType mean_dist = 0;
-                FloatType dev_dist = 0;
-                int npts_in_cylinder = 0;
-                // the number of segments includes negative shifts
-                for (int cylsec=0; cylsec<num_cyl_balls; ++cylsec) {
-                    
-                    // first segment center starts at +0.5 from min neg shift
-                    Point base_segment_center = corepoints[ptidx] + (cyl_section_length*0.5-cylinder_length) * normal;
-
-                    FloatType min_dist_along_axis = cylsec * cyl_section_length - cylinder_length;
-                    FloatType max_dist_along_axis = min_dist_along_axis + cyl_section_length;
-                    
-                    // find full-res points in the current cylinder section
-                    ((ref12_idx==0)?p1:p2).applyToNeighbors(
-                        // long life to C++11 lambdas !
-                        [&](FloatType d2, Point* p) {
-                            Point delta = *p - corepoints[ptidx];
-                            FloatType dist_along_axis = delta.dot(normal);
-                            FloatType dist_to_axis_sq = (delta - dist_along_axis * normal).norm2();
-                            // check the point is in this cylinder section
-                            if (dist_to_axis_sq>cylinder_base_radius_sq) return;
-                            if (dist_along_axis<min_dist_along_axis) return;
-                            if (dist_along_axis>=max_dist_along_axis) return;
-                            if (use_median) all_dists_along_axis.push_back(dist_along_axis);
-                            else {
-                                mean_dist += dist_along_axis;
-                                dev_dist += dist_along_axis * dist_along_axis;
-                                ++npts_in_cylinder;
-                            }
-                        },
-                        base_segment_center + (cylsec * cyl_section_length) * normal,
-                        cyl_ball_radius
-                    );
-                }
-                
-                // process average / median
-                FloatType avgd = 0, devd = 0;
-                if (use_median) {
-                    sort(all_dists_along_axis.begin(), all_dists_along_axis.end());
-                    // median instead of average
-                    npts_in_cylinder = all_dists_along_axis.size();
-                    avgd = median(&all_dists_along_axis[0], npts_in_cylinder);
-                    // interquartile range
-                    //   there are several ways to compute it, with no standard
-                    //   commonly accepted definition. Use that of mathworld
-                    int num_pts_each_half = (npts_in_cylinder+1)/2;
-                    int offset_second_half = npts_in_cylinder/2;
-                    FloatType q1 = median(&all_dists_along_axis[0], num_pts_each_half);
-                    FloatType q3 = median(&all_dists_along_axis[offset_second_half], num_pts_each_half);
-                    devd = q3 - q1;
-                } else {
-                    // standard mean / std dev
-                    if (npts_in_cylinder>0) avgd = mean_dist / npts_in_cylinder;
-                    if (npts_in_cylinder>1) devd = sqrt( (dev_dist - avgd*avgd*npts_in_cylinder)/(npts_in_cylinder-1.0) );
-                }
-                
-                *core_shift_bs_ref[ref12_idx] = normal * avgd;
-                *core_shift_ref[ref12_idx] += normal * avgd;
-                *plane_dev_ref[ref12_idx] += devd;
-                *plane_nump_ref[ref12_idx] += npts_in_cylinder;
-            }
+            // bootstrap mean normal
+            normal_1 += normal_bs_1;
+            normal_2 += normal_bs_2;
             
-            // also bootstrap the diff
-            // in each bootstrap: deltavec = (core+shift2) - (core+shift1) = shift2 - shift1;
-            // after bootstrap: avg deltavec = avg shift 2 - avg shift 1
-            // BUT avg deltavec.norm() != norm avg deltavec
-            // => we want avg deltavec.norm() as the "diff" result
-            // and the dev of that as well after bootstrap
-            // AND we also want the average shifted core points
-            // but these can be recovered from the avg shifts after bootstrap
-            Point core_shift_diff = core_shift_bs_2 - core_shift_bs_1;
-            FloatType deltanorm = core_shift_diff.norm();
-            // signed distance according to the normal direction
-            if (core_shift_diff.dot(normal_bs_1+normal_bs_2)<0) deltanorm *= -1;
-            diff += deltanorm;
-            diff_dev += deltanorm * deltanorm;
+            if (compute_normal_angles) {
+                (*normal_bs_sample1)[n_bootstrap_iter] = normal_bs_1;
+                (*normal_bs_sample2)[n_bootstrap_iter] = normal_bs_2;
+            }
         }
-        
-        core_shift_1 /= num_bootstrap_iter;
-        core_shift_2 /= num_bootstrap_iter;
         
         normal_1.normalize();
         normal_2.normalize();
+
+        // angles between normals and bs mean = a kind of directional deviation...
+        // ... and a way to detect bad normals
+        if (compute_normal_angles) {
+            FloatType dprod1 = 0, dprod2 = 0;
+            for (int n_bootstrap_iter = 0; n_bootstrap_iter < num_normal_bootstrap_iter; ++n_bootstrap_iter) {
+                dprod1 += (*normal_bs_sample1)[n_bootstrap_iter].dot(normal_1);
+                dprod2 += (*normal_bs_sample2)[n_bootstrap_iter].dot(normal_2);
+            }
+            n1angle_bs = acos(dprod1 / num_normal_bootstrap_iter) * 180 / M_PI;
+            n2angle_bs = acos(dprod2 / num_normal_bootstrap_iter) * 180 / M_PI;
+            delete normal_bs_sample1;
+            delete normal_bs_sample2;
+        }
         
-        plane_dev_1 /= num_bootstrap_iter;
-        plane_dev_2 /= num_bootstrap_iter;
+        /// estimate the diff separately from the normals
+        /// First get all points in the cylinder
+        /// then bootstrap to estimate the variance around the core shift distance
+        vector<FloatType> distances_along_axis_1;
+        vector<FloatType> distances_along_axis_2;
+        Point* normal_ref[2] = {&normal_1, &normal_2};
+        vector<FloatType>* distances_along_axis_ref[2] = {&distances_along_axis_1, &distances_along_axis_2};
         
-        plane_nump_1 /= num_bootstrap_iter;
-        plane_nump_2 /= num_bootstrap_iter;
+        for (int ref12_idx = 0; ref12_idx < 2; ++ref12_idx) {
+            Point& normal = *normal_ref[ref12_idx];
+            vector<FloatType>& distances_along_axis = *distances_along_axis_ref[ref12_idx];
+
+            // the number of segments includes negative shifts
+            for (int cylsec=0; cylsec<num_cyl_balls; ++cylsec) {
+                
+                // first segment center starts at +0.5 from min neg shift
+                Point base_segment_center = corepoints[ptidx] + (cyl_section_length*0.5-cylinder_length) * normal;
+
+                FloatType min_dist_along_axis = cylsec * cyl_section_length - cylinder_length;
+                FloatType max_dist_along_axis = min_dist_along_axis + cyl_section_length;
+                
+                // find full-res points in the current cylinder section
+                ((ref12_idx==0)?p1:p2).applyToNeighbors(
+                    // long life to C++11 lambdas !
+                    [&](FloatType d2, Point* p) {
+                        Point delta = *p - corepoints[ptidx];
+                        FloatType dist_along_axis = delta.dot(normal);
+                        FloatType dist_to_axis_sq = (delta - dist_along_axis * normal).norm2();
+                        // check the point is in this cylinder section
+                        if (dist_to_axis_sq>cylinder_base_radius_sq) return;
+                        if (dist_along_axis<min_dist_along_axis) return;
+                        if (dist_along_axis>=max_dist_along_axis) return;
+                        distances_along_axis.push_back(dist_along_axis);
+                    },
+                    base_segment_center + (cylsec * cyl_section_length) * normal,
+                    cyl_ball_radius
+                );
+            }
+        }
         
+        // prepare bootstrap for processing average / median.
+        
+        vector<FloatType>* daa1;
+        vector<FloatType>* daa2;
+        if (num_bootstrap_iter==1) {
+            daa1 = &distances_along_axis_1;
+            daa2 = &distances_along_axis_2;
+        } else {
+            daa1 = new vector<FloatType>(distances_along_axis_1.size());
+            daa2 = new vector<FloatType>(distances_along_axis_2.size());
+        }
+        
+        FloatType c1shift = 0, c2shift = 0;
+        FloatType c1shift_bsdev = 0, c2shift_bsdev = 0;
+        FloatType c1dev = 0, c2dev = 0;
+        FloatType diff = 0, diff_bsdev = 0;
+        for (int bootstrap_iter = 0; bootstrap_iter < num_bootstrap_iter; ++bootstrap_iter) {
+            // resample the distances vectors
+            if (num_bootstrap_iter>1) {
+                resample(distances_along_axis_1, *daa1);
+                resample(distances_along_axis_2, *daa2);
+            }
+            FloatType avgd1, avgd2, devd1, devd2;
+            if (use_median) {
+                sort(distances_along_axis_1.begin(), distances_along_axis_1.end());
+                sort(distances_along_axis_2.begin(), distances_along_axis_2.end());
+                avgd1 = median(&(*daa1)[0], daa1->size());
+                avgd2 = median(&(*daa2)[0], daa2->size());
+                devd1 = interquartile(&(*daa1)[0], daa1->size());
+                devd2 = interquartile(&(*daa2)[0], daa2->size());
+            } else {
+                mean_dev(&(*daa1)[0], daa1->size(), avgd1, devd1);
+                mean_dev(&(*daa2)[0], daa2->size(), avgd2, devd2);
+            }
+            
+            c1shift += avgd1;
+            c1shift_bsdev += avgd1 * avgd1; // for bootstrap distribution dev
+            c1dev += devd1;
+            c2shift += avgd2;
+            c2shift_bsdev += avgd2 * avgd2;
+            c2dev += devd2;
+            
+            Point core_shift_diff = avgd2 * normal_2 - avgd1 * normal_1;
+            FloatType deltanorm = core_shift_diff.norm();
+            // signed distance according to the normal direction
+            if (core_shift_diff.dot(normal_1+normal_2)<0) deltanorm *= -1;
+            diff += deltanorm;
+            diff_bsdev += deltanorm * deltanorm;
+        }
+            
+        if (num_bootstrap_iter>1) {delete daa1; delete daa2;}
+        
+        // finish bootstrap stats
+        c1shift /= num_bootstrap_iter;
+        c1dev /= num_bootstrap_iter;
+        c2shift /= num_bootstrap_iter;
+        c2dev /= num_bootstrap_iter;
         diff /= num_bootstrap_iter;
-        if (num_bootstrap_iter>1) diff_dev = sqrt( (diff_dev - diff*diff*num_bootstrap_iter)/(num_bootstrap_iter-1.0) );
-        else diff_dev = 0;
         
-        Point core1 = corepoints[ptidx] + core_shift_1;
-        Point core2 = corepoints[ptidx] + core_shift_2;
+        if (num_bootstrap_iter>1) {
+            diff_bsdev = sqrt( (diff_bsdev - diff*diff*num_bootstrap_iter)/(num_bootstrap_iter-1.0) );
+            c1shift_bsdev = sqrt( (c1shift_bsdev - c1shift*c1shift*num_bootstrap_iter)/(num_bootstrap_iter-1.0) );
+            c2shift_bsdev = sqrt( (c2shift_bsdev - c2shift*c2shift*num_bootstrap_iter)/(num_bootstrap_iter-1.0) );
+        }
+        else {
+            diff_bsdev = 0;
+            c1shift_bsdev = 0;
+            c2shift_bsdev = 0;
+        }
+        
+        Point core1 = corepoints[ptidx] + c1shift * normal_1;
+        Point core2 = corepoints[ptidx] + c2shift * normal_2;
 
         for (int i=0; i<(int)resultfiles.size(); ++i) {
             ofstream& resultfile = *resultfiles[i];
@@ -873,12 +956,20 @@ int main(int argc, char** argv) {
                 else if (formats[j] == "n2") resultfile << normal_2.x << " " << normal_2.y << " " << normal_2.z;
                 else if (formats[j] == "sn1") resultfile << scalesvec[normal_scale_idx_1];
                 else if (formats[j] == "sn2") resultfile << scalesvec[normal_scale_idx_2];
-                else if (formats[j] == "dev1") resultfile << plane_dev_1;
-                else if (formats[j] == "dev2") resultfile << plane_dev_2;
-                else if (formats[j] == "np1") resultfile << plane_nump_1;
-                else if (formats[j] == "np2") resultfile << plane_nump_2;
+                else if (formats[j] == "np1") resultfile << distances_along_axis_1.size();
+                else if (formats[j] == "np2") resultfile << distances_along_axis_2.size();
+                else if (formats[j] == "shift1") resultfile << c1shift;
+                else if (formats[j] == "shift2") resultfile << c2shift;
+                else if (formats[j] == "dev1") resultfile << c1dev;
+                else if (formats[j] == "dev2") resultfile << c2dev;
                 else if (formats[j] == "diff") resultfile << diff;
-                else if (formats[j] == "diff_dev") resultfile << diff_dev;
+                else if (formats[j] == "diff_bsdev") resultfile << diff_bsdev;
+                else if (formats[j] == "shift1_bsdev") resultfile << c1shift_bsdev;
+                else if (formats[j] == "shift2_bsdev") resultfile << c2shift_bsdev;
+                else if (formats[j] == "ksi1") resultfile << (scalesvec[normal_scale_idx_1] / c1dev);
+                else if (formats[j] == "ksi2") resultfile << (scalesvec[normal_scale_idx_2] / c2dev);
+                else if (formats[j] == "n1angle_bs") resultfile << n1angle_bs;
+                else if (formats[j] == "n2angle_bs") resultfile << n2angle_bs;
                 else {
                     if (ptidx==0) cout << "Invalid result format \"" << formats[j] << "\" is ignored." << endl;
                 }
