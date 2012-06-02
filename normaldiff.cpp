@@ -55,6 +55,11 @@
 using namespace std;
 using namespace boost;
 
+const char* all_result_formats[] = {"diff", "dev1", "dev2", "shift1", "shift2", "c1", "c2", "n1", "n2", "sn1", "sn2", "np1", "np2", "diff_bsdev", "shift1_bsdev", "shift2_bsdev", "ksi1", "ksi2", "n1angle_bs", "n2angle_bs", "diff_ci_low", "diff_ci_high", "diff_sig"};
+const int nresformats = 23;
+const char* default_result_formats[] = {"c1","n1","diff","diff_sig"};
+const int num_default_result_formats = 4;
+
 int help(const char* errmsg = 0) {
 cout << "\
 normaldiff normal_scale(s) : [cylinder_base : [cylinder_length : ]] p1.xyz[:p1reduced.xyz] p2.xyz[:p2reduced.xyz] cores.xyz extpts.xyz result.txt[:format] [opt_flags [extra_info]]\n\
@@ -97,7 +102,7 @@ normaldiff normal_scale(s) : [cylinder_base : [cylinder_length : ]] p1.xyz[:p1re
                          # Several output files may be specified separated by ':',\n\
                          # each with their own optional comma separated variables\n\
                          # specification (see the syntax above)\n\
-                         # The default is to use c1,diff,diff_sig,n1\n\
+                         # The default is to use c1,n1,diff,diff_sig\n\
                          # Available output variables are:\n\
                          # - c1.x c1.y c1.z: core point coordinates, shifted to surface of p1.\n\
                          #   The surface is defined by a mean position (default) or by a median position (option \"q\").\n\
@@ -212,7 +217,15 @@ void resample(const vector<double>& original, vector<double>& resampled) {
 }
 
 inline double inverse_normal_cdf(double p) {
+    // use non-inf arithmetic, faster
+    if (p==0) return -numeric_limits<double>::max();
+    if (p==1) return numeric_limits<double>::max();
+//    try {
     return M_SQRT2 * boost::math::erf_inv(2.*p-1.);
+//     } catch(...) {
+//         cout << "inverse_normal_cdf error: p=" << p << endl;
+//         return 0;
+//     }
 }
 inline double normal_cumulative(double x) {
     return 0.5 * (1. + boost::math::erf(x*M_SQRT1_2));
@@ -343,8 +356,6 @@ int main(int argc, char** argv) {
     vector<string> result_filenames;
     vector<vector<string> > result_formats;
     
-    const char* all_result_formats[] = {"diff", "dev1", "dev2", "shift1", "shift2", "c1", "c2", "n1", "n2", "sn1", "sn2", "np1", "np2", "diff_bsdev", "shift1_bsdev", "shift2_bsdev", "ksi1", "ksi2", "n1angle_bs", "n2angle_bs", "diff_ci_low", "diff_ci_high", "diff_sig"};
-    const int nresformats = 20;
     bool compute_normal_angles = false, compute_shift_bsdev = false;
     double n1angle_bs = 0, n2angle_bs = 0;
     bool use_BCa = false;
@@ -371,13 +382,14 @@ int main(int argc, char** argv) {
             }
             if (!found) return help(("Invalid result file format: "+format).c_str());
             formats.push_back(format);
+        }
+        if (formats.empty()) {
+            for (int i=0; i<num_default_result_formats; ++i) formats.push_back(default_result_formats[i]);
+        }
+        for (auto format : formats) {
             if (format=="n1angle_bs" || format=="n2angle_bs") compute_normal_angles = true;
             if (format=="shift1_bsdev" || format=="shift2_bsdev") compute_shift_bsdev = true;
             if (format=="diff_ci_low" || format=="diff_ci_high" || format=="diff_sig") use_BCa = true;
-        }
-        // default is to output all fields
-        if (formats.empty()) {
-            for (int i=0; i<nresformats; ++i) formats.push_back(all_result_formats[i]);
         }
         result_formats.push_back(formats);
     }
@@ -462,6 +474,9 @@ int main(int argc, char** argv) {
         z_low = inverse_normal_cdf(0.5 - confidence_interval_percent/200.);
         z_high = inverse_normal_cdf(0.5 + confidence_interval_percent/200.);
     }
+    
+    vector<double> *bs_dist = 0;
+    if (use_BCa) bs_dist = new vector<double>(num_bootstrap_iter);
     
     boost::mt11213b rng;
     boost::normal_distribution<double> poserr_dist(0, pos_dev);
@@ -1050,10 +1065,7 @@ int main(int argc, char** argv) {
                 }
             }
         }
-        
-        vector<double> *bs_dist = 0;
-        if (use_BCa && use_median) bs_dist = new vector<double>(num_bootstrap_iter);
-                
+                        
         // bootstrap, at last
         double c1shift = 0, c2shift = 0;
         double c1shift_bsdev = 0, c2shift_bsdev = 0;
@@ -1091,7 +1103,7 @@ int main(int argc, char** argv) {
             diff += deltanorm;
             diff_bsdev += deltanorm * deltanorm;
             
-            if (diff < sample_diff) ++z0_sum;
+            if (deltanorm < sample_diff) ++z0_sum;
             
             if (bs_dist) (*bs_dist)[bootstrap_iter] = deltanorm;
         }
@@ -1118,23 +1130,26 @@ int main(int argc, char** argv) {
 
         // output confidence intervals, if needed
         if (use_BCa) {
+            sort(bs_dist->begin(), bs_dist->end());
             if (use_median) {
-                sort(bs_dist->begin(), bs_dist->end());
                 int idxlow = max(0, min((int)floor(((1.-confidence_interval_percent*0.01) * 0.5) * num_bootstrap_iter), num_bootstrap_iter-1));
                 int idxhigh = max(0, min((int)floor((1.-(1.-confidence_interval_percent*0.01) * 0.5) * num_bootstrap_iter), num_bootstrap_iter-1));
                 ci_low = (*bs_dist)[idxlow];
                 ci_high = (*bs_dist)[idxhigh];
-                delete bs_dist;
             } else {
                 double z0 = inverse_normal_cdf(z0_sum / (double)num_bootstrap_iter);
-                ci_low = normal_cumulative(z0+(z0+z_low)/(1.-BC_acceleration_factor*(z0+z_low)));
-                ci_high = normal_cumulative(z0+(z0+z_high)/(1.-BC_acceleration_factor*(z0+z_high)));
+                double alow = normal_cumulative(z0+(z0+z_low)/(1.-BC_acceleration_factor*(z0+z_low)));
+                double ahigh = normal_cumulative(z0+(z0+z_high)/(1.-BC_acceleration_factor*(z0+z_high)));
+                int idxlow = max(0, min((int)floor(alow * num_bootstrap_iter), num_bootstrap_iter-1));
+                int idxhigh = max(0, min((int)floor(ahigh * num_bootstrap_iter), num_bootstrap_iter-1));
+                ci_low = (*bs_dist)[idxlow];
+                ci_high = (*bs_dist)[idxhigh];
             }
         } else if (normal_ci && !use_median) {
             ci_low = sample_diff + z_low * sample_dev;
             ci_high = sample_diff + z_high * sample_dev;
         }
-        int diff_sig = (np1>=num_pt_sig) && (np2>=num_pt_sig) && (diff>=ci_low) && (diff>=ci_high);
+        int diff_sig = (np1>=num_pt_sig) && (np2>=num_pt_sig) && (diff>=ci_low) && (diff<=ci_high);
         
         Point core1 = corepoints[ptidx] + c1shift * normal_1;
         Point core2 = corepoints[ptidx] + c2shift * normal_2;
