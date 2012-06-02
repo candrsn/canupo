@@ -139,7 +139,7 @@ normaldiff normal_scale(s) : [cylinder_base : [cylinder_length : ]] p1.xyz[:p1re
                          #     The default is to shift the core point for each cloud using the normal computed on that cloud.\n\
                          #  2: Shift the core point on both clouds using the normal computed on the second cloud.\n\
                          #  m: Shift the core point on both clouds using the mean of both normals.\n\
-                         #  b: Number of bootstrap iterations for the standard deviation around the shifted position of the core points. 0 (the default) disables this bootstrapping\n\
+                         #  b: Number of bootstrap iterations for the standard deviation around the shifted position of the core points (default is 100). 0 disables this bootstrapping\n\
                          #  n: Number of bootstrap iterations for the estimation of the normals. 0 (the default) disables this bootstrapping. This option is useless when the normal is fixed to be vertical.\n\
                          #  c: Confidence interval (in %) for setting the significance bounds. Default is 95. This option is only effective when computing the diff_ci_xxx parameters.\n\
                          #  p: Minimal number of points that shall be in the cylinders (the np1 and np2 values), below which the the diff is considered not significant (the diff_sig value is set to 0). Default is 10.\n\
@@ -406,7 +406,7 @@ int main(int argc, char** argv) {
     bool shift_mean = false;
     double pos_dev = 0;
     double max_core_shift_distance = numeric_limits<double>::max();
-    int num_bootstrap_iter = 1, num_normal_bootstrap_iter = 1;
+    int num_bootstrap_iter = 100, num_normal_bootstrap_iter = 1;
     double confidence_interval_percent = 95.;
     bool normal_ci = false;
     int num_pt_sig = 10;
@@ -574,8 +574,16 @@ int main(int argc, char** argv) {
     vector<ofstream*> resultfiles(result_filenames.size());
     for (int i=0; i<(int)result_filenames.size(); ++i) {
         resultfiles[i] = new ofstream(result_filenames[i].c_str());
+        // add the variables as a comment for matlab/octave
+        // but no space between # and the first variable for cloud compare
+        *resultfiles[i] << "#";
+        vector<string>& formats = result_formats[i];
+        for (int j=0; j<(int)formats.size(); ++j) {
+            if (j>0) *resultfiles[i] << " ";
+            *resultfiles[i] << formats[j];
+        }
+        *resultfiles[i] << endl;
     }
-    
     
     // parameters and files loaded, now the real work
     
@@ -1192,8 +1200,8 @@ int main(int argc, char** argv) {
                 ci_high = (*bs_dist)[idxhigh];
             }
         } else if (normal_ci && !use_median) {
-            ci_low = sample_diff + z_low * sample_dev;
-            ci_high = sample_diff + z_high * sample_dev;
+            ci_low = sample_diff + z_low * sample_dev / sqrt(num_bootstrap_iter);
+            ci_high = sample_diff + z_high * sample_dev / sqrt(num_bootstrap_iter);
         }
         int diff_sig = (np1>=num_pt_sig) && (np2>=num_pt_sig) && (diff>=ci_low) && (diff<=ci_high);
         
