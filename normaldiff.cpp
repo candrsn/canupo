@@ -55,8 +55,8 @@
 using namespace std;
 using namespace boost;
 
-const char* all_result_formats[] = {"diff", "dev1", "dev2", "shift1", "shift2", "c1", "c2", "n1", "n2", "sn1", "sn2", "np1", "np2", "diff_bsdev", "shift1_bsdev", "shift2_bsdev", "ksi1", "ksi2", "n1angle_bs", "n2angle_bs", "diff_ci_low", "diff_ci_high", "diff_sig", "normal_dev1", "normal_dev2"};
-const int nresformats = 25;
+const char* all_result_formats[] = {"diff", "dev1", "dev2", "shift1", "shift2", "c1", "c2", "n1", "n2", "sn1", "sn2", "np1", "np2", "diff_bsdev", "shift1_bsdev", "shift2_bsdev", "ksi1", "ksi2", "n1angle_bs", "n2angle_bs", "diff_ci_low", "diff_ci_high", "diff_sig", "normal_dev1", "normal_dev2", "ns1", "ns2"};
+const int nresformats = 27;
 const char* default_result_formats[] = {"c1","n1","diff","diff_sig"};
 const int num_default_result_formats = 4;
 
@@ -112,6 +112,7 @@ normaldiff normal_scale(s) : [cylinder_base : [cylinder_length : ]] p1.xyz[:p1re
                          #   Use the format name \"n1\", all three entries are then given.\n\
                          # - n2.x n2.y n2.z: surface normal vector coordinates for p2\n\
                          # - sn1 sn2: scales at which the normals were computed in p1 and p2\n\
+                         # - ns1 ns2: number of points in the neighborhood sphere at the sn1,sn2 scale.\n\
                          # - np1 np2: number of points in the cylinders\n\
                          # - diff: point cloud difference. \n\
                          #         value of the signed distance c2 - c1, possibly averaged\n\
@@ -760,6 +761,13 @@ int main(int argc, char** argv) {
         vector<double> A1(neigh_num_1[0] * 3);
         vector<double> A2(neigh_num_2[0] * 3);
         vector<double>* A_ref[2] = {&A1, &A2};
+        // lapack destroys the matrix, we need it for compute_normal_plane_dev
+        vector<double> A1copy(0), A2copy(0);
+        if (compute_normal_plane_dev) {
+            A1copy.resize(A1.size());
+            A2copy.resize(A2.size());
+        }
+        vector<double>* Acopy_ref[2] = {&A1copy, &A2copy};
 
         // We have all core point neighbors at all scales in each data set
         // and the correct scales for the computation
@@ -800,6 +808,7 @@ int main(int argc, char** argv) {
                 int npts_scale_base = (*neigh_num_ref[ref12_idx])[normal_sidx];
                 Point avg = 0;
                 vector<double>& A = *A_ref[ref12_idx];
+                vector<double>& Acopy = *Acopy_ref[ref12_idx];
                 int& npts_scaleN = *npts_scaleN_ref[ref12_idx];
                 double radiussq = scalesvec[normal_sidx] * scalesvec[normal_sidx] * 0.25;
                 Point bspt;
@@ -840,6 +849,7 @@ int main(int argc, char** argv) {
                     A[i+npts_scaleN] -= avg.y;
                     A[i+npts_scaleN*2] -= avg.z;
                 }
+                if (compute_normal_plane_dev) for (int i=0; i<npts_scaleN*3; ++i) Acopy [i] = A[i];
                 
                 if (!force_vertical) {
                     if (force_horizontal) {
@@ -909,7 +919,7 @@ int main(int argc, char** argv) {
             }
             
             if (compute_normal_plane_dev) for (int ref12_idx = 0; ref12_idx < 2; ++ref12_idx) {
-                vector<double>& A = *A_ref[ref12_idx];
+                vector<double>& A = *Acopy_ref[ref12_idx];
                 int& npts_scaleN = *npts_scaleN_ref[ref12_idx];
                 Point& normal = *normal_bs_ref[ref12_idx];
                 double avg_dist_to_plane = 0.;
@@ -1201,6 +1211,8 @@ int main(int argc, char** argv) {
                 else if (formats[j] == "n2") resultfile << normal_2.x << " " << normal_2.y << " " << normal_2.z;
                 else if (formats[j] == "sn1") resultfile << scalesvec[normal_scale_idx_1];
                 else if (formats[j] == "sn2") resultfile << scalesvec[normal_scale_idx_2];
+                else if (formats[j] == "ns1") resultfile << neigh_num_1[normal_scale_idx_1];
+                else if (formats[j] == "ns2") resultfile << neigh_num_2[normal_scale_idx_2];
                 else if (formats[j] == "np1") resultfile << np1;
                 else if (formats[j] == "np2") resultfile << np2;
                 else if (formats[j] == "shift1") resultfile << c1shift;
