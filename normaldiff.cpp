@@ -151,9 +151,9 @@ normaldiff normal_scale(s) : [cylinder_base : [cylinder_length : ]] p1.xyz[:p1re
     return 0;
 }
 
-void mean_dev(FloatType* values, int num, FloatType& mean, FloatType& dev) {
-    if (num<1) {mean = dev = numeric_limits<FloatType>::quiet_NaN(); return;}
-    FloatType sum = 0, ssq = 0;
+void mean_dev(double* values, int num, double& mean, double& dev) {
+    if (num<1) {mean = dev = numeric_limits<double>::quiet_NaN(); return;}
+    double sum = 0, ssq = 0;
     for (int i=0; i<num; ++i) {
         sum += values[i];
         ssq += values[i] * values[i];
@@ -163,18 +163,18 @@ void mean_dev(FloatType* values, int num, FloatType& mean, FloatType& dev) {
     else dev = 0;
 }
 
-double mean(FloatType* values, int num) {
-    if (num<1) {return numeric_limits<FloatType>::quiet_NaN();}
-    FloatType sum = 0;
+double mean(double* values, int num) {
+    if (num<1) {return numeric_limits<double>::quiet_NaN();}
+    double sum = 0;
     for (int i=0; i<num; ++i) sum += values[i];
     return sum / num;
 }
 
 // median: common definition using mid-point average in the even case
-FloatType median(FloatType* values, int num) {
-    if (num<1) return numeric_limits<FloatType>::quiet_NaN();
+double median(double* values, int num) {
+    if (num<1) return numeric_limits<double>::quiet_NaN();
     int nd2 = num/2;
-    FloatType med = values[nd2];
+    double med = values[nd2];
     if (num%2==0) { // even case
         med = (med + values[nd2-1]) * 0.5;
     }
@@ -183,11 +183,11 @@ FloatType median(FloatType* values, int num) {
 // interquartile range
 //   there are several ways to compute it, with no standard
 //   commonly accepted definition. Use that of mathworld
-FloatType interquartile(FloatType* values, int num) {
+double interquartile(double* values, int num) {
     int num_pts_each_half = (num+1)/2;
     int offset_second_half = num/2;
-    FloatType q1 = median(values, num_pts_each_half);
-    FloatType q3 = median(values + offset_second_half, num_pts_each_half);
+    double q1 = median(values, num_pts_each_half);
+    double q3 = median(values + offset_second_half, num_pts_each_half);
     return q3 - q1;
 }
 
@@ -206,9 +206,9 @@ int randint(const int nint) {
     return randtable[randtableidx] % nint;
 }
 
-void resample(const vector<FloatType>& original, vector<FloatType>& resampled) {
+void resample(const vector<double>& original, vector<double>& resampled) {
     const int nint = original.size();
-    for (FloatType& sample : resampled) sample = original[randint(nint)];
+    for (double& sample : resampled) sample = original[randint(nint)];
 }
 
 inline double inverse_normal_cdf(double p) {
@@ -221,11 +221,11 @@ inline double normal_cumulative(double x) {
 /*
 boost::mt11213b rng;
 
-void resample(const vector<FloatType>& original, vector<FloatType>& resampled) {
+void resample(const vector<double>& original, vector<double>& resampled) {
     // resampling with replacement
     boost::uniform_int<int> int_dist(0, original.size()-1);
     boost::variate_generator<boost::mt11213b&, boost::uniform_int<int> > randint(rng, int_dist);
-    for (FloatType& sample : resampled) sample = original[randint()];
+    for (double& sample : resampled) sample = original[randint()];
 }
 */
 
@@ -241,29 +241,29 @@ int main(int argc, char** argv) {
     if (separator==0) return help();
 
     // get all unique scales from large to small, for later processing of neighborhoods
-    typedef set<FloatType, greater<FloatType> > ScaleSet;
+    typedef set<double, greater<double> > ScaleSet;
     ScaleSet scales;
     for (int i=1; i<separator; ++i) {
         // perhaps it has the minscale:increment:maxscale syntax
         char* col1 = strchr(argv[i],':');
         char* col2 = strrchr(argv[i],':');
         if (col1==0 || col2==0 || col1==col2) {
-            FloatType scale = atof(argv[i]);
+            double scale = atof(argv[i]);
             if (scale<=0) return help("Invalid scale");
             scales.insert(scale);
         } else {
             *col1++=0;
-            FloatType minscale = atof(argv[i]);
+            double minscale = atof(argv[i]);
             *col2++=0;
-            FloatType increment = atof(col1);
-            FloatType maxscale = atof(col2);
+            double increment = atof(col1);
+            double maxscale = atof(col2);
             if (minscale<=0 || maxscale<=0) return help("Invalid scale range");
             bool validRange = false;
             if ((minscale - maxscale) * increment > 0) return help("Invalid range specification");
-            if (minscale<=maxscale) for (FloatType scale = minscale; scale < maxscale*(1-1e-6); scale += increment) {
+            if (minscale<=maxscale) for (double scale = minscale; scale < maxscale*(1-1e-6); scale += increment) {
                 validRange = true;
                 scales.insert(scale);
-            } else for (FloatType scale = minscale; scale > maxscale*(1+1e-6); scale += increment) {
+            } else for (double scale = minscale; scale > maxscale*(1+1e-6); scale += increment) {
                 validRange = true;
                 scales.insert(scale);
             }
@@ -273,13 +273,13 @@ int main(int argc, char** argv) {
         }
     }
 
-    vector<FloatType> scalesvec(scales.begin(), scales.end());
+    vector<double> scalesvec(scales.begin(), scales.end());
     int nscales = scalesvec.size();
     
     if (scales.empty()) return help();
     
-    FloatType cylinder_base = scalesvec.back(); // smallest
-    FloatType cylinder_length = scalesvec[0];   // largest
+    double cylinder_base = scalesvec.back(); // smallest
+    double cylinder_length = scalesvec[0];   // largest
     
     int separator_next = 0;
     for (int i=separator+1; i<argc; ++i) if (!strcmp(":",argv[i])) {
@@ -346,7 +346,7 @@ int main(int argc, char** argv) {
     const char* all_result_formats[] = {"diff", "dev1", "dev2", "shift1", "shift2", "c1", "c2", "n1", "n2", "sn1", "sn2", "np1", "np2", "diff_bsdev", "shift1_bsdev", "shift2_bsdev", "ksi1", "ksi2", "n1angle_bs", "n2angle_bs", "diff_ci_low", "diff_ci_high", "diff_sig"};
     const int nresformats = 20;
     bool compute_normal_angles = false, compute_shift_bsdev = false;
-    FloatType n1angle_bs = 0, n2angle_bs = 0;
+    double n1angle_bs = 0, n2angle_bs = 0;
     bool use_BCa = false;
     
     char_separator<char> colsep(":");
@@ -457,15 +457,15 @@ int main(int argc, char** argv) {
     if (confidence_interval_percent<0 || confidence_interval_percent>100) {
         return help("Invalid confidence interval for the c flag, shall be between 0 and 100");
     }
-    FloatType z_low = 0., z_high = 0.;
+    double z_low = 0., z_high = 0.;
     if (use_BCa || normal_ci) {
         z_low = inverse_normal_cdf(0.5 - confidence_interval_percent/200.);
         z_high = inverse_normal_cdf(0.5 + confidence_interval_percent/200.);
     }
     
     boost::mt11213b rng;
-    boost::normal_distribution<FloatType> poserr_dist(0, pos_dev);
-    boost::variate_generator<boost::mt11213b&, boost::normal_distribution<FloatType> > poserr_rand(rng, poserr_dist);
+    boost::normal_distribution<double> poserr_dist(0, pos_dev);
+    boost::variate_generator<boost::mt11213b&, boost::normal_distribution<double> > poserr_rand(rng, poserr_dist);
 
     if (num_bootstrap_iter>1 || num_normal_bootstrap_iter>1) randinit();
     
@@ -506,7 +506,7 @@ int main(int argc, char** argv) {
         Point point;
         int i = 0;
         for (char* x = line; *x!=0;) {
-            FloatType value = fast_atof_next_token(x);
+            double value = fast_atof_next_token(x);
             if (i<Point::dim) point[i++] = value;
             else break;
         }
@@ -527,7 +527,7 @@ int main(int argc, char** argv) {
         Point point;
         int i = 0;
         for (char* x = line; *x!=0;) {
-            FloatType value = fast_atof_next_token(x);
+            double value = fast_atof_next_token(x);
             if (i<Point::dim) point[i++] = value;
             else break;
         }
@@ -562,9 +562,9 @@ int main(int argc, char** argv) {
     
     cout << "Percent complete: 0" << flush;
     
-    FloatType core_global_diff_mean = 0;
-    FloatType core_global_diff_min = numeric_limits<FloatType>::max();
-    FloatType core_global_diff_max = -numeric_limits<FloatType>::max();
+    double core_global_diff_mean = 0;
+    double core_global_diff_min = numeric_limits<double>::max();
+    double core_global_diff_max = -numeric_limits<double>::max();
     
     // for each core point
     int nextpercentcomplete = 5;
@@ -621,7 +621,7 @@ int main(int argc, char** argv) {
             }
             // lower scale : restrict previously found neighbors to the new distance
             else {
-                FloatType radiussq = scalesvec[scaleidx] * scalesvec[scaleidx] * 0.25;
+                double radiussq = scalesvec[scaleidx] * scalesvec[scaleidx] * 0.25;
                 // dicho search might be faster than sequencially from the vector end if there are many points
                 int dichofirst = 0;
                 int dicholast = neighbors_1.size();
@@ -654,7 +654,7 @@ int main(int argc, char** argv) {
         int normal_scale_idx_1 = 0, normal_scale_idx_2 = 0;
         
         if (nscales>1) {
-            FloatType svalues[3];
+            double svalues[3];
             // avoid code dup below
             // but some dup in bootstrapping as I'm lazy to get rid of it
             int* normal_scale_idx_ref[2] = {&normal_scale_idx_1, &normal_scale_idx_2};
@@ -664,7 +664,7 @@ int main(int argc, char** argv) {
             // loop on both pt sets
             for (int ref12_idx = 0; ref12_idx < 2; ++ref12_idx) {
                 vector<DistPoint<Point> >& neighbors = *neighbors_ref[ref12_idx];
-                FloatType maxbarycoord = -numeric_limits<FloatType>::max();
+                double maxbarycoord = -numeric_limits<double>::max();
                 for (int sidx=0; sidx<nscales; ++sidx) {
                     int npts = (*neigh_num_ref[ref12_idx])[sidx];
                     if (npts>=3) {
@@ -673,7 +673,7 @@ int main(int argc, char** argv) {
                         // compute PCA on the neighbors at this scale
                         // a copy is needed as LAPACK destroys the matrix, and the center changes anyway
                         // => cannot keep the points from one scale to the lower, need to rebuild the matrix
-                        vector<FloatType> A(npts * 3);
+                        vector<double> A(npts * 3);
                         for (int i=0; i<npts; ++i) {
                             // A is column-major
                             A[i] = neighbors[i].pt->x - avg.x;
@@ -684,7 +684,7 @@ int main(int argc, char** argv) {
                         // The most 2D scale. For the criterion for how "2D" a scale is, see canupo
                         // Ideally first and second eigenvalue are equal
                         // convert to percent variance explained by each dim
-                        FloatType totalvar = 0;
+                        double totalvar = 0;
                         for (int i=0; i<3; ++i) {
                             // singular values are squared roots of eigenvalues
                             svalues[i] = svalues[i] * svalues[i]; // / (neighbors.size() - 1);
@@ -697,9 +697,9 @@ int main(int argc, char** argv) {
                         // Use barycentric coordinates : a for 1D, b for 2D and c for 3D
                         // Formula on wikipedia page for barycentric coordinates
                         // using directly the triangle in %variance space, they simplify a lot
-                        //FloatType c = 1 - a - b; // they sum to 1
+                        //double c = 1 - a - b; // they sum to 1
                         // a = svalues[0] - svalues[1];
-                        FloatType b = 2 * svalues[0] + 4 * svalues[1] - 2;
+                        double b = 2 * svalues[0] + 4 * svalues[1] - 2;
                         if (b > maxbarycoord) {
                             maxbarycoord = b;
                             *normal_scale_idx_ref[ref12_idx] = sidx;
@@ -712,9 +712,9 @@ int main(int argc, char** argv) {
         // closest ref point is also shared for all bootstrap iterations for efficiency
         // non-empty set => valid index
         int nearestidx = -1;
-        FloatType mindist = numeric_limits<FloatType>::max();
+        double mindist = numeric_limits<double>::max();
         for (int i=0; i<(int)refpoints.size(); ++i) {
-            FloatType d = dist2(refpoints[i],corepoints[ptidx]);
+            double d = dist2(refpoints[i],corepoints[ptidx]);
             if (d<mindist) {
                 mindist = d;
                 nearestidx = i;
@@ -743,8 +743,8 @@ int main(int argc, char** argv) {
             Point normal_bs_1, normal_bs_2;
             int npts_scale0_bs_1, npts_scale0_bs_2;
             
-            FloatType svalues[3];
-            FloatType eigenvectors[9];
+            double svalues[3];
+            double eigenvectors[9];
             
             vector<Point> resampled_neighbors_1, resampled_neighbors_2;
             // avoid code dup below
@@ -771,7 +771,7 @@ int main(int argc, char** argv) {
                 //if (npts_scale0==0) continue; // ensured >=3 at this point
                 // resampling with replacement
                 Point avg = 0;
-                vector<FloatType> A(npts_scale0 * 3);
+                vector<double> A(npts_scale0 * 3);
                 //int_dist(rng); // boost 1.47 is so much better :(
                 /*
                 boost::uniform_int<int> int_dist(0, npts_scale0-1);
@@ -779,7 +779,7 @@ int main(int argc, char** argv) {
                 */
                 int normal_sidx = *normal_scale_idx_ref[ref12_idx];
                 int npts_scaleN = 0;
-                FloatType radiussq = scalesvec[normal_sidx] * scalesvec[normal_sidx] * 0.25;
+                double radiussq = scalesvec[normal_sidx] * scalesvec[normal_sidx] * 0.25;
                 Point bspt;
                 for (int i=0; i<npts_scale0; ++i) {
                     Point* pt = neighbors[i].pt;
@@ -900,7 +900,7 @@ int main(int argc, char** argv) {
         // angles between normals and bs mean = a kind of directional deviation...
         // ... and a way to detect bad normals
         if (compute_normal_angles) {
-            FloatType dprod1 = 0, dprod2 = 0;
+            double dprod1 = 0, dprod2 = 0;
             for (int n_bootstrap_iter = 0; n_bootstrap_iter < num_normal_bootstrap_iter; ++n_bootstrap_iter) {
                 dprod1 += (*normal_bs_sample1)[n_bootstrap_iter].dot(normal_1);
                 dprod2 += (*normal_bs_sample2)[n_bootstrap_iter].dot(normal_2);
@@ -914,14 +914,14 @@ int main(int argc, char** argv) {
         /// estimate the diff separately from the normals
         /// First get all points in the cylinder
         /// then bootstrap to estimate the variance around the core shift distance
-        vector<FloatType> distances_along_axis_1;
-        vector<FloatType> distances_along_axis_2;
+        vector<double> distances_along_axis_1;
+        vector<double> distances_along_axis_2;
         Point* normal_ref[2] = {&normal_1, &normal_2};
-        vector<FloatType>* distances_along_axis_ref[2] = {&distances_along_axis_1, &distances_along_axis_2};
+        vector<double>* distances_along_axis_ref[2] = {&distances_along_axis_1, &distances_along_axis_2};
         
         for (int ref12_idx = 0; ref12_idx < 2; ++ref12_idx) {
             Point& normal = *normal_ref[ref12_idx];
-            vector<FloatType>& distances_along_axis = *distances_along_axis_ref[ref12_idx];
+            vector<double>& distances_along_axis = *distances_along_axis_ref[ref12_idx];
 
             // the number of segments includes negative shifts
             for (int cylsec=0; cylsec<num_cyl_balls; ++cylsec) {
@@ -929,16 +929,16 @@ int main(int argc, char** argv) {
                 // first segment center starts at +0.5 from min neg shift
                 Point base_segment_center = corepoints[ptidx] + (cyl_section_length*0.5-cylinder_length) * normal;
 
-                FloatType min_dist_along_axis = cylsec * cyl_section_length - cylinder_length;
-                FloatType max_dist_along_axis = min_dist_along_axis + cyl_section_length;
+                double min_dist_along_axis = cylsec * cyl_section_length - cylinder_length;
+                double max_dist_along_axis = min_dist_along_axis + cyl_section_length;
                 
                 // find full-res points in the current cylinder section
                 ((ref12_idx==0)?p1:p2).applyToNeighbors(
                     // long life to C++11 lambdas !
-                    [&](FloatType d2, Point* p) {
+                    [&](double d2, Point* p) {
                         Point delta = *p - corepoints[ptidx];
-                        FloatType dist_along_axis = delta.dot(normal);
-                        FloatType dist_to_axis_sq = (delta - dist_along_axis * normal).norm2();
+                        double dist_along_axis = delta.dot(normal);
+                        double dist_to_axis_sq = (delta - dist_along_axis * normal).norm2();
                         // check the point is in this cylinder section
                         if (dist_to_axis_sq>cylinder_base_radius_sq) return;
                         if (dist_along_axis<min_dist_along_axis) return;
@@ -956,20 +956,20 @@ int main(int argc, char** argv) {
         
         // prepare bootstrap for processing average / median.
         
-        vector<FloatType>* daa1;
-        vector<FloatType>* daa2;
+        vector<double>* daa1;
+        vector<double>* daa2;
         if (num_bootstrap_iter==1) {
             daa1 = &distances_along_axis_1;
             daa2 = &distances_along_axis_2;
         } else {
-            daa1 = new vector<FloatType>(np1);
-            daa2 = new vector<FloatType>(np2);
+            daa1 = new vector<double>(np1);
+            daa2 = new vector<double>(np2);
         }
 
         // Confidence interval estimation using the bias-corrected accelerated BCa technique
         // activated on demand, adds some computations...
-        FloatType avgd1, avgd2, devd1, devd2;
-        FloatType z0_sum = 0, sample_diff = 0, BC_acceleration_factor = 0.;
+        double avgd1, avgd2, devd1, devd2;
+        double z0_sum = 0, sample_diff = 0, BC_acceleration_factor = 0.;
         // for the mean, OK:
         // mean(a*n1-b*n2) = mean(a)*n1-mean(b)*n2
         // NOTE: assume uncorrelated variations on each cloud
@@ -978,22 +978,22 @@ int main(int argc, char** argv) {
         // var(a*n1-b*n2) = var(a)*n1-var(b)*n2
         // dev = sqrt(sum) and NOT sum sqrt
         // for the median, more tricky...
-        FloatType sample_dev = 0;
-        FloatType ci_low = 0., ci_high = 0.;
+        double sample_dev = 0;
+        double ci_low = 0., ci_high = 0.;
         if (normal_ci || use_BCa) {
             // use median ⇒ no BCa, see below for using the bootstrap distribution instead
             // use the quartiles for the confidence_interval_percent then
             if (use_median && normal_ci) {
                 // rely on random sampling when there are too many combinations
                 const int np_prod_max = 10000;
-                vector<FloatType> sample_deltanorm(min(np1*np2,np_prod_max),0.);
+                vector<double> sample_deltanorm(min(np1*np2,np_prod_max),0.);
                 if (np1*np2>np_prod_max) for (int i=0; i<np_prod_max; ++i) {
-                    FloatType d1 = distances_along_axis_1[randint(np1)];
-                    FloatType d2 = distances_along_axis_2[randint(np2)];
+                    double d1 = distances_along_axis_1[randint(np1)];
+                    double d2 = distances_along_axis_2[randint(np2)];
                     sample_deltanorm[i] = (d2 * normal_2 - d1 * normal_1).norm();
                 } else for (int i=0; i<np1; ++i) for (int j=0; j<np2; ++j) {
-                    FloatType d1 = distances_along_axis_1[i];
-                    FloatType d2 = distances_along_axis_2[j];
+                    double d1 = distances_along_axis_1[i];
+                    double d2 = distances_along_axis_2[j];
                     sample_deltanorm[i*np2+j] = (d2 * normal_2 - d1 * normal_1).norm();
                 }
                 sort(sample_deltanorm.begin(), sample_deltanorm.end());
@@ -1010,10 +1010,10 @@ int main(int argc, char** argv) {
                 sample_dev = sqrt((avgd2 * avgd2 * normal_2 - avgd1 * avgd1 * normal_1).norm2());
                 if (use_BCa) {
                     // need some all-minus-one stat average
-                    vector<FloatType> allm1(np1, 0.);
-                    vector<FloatType> allm2(np2, 0.);
-                    FloatType sumd1 = avgd1 * np1;
-                    FloatType sumd2 = avgd2 * np2;
+                    vector<double> allm1(np1, 0.);
+                    vector<double> allm2(np2, 0.);
+                    double sumd1 = avgd1 * np1;
+                    double sumd2 = avgd2 * np2;
                     // now the all-minus-one values
                     // shall ideally be computed on the diff values distribution, but it's
                     // hard to have (n-1) stats on that. would be possible perhaps by considering
@@ -1025,17 +1025,17 @@ int main(int argc, char** argv) {
                     if (np2>1) for (int i=0; i<np2; ++i) {
                         allm2[i] = (sumd2 - distances_along_axis_2[i]) / (np2 - 1.0);
                     }
-                    FloatType meanm1 = mean(&allm1[0], np1);
-                    FloatType meanm2 = mean(&allm2[0], np2);
-                    FloatType sumdmsq1 = 0., sumdmth1 = 0;
-                    FloatType sumdmsq2 = 0., sumdmth2 = 0;
+                    double meanm1 = mean(&allm1[0], np1);
+                    double meanm2 = mean(&allm2[0], np2);
+                    double sumdmsq1 = 0., sumdmth1 = 0;
+                    double sumdmsq2 = 0., sumdmth2 = 0;
                     for (auto x : allm1) {
-                        FloatType dm2 = (x - meanm1) * (x - meanm1);
+                        double dm2 = (x - meanm1) * (x - meanm1);
                         sumdmth1 += (x - meanm1) * dm2;
                         sumdmsq1 += dm2;
                     }
                     for (auto x : allm2) {
-                        FloatType dm2 = (x - meanm2) * (x - meanm2);
+                        double dm2 = (x - meanm2) * (x - meanm2);
                         sumdmth2 += (x - meanm2) * dm2;
                         sumdmsq2 += dm2;
                     }
@@ -1044,21 +1044,21 @@ int main(int argc, char** argv) {
                     if (np2>1) {sumdmsq2 /= np2-1; sumdmth2 /= np2-1;} // unsure /(n-1)...
                     Point pdmsq = sumdmsq2 * normal_2 - sumdmsq1 * normal_1;
                     Point pdmth = sumdmth2 * normal_2 - sumdmth1 * normal_1;
-                    FloatType dmsq = pdmsq.norm2();
-                    FloatType dmth = pdmth.x*pdmth.x*pdmth.x + pdmth.y*pdmth.y*pdmth.y + pdmth.z*pdmth.z*pdmth.z;
+                    double dmsq = pdmsq.norm2();
+                    double dmth = pdmth.x*pdmth.x*pdmth.x + pdmth.y*pdmth.y*pdmth.y + pdmth.z*pdmth.z*pdmth.z;
                     if (dmsq>0) BC_acceleration_factor = dmth / (6.*sqrt(dmsq*dmsq*dmsq));
                 }
             }
         }
         
-        vector<FloatType> *bs_dist = 0;
-        if (use_BCa && use_median) bs_dist = new vector<FloatType>(num_bootstrap_iter);
+        vector<double> *bs_dist = 0;
+        if (use_BCa && use_median) bs_dist = new vector<double>(num_bootstrap_iter);
                 
         // bootstrap, at last
-        FloatType c1shift = 0, c2shift = 0;
-        FloatType c1shift_bsdev = 0, c2shift_bsdev = 0;
-        FloatType c1dev = 0, c2dev = 0;
-        FloatType diff = 0, diff_bsdev = 0;
+        double c1shift = 0, c2shift = 0;
+        double c1shift_bsdev = 0, c2shift_bsdev = 0;
+        double c1dev = 0, c2dev = 0;
+        double diff = 0, diff_bsdev = 0;
         for (int bootstrap_iter = 0; bootstrap_iter < num_bootstrap_iter; ++bootstrap_iter) {
             // resample the distances vectors
             if (num_bootstrap_iter>1) {
@@ -1085,7 +1085,7 @@ int main(int argc, char** argv) {
             c2dev += devd2;
             
             Point core_shift_diff = avgd2 * normal_2 - avgd1 * normal_1;
-            FloatType deltanorm = core_shift_diff.norm();
+            double deltanorm = core_shift_diff.norm();
             // signed distance according to the normal direction
             if (core_shift_diff.dot(normal_1+normal_2)<0) deltanorm *= -1;
             diff += deltanorm;
@@ -1126,7 +1126,7 @@ int main(int argc, char** argv) {
                 ci_high = (*bs_dist)[idxhigh];
                 delete bs_dist;
             } else {
-                FloatType z0 = inverse_normal_cdf(z0_sum / (FloatType)num_bootstrap_iter);
+                double z0 = inverse_normal_cdf(z0_sum / (double)num_bootstrap_iter);
                 ci_low = normal_cumulative(z0+(z0+z_low)/(1.-BC_acceleration_factor*(z0+z_low)));
                 ci_high = normal_cumulative(z0+(z0+z_high)/(1.-BC_acceleration_factor*(z0+z_high)));
             }
@@ -1175,8 +1175,8 @@ int main(int argc, char** argv) {
         }
         
         core_global_diff_mean += diff;
-        core_global_diff_min = min((FloatType)core_global_diff_min, (FloatType)diff);
-        core_global_diff_max = max((FloatType)core_global_diff_min, (FloatType)diff);
+        core_global_diff_min = min((double)core_global_diff_min, (double)diff);
+        core_global_diff_max = max((double)core_global_diff_min, (double)diff);
     }
     cout << endl;
     
