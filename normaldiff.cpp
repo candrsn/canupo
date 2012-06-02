@@ -90,23 +90,15 @@ normaldiff normal_scale(s) : [cylinder_base : [cylinder_length : ]] p1.xyz[:p1re
                          # to orient normals. The closest point in the set is used to orient the\n\
                          # normal a each core point. The exterior points shall be exterior to\n\
                          # both p1 and p2...\n\
-  outputs: result.txt[,e1,e2,e3:res2.txt,e4,...]\n\
+  outputs: result.txt[,v1,v2,v3:res2.txt,v4,...]\n\
                          # A file containing as many result lines as core points\n\
-                         # Each line contains space separated entries, that can be\n\
+                         # Each line contains space separated output variables, that can be\n\
                          # specified in order by their names below (ex: c1,diff).\n\
                          # Several output files may be specified separated by ':',\n\
-                         # each with their own optional comma separated entry\n\
-                         # specifications (see the syntax above)\n\
-                         # The default is to use all entries in this order:\n\
-                         # - diff: point cloud difference. \n\
-                         #         value of the signed distance c2 - c1, possibly averaged\n\
-                         #         by the statistical bootstrapping technique.\n\
-                         # - dev1 dev2: standard deviation of the distance between: the points\n\
-                         #              surrounding c1 and c2 at scales sc1 and sc2; and the\n\
-                         #              \"surface\" planes defined by the normals at c1 and c2.\n\
-                         #         This value is possibly averaged by bootstrap.\n\
-                         #              When option \"q\" is activated the interquartile ranges are used instead of standard deviations.\n\
-                         # - shift1 shift2: signed distance the core points were shifted along the normals. This value is possibly averaged by bootstrap.\n\
+                         # each with their own optional comma separated variables\n\
+                         # specification (see the syntax above)\n\
+                         # The default is to use c1,diff,diff_sig,n1\n\
+                         # Available output variables are:\n\
                          # - c1.x c1.y c1.z: core point coordinates, shifted to surface of p1.\n\
                          #   The surface is defined by a mean position (default) or by a median position (option \"q\").\n\
                          #   Use the format name \"c1\", all three entries are then given.\n\
@@ -116,30 +108,39 @@ normaldiff normal_scale(s) : [cylinder_base : [cylinder_length : ]] p1.xyz[:p1re
                          # - n2.x n2.y n2.z: surface normal vector coordinates for p2\n\
                          # - sn1 sn2: scales at which the normals were computed in p1 and p2\n\
                          # - np1 np2: number of points in the cylinders\n\
+                         # - diff: point cloud difference. \n\
+                         #         value of the signed distance c2 - c1, possibly averaged\n\
+                         #         by the statistical bootstrapping technique.\n\
+                         # - diff_ci_low: lower bound of the confidence interval for the diff values, at 95% confidence level (default, see the c and g flags). The default is to estimate the confidence interval using the Bias-Corrected-accelerated (BCa) technique when bootstrapping is active, or to use a normality assumption otherwise.\n\
+                         # - diff_ci_high: higher bound of the confidence interval for the diff values. See diff_ci_low.\n\
+                         # - diff_sig: A boolean (0 or 1) indicating whether the diff value is within the confidence interval AND whether there were enough points for estimating that interval itself. See the c, g, and p flags).\n\
+                         # - shift1 shift2: signed distance the core points were shifted along the normals. This value is possibly averaged by bootstrap.\n\
+                         # - dev1 dev2: standard deviation of the distance between: the points\n\
+                         #              surrounding c1 and c2 in the cylinder; and the\n\
+                         #              \"surface\" planes defined by the normals at c1 and c2.\n\
+                         #         This value is possibly averaged by bootstrap.\n\
+                         #              When option \"q\" is activated the interquartile ranges are used instead of standard deviations.\n\
                          # - diff_bsdev: deviation of the diff value, estimated by bootstrapping.\n\
                          # - shift1_bsdev shift2_bsdev: deviation of the shift values, estimated by bootstrapping.\n\
                          # - ksi1 ksi2: a shortcut for sn1/dev1 and sn2/dev2\n\
                          # - n1angle_bs n2angle_bs: average angle (in degrees) between the normals and their mean value during normal bootstrapping. This can be seen as a kind of mean angular deviation around the normal, and is an indicator of how the normal is stable at that point. Requires the \"n\" flag.\n\
-                         # - diff_ci_low: lower bound of the confidence interval for the diff values, at 95% confidence level (default, see the c and g flags). The default is to estimate the confidence interval using the Bias-Corrected-accelerated (BCa) technique when bootstrapping is active, or to use a normality assumption otherwise.\n\
-                         # - diff_ci_high: higher bound of the confidence interval for the diff values. See diff_ci_low.\n\
-                         # - diff_sig: A boolean (0 or 1) indicating whether the diff value is within the confidence interval AND whether there were enough points for estimating that interval itself. See the c, g, and p flags).\n\
   input: opt_flags       # Optional flags. Some may be combined together. Ex: \"hqb\".\n\
                          # Available flags are:\n\
-                         #  q: Use the interquartile range and the median instead of standard deviation and mean, in order to define the new core point.\n\
                          #  h: make the resulting normals purely Horizontal (null z component).\n\
                          #  v: make the resulting normals purely Vertical (so, all normals are either +z or -z depending on the reference points).\n\
                          #  1: Shift the core point on both clouds using the normal computed on the first cloud\n\
                          #     The default is to shift the core point for each cloud using the normal computed on that cloud.\n\
                          #  2: Shift the core point on both clouds using the normal computed on the second cloud.\n\
                          #  m: Shift the core point on both clouds using the mean of both normals.\n\
+                         #  b: Number of bootstrap iterations for the standard deviation around the shifted position of the core points. 0 (the default) disables this bootstrapping\n\
+                         #  n: Number of bootstrap iterations for the estimation of the normals. 0 (the default) disables this bootstrapping. This option is useless when the normal is fixed to be vertical.\n\
+                         #  c: Confidence interval (in %) for setting the significance bounds. Default is 95. This option is only effective when computing the diff_ci_xxx parameters.\n\
+                         #  p: Minimal number of points that shall be in the cylinders (the np1 and np2 values), below which the the diff is considered not significant (the diff_sig value is set to 0). Default is 10.\n\
+                         #  g: Assume a normal (gaussian) distribution of the point distances around the mean shift(1/2) values for estimating the confidence interval of the diff values. The default (when g is not set) is to estimate the confidence interval for the mean/dev using the Bias-Corrected-accelerated bootstrapping technique when bootstrapping is active.\n\
+                         #  q: Use the interquartile range and the median instead of standard deviation and mean, in order to define the new core point. The confidence intervals, if requested, are computed using the quantiles set by the c flag, either on the bootstrapped distribution (if available) or on a distribution of combinations of diffs between the clouds (can actually be slower and less reliable than bootstrap, check it!)\n\
                          #  e: provide the standard deviation of the Error on the point positions\n\
                          #     in p1 and p2 as extra info. This is a parameter provided by the device\n\
                          #     used for measuring p1 and p2. It is incorporated in the bootstrapping.\n\
-                         #  b: Number of bootstrap iterations for the standard deviation around the shifted position of the core points. 0 (the default) disables this bootstrapping\n\
-                         #  n: Number of bootstrap iterations for the estimation of the normals. 0 (the default) disables this bootstrapping. This option is useless when the normal is fixed to be vertical.\n\
-                         #  c: Confidence interval (in %) for the BCa bounds. Default is 95. This option is only effective when computing the diff_ci_xxx parameters.\n\
-                         #  g: Assume a normal (gaussian) distribution of the point distances around the mean shift(1/2) values for estimating the confidence interval of the diff values. The default is to estimate the confidence interval using the Bias-Corrected-accelerated bootstrapping technique when bootstrapping is active.\n\
-                         #  p: Minimal number of points that shall be in the cylinders (the np1 and np2 values), below which the the diff is considered not significant (the diff_sig value is set to 0). Default is 10.\n\
   input: extra_info      # Extra parameters for the \"e\", \"s\", \"b\", \"n\", \"c\" and \"p\" flags,\n\
                          # given in the same order as these flags were specified.\n\
                          # Ex: normaldiff (all other opts) ehb 1e-2 1000\n\
@@ -445,10 +446,10 @@ int main(int argc, char** argv) {
     }
     if (num_bootstrap_iter==1) {
         if (compute_shift_bsdev) return help("Warning: cannot compute the shift bootstrap deviation without bootstrapping, set the b flag.");
-        if (use_BCa) normal_ci = true; // default to normal without bootstrap
+        if (use_BCa) normal_ci = true; // default to normal assumption without bootstrap
     }
     // honor the g flag
-    if (normal_ci) use_BCa = false;
+    if (normal_ci && !use_median) use_BCa = false;
     
     if (num_normal_bootstrap_iter<=0) num_normal_bootstrap_iter = 1;
     if (compute_normal_angles && (num_normal_bootstrap_iter==1)) cout << "Warning: cannot compute the normal angle deviations without bootstraping the normals, set the n flag." << endl;
@@ -944,7 +945,7 @@ int main(int argc, char** argv) {
                         if (dist_along_axis>=max_dist_along_axis) return;
                         distances_along_axis.push_back(dist_along_axis);
                     },
-                    base_segment_center + (cylsec * cyl_section_length) * normal,1
+                    base_segment_center + (cylsec * cyl_section_length) * normal,
                     cyl_ball_radius
                 );
             }
@@ -967,6 +968,7 @@ int main(int argc, char** argv) {
 
         // Confidence interval estimation using the bias-corrected accelerated BCa technique
         // activated on demand, adds some computations...
+        FloatType avgd1, avgd2, devd1, devd2;
         FloatType z0_sum = 0, sample_diff = 0, BC_acceleration_factor = 0.;
         // for the mean, OK:
         // mean(a*n1-b*n2) = mean(a)*n1-mean(b)*n2
@@ -977,9 +979,13 @@ int main(int argc, char** argv) {
         // dev = sqrt(sum) and NOT sum sqrt
         // for the median, more tricky...
         FloatType sample_dev = 0;
+        FloatType ci_low = 0., ci_high = 0.;
         if (normal_ci || use_BCa) {
-            if (use_median) {
+            // use median ⇒ no BCa, see below for using the bootstrap distribution instead
+            // use the quartiles for the confidence_interval_percent then
+            if (use_median && normal_ci) {
                 // rely on random sampling when there are too many combinations
+                const int np_prod_max = 10000;
                 vector<FloatType> sample_deltanorm(min(np1*np2,np_prod_max),0.);
                 if (np1*np2>np_prod_max) for (int i=0; i<np_prod_max; ++i) {
                     FloatType d1 = distances_along_axis_1[randint(np1)];
@@ -991,129 +997,62 @@ int main(int argc, char** argv) {
                     sample_deltanorm[i*np2+j] = (d2 * normal_2 - d1 * normal_1).norm();
                 }
                 sort(sample_deltanorm.begin(), sample_deltanorm.end());
-                sample_diff = median(&sample_deltanorm[0], sample_deltanorm.size());
-                sample_dev = interquartile(&sample_deltanorm[0], sample_deltanorm.size());
-                if (use_BCa) {
-                    // need some all-minus-one stat average
-                    vector<FloatType> allm(sample_deltanorm.size(), 0.);
-                    int half = sample_deltanorm.size() / 2;
-                    if (sample_deltanorm.size() % 2 == 0) {
-                        // removing points below the median index in the original vector
-                        // does not change the median in the vector without i
-                        // ori (even): | x | x | x | x | x | x |
-                        // rem<np1/2:  | x |   | x | m | x | x |
-                        // rem>=np1/2: | x | x | m |   | x | x |
-                        for (int i=0; i<half; ++i) allm[i] = sample_deltanorm[half];
-                        for (int i=half; i<allm.size(); ++i) allm[i] = sample_deltanorm[half-1];
-                    } else {
-                        // ori (odd):  | x | x | x | x | x | x | x |
-                        // rem<np1/2:  | x |   | x | m | m | x | x |
-                        // rem==np1/2: | x | x | m |   | m | x | x |
-                        // rem>np1/2:  | x | x | m | m | x |   | x |
-                        if (allm.size()>1) {
-                            FloatType med = (sample_deltanorm[half] + sample_deltanorm[half+1]) * 0.5;
-                            for (int i=0; i<half; ++i) allm[i] = med;
-                            // np1 odd and >1, at least 3
-                            allm[half] = (sample_deltanorm[half-1] + sample_deltanorm[half+1]) * 0.5;
-                            med = (sample_deltanorm[half-1] + sample_deltanorm[half]) * 0.5;
-                            for (int i=half+1; i<allm.size(); ++i) allm[i] = med;
-                        }
-                    }
-                }
-            } else {
+                int idxlow = max(0, min((int)floor(((1.-confidence_interval_percent*0.01) * 0.5) * sample_deltanorm.size()), (int)sample_deltanorm.size()-1));
+                int idxhigh = max(0, min((int)floor((1.-(1.-confidence_interval_percent*0.01) * 0.5) * sample_deltanorm.size()), (int)sample_deltanorm.size()-1));
+                ci_low = sample_deltanorm[idxlow];
+                ci_high = sample_deltanorm[idxhigh];
+            }
+            if (!use_median) {
                 mean_dev(&distances_along_axis_1[0], np1, avgd1, devd1);
                 mean_dev(&distances_along_axis_2[0], np2, avgd2, devd2);
                 Point core_shift_diff = avgd2 * normal_2 - avgd1 * normal_1;
                 sample_diff = core_shift_diff.norm();
                 sample_dev = sqrt((avgd2 * avgd2 * normal_2 - avgd1 * avgd1 * normal_1).norm2());
+                if (use_BCa) {
+                    // need some all-minus-one stat average
+                    vector<FloatType> allm1(np1, 0.);
+                    vector<FloatType> allm2(np2, 0.);
+                    FloatType sumd1 = avgd1 * np1;
+                    FloatType sumd2 = avgd2 * np2;
+                    // now the all-minus-one values
+                    // shall ideally be computed on the diff values distribution, but it's
+                    // hard to have (n-1) stats on that. would be possible perhaps by considering
+                    // all np1*np2 possible combination and doing (n-1) stats on that...
+                    // quite heavy computationally
+                    if (np1>1) for (int i=0; i<np1; ++i) {
+                        allm1[i] = (sumd1 - distances_along_axis_1[i]) / (np1 - 1.0);
+                    }
+                    if (np2>1) for (int i=0; i<np2; ++i) {
+                        allm2[i] = (sumd2 - distances_along_axis_2[i]) / (np2 - 1.0);
+                    }
+                    FloatType meanm1 = mean(&allm1[0], np1);
+                    FloatType meanm2 = mean(&allm2[0], np2);
+                    FloatType sumdmsq1 = 0., sumdmth1 = 0;
+                    FloatType sumdmsq2 = 0., sumdmth2 = 0;
+                    for (auto x : allm1) {
+                        FloatType dm2 = (x - meanm1) * (x - meanm1);
+                        sumdmth1 += (x - meanm1) * dm2;
+                        sumdmsq1 += dm2;
+                    }
+                    for (auto x : allm2) {
+                        FloatType dm2 = (x - meanm2) * (x - meanm2);
+                        sumdmth2 += (x - meanm2) * dm2;
+                        sumdmsq2 += dm2;
+                    }
+                    // var(b*n2-a*n1) = var(b)*n2-var(a)*n1, uncorrelated
+                    if (np1>1) {sumdmsq1 /= np1-1; sumdmth1 /= np1-1;}
+                    if (np2>1) {sumdmsq2 /= np2-1; sumdmth2 /= np2-1;} // unsure /(n-1)...
+                    Point pdmsq = sumdmsq2 * normal_2 - sumdmsq1 * normal_1;
+                    Point pdmth = sumdmth2 * normal_2 - sumdmth1 * normal_1;
+                    FloatType dmsq = pdmsq.norm2();
+                    FloatType dmth = pdmth.x*pdmth.x*pdmth.x + pdmth.y*pdmth.y*pdmth.y + pdmth.z*pdmth.z*pdmth.z;
+                    if (dmsq>0) BC_acceleration_factor = dmth / (6.*sqrt(dmsq*dmsq*dmsq));
+                }
             }
         }
-        if (use_BCa) {
-            // need the sample statistic value and some all-minus-one stat average
-            vector<FloatType> allm1(np1, 0.);
-            vector<FloatType> allm2(np2, 0.);
-            if (use_median) {
-                sort(distances_along_axis_1.begin(), distances_along_axis_1.end());
-                sort(distances_along_axis_2.begin(), distances_along_axis_2.end());
-                avgd1 = median(&distances_along_axis_1[0], np1);
-                avgd2 = median(&distances_along_axis_2[0], np2);
-                // now the all-minus-one values
-                // median of all values without i
-                int halfnp1 = np1 / 2;
-                if (np1 % 2 == 0) {
-                    // removing points below the median index in the original vector
-                    // does not change the median in the vector without i
-                    // ori (even): | x | x | x | x | x | x |
-                    // rem<np1/2:  | x |   | x | m | x | x |
-                    // rem>=np1/2: | x | x | m |   | x | x |
-                    for (int i=0; i<halfnp1; ++i) allm1[i] = distances_along_axis_1[halfnp1];
-                    for (int i=halfnp1; i<np1; ++i) allm1[i] = distances_along_axis_1[halfnp1-1];
-                } else {
-                    // ori (odd):  | x | x | x | x | x | x | x |
-                    // rem<np1/2:  | x |   | x | m | m | x | x |
-                    // rem==np1/2: | x | x | m |   | m | x | x |
-                    // rem>np1/2:  | x | x | m | m | x |   | x |
-                    if (np1>1) {
-                        FloatType med = (distances_along_axis_1[halfnp1] + distances_along_axis_1[halfnp1+1]) * 0.5;
-                        for (int i=0; i<halfnp1; ++i) allm1[i] = med;
-                        // np1 odd and >1, at least 3
-                        allm1[halfnp1] = (distances_along_axis_1[halfnp1-1] + distances_along_axis_1[halfnp1+1]) * 0.5;
-                        med = (distances_along_axis_1[halfnp1-1] + distances_along_axis_1[halfnp1]) * 0.5;
-                        for (int i=halfnp1+1; i<np1; ++i) allm1[i] = med;
-                    }
-                }
-                int halfnp2 = np2 / 2;
-                if (np2 % 2 == 0) {
-                    for (int i=0; i<halfnp2; ++i) allm1[i] = distances_along_axis_1[halfnp2];
-                    for (int i=halfnp2; i<np2; ++i) allm1[i] = distances_along_axis_1[halfnp2-1];
-                } else {
-                    if (np2>1) {
-                        FloatType med = (distances_along_axis_2[halfnp2] + distances_along_axis_2[halfnp2+1]) * 0.5;
-                        for (int i=0; i<halfnp2; ++i) allm2[i] = med;
-                        allm2[halfnp2] = (distances_along_axis_2[halfnp2-1] + distances_along_axis_2[halfnp2+1]) * 0.5;
-                        med = (distances_along_axis_2[halfnp2-1] + distances_along_axis_2[halfnp2]) * 0.5;
-                        for (int i=halfnp2+1; i<np2; ++i) allm2[i] = med;
-                    }
-                }
-                
-            } else {
-                FloatType sumd1 = 0., sumd2 = 0.;
-                for (auto x : distances_along_axis_1) sumd1 += x;
-                for (auto x : distances_along_axis_2) sumd2 += x;
-                if (np1>0) avgd1 = sumd1 / np1;
-                if (np2>0) avgd2 = sumd2 / np2;
-                // now the all-minus-one values
-                if (np1>1) for (int i=0; i<np1; ++i) {
-                    allm1[i] = (sumd1 - distances_along_axis_1[i]) / (np1 - 1.0);
-                }
-                if (np2>1) for (int i=0; i<np2; ++i) {
-                    allm2[i] = (sumd2 - distances_along_axis_2[i]) / (np2 - 1.0);
-                }
-            }
-            Point core_shift_diff = avgd2 * normal_2 - avgd1 * normal_1;
-            sample_diff = core_shift_diff.norm();
-            // signed distance according to the normal direction
-            if (core_shift_diff.dot(normal_1+normal_2)<0) sample_diff *= -1;
-            // Finish the computation of the acceleration factor in the non-parametric BCa
-            // assume both planes follow the same distribution, cumulate the stats
-            // to estimate the acceleration factor
-            FloatType meanm = 0.;
-            for (auto x : allm1) meanm += x;
-            for (auto x : allm2) meanm += x;
-            if (np1+np2>0) meanm /= np1+np2;
-            FloatType sumdm2 = 0., sumdm3 = 0.;
-            for (auto x : allm1) {
-                FloatType dm2 = (x - meanm) * (x - meanm);
-                sumdm3 += (x - meanm) * dm2;
-                sumdm2 += dm2;
-            }
-            for (auto x : allm2) {
-                FloatType dm2 = (x - meanm) * (x - meanm);
-                sumdm3 += (x - meanm) * dm2;
-                sumdm2 += dm2;
-            }
-            if (sumdm2>0) BC_acceleration_factor = sumdm3 / (6.*sqrt(sumdm2*sumdm2*sumdm2));
-        }
+        
+        vector<FloatType> *bs_dist = 0;
+        if (use_BCa && use_median) bs_dist = new vector<FloatType>(num_bootstrap_iter);
                 
         // bootstrap, at last
         FloatType c1shift = 0, c2shift = 0;
@@ -1126,7 +1065,6 @@ int main(int argc, char** argv) {
                 resample(distances_along_axis_1, *daa1);
                 resample(distances_along_axis_2, *daa2);
             }
-            FloatType avgd1, avgd2, devd1, devd2;
             if (use_median) {
                 sort(daa1->begin(), daa1->end());
                 sort(daa2->begin(), daa2->end());
@@ -1154,19 +1092,9 @@ int main(int argc, char** argv) {
             diff_bsdev += deltanorm * deltanorm;
             
             if (diff < sample_diff) ++z0_sum;
+            
+            if (bs_dist) (*bs_dist)[bootstrap_iter] = deltanorm;
         }
-
-        // output confidence intervals, if needed
-        FloatType ci_low = 0., ci_high = 0.;
-        if (use_BCa) {
-            FloatType z0 = inverse_normal_cdf(z0_sum / (FloatType)num_bootstrap_iter);
-            ci_low = normal_cumulative(z0+(z0+z_low)/(1.-BC_acceleration_factor*(z0+z_low)));
-            ci_high = normal_cumulative(z0+(z0+z_high)/(1.-BC_acceleration_factor*(z0+z_high)));
-        } else if (normal_ci) {
-            ci_low = z_low * dev;
-            ci_high = ;
-        }
-        num_pt_sig
         
         if (num_bootstrap_iter>1) {delete daa1; delete daa2;}
         
@@ -1187,6 +1115,26 @@ int main(int argc, char** argv) {
             c1shift_bsdev = 0;
             c2shift_bsdev = 0;
         }
+
+        // output confidence intervals, if needed
+        if (use_BCa) {
+            if (use_median) {
+                sort(bs_dist->begin(), bs_dist->end());
+                int idxlow = max(0, min((int)floor(((1.-confidence_interval_percent*0.01) * 0.5) * num_bootstrap_iter), num_bootstrap_iter-1));
+                int idxhigh = max(0, min((int)floor((1.-(1.-confidence_interval_percent*0.01) * 0.5) * num_bootstrap_iter), num_bootstrap_iter-1));
+                ci_low = (*bs_dist)[idxlow];
+                ci_high = (*bs_dist)[idxhigh];
+                delete bs_dist;
+            } else {
+                FloatType z0 = inverse_normal_cdf(z0_sum / (FloatType)num_bootstrap_iter);
+                ci_low = normal_cumulative(z0+(z0+z_low)/(1.-BC_acceleration_factor*(z0+z_low)));
+                ci_high = normal_cumulative(z0+(z0+z_high)/(1.-BC_acceleration_factor*(z0+z_high)));
+            }
+        } else if (normal_ci && !use_median) {
+            ci_low = sample_diff + z_low * sample_dev;
+            ci_high = sample_diff + z_high * sample_dev;
+        }
+        int diff_sig = (np1>=num_pt_sig) && (np2>=num_pt_sig) && (diff>=ci_low) && (diff>=ci_high);
         
         Point core1 = corepoints[ptidx] + c1shift * normal_1;
         Point core2 = corepoints[ptidx] + c2shift * normal_2;
@@ -1216,6 +1164,9 @@ int main(int argc, char** argv) {
                 else if (formats[j] == "ksi2") resultfile << (scalesvec[normal_scale_idx_2] / c2dev);
                 else if (formats[j] == "n1angle_bs") resultfile << n1angle_bs;
                 else if (formats[j] == "n2angle_bs") resultfile << n2angle_bs;
+                else if (formats[j] == "diff_ci_low") resultfile << ci_low;
+                else if (formats[j] == "diff_ci_high") resultfile << ci_high;
+                else if (formats[j] == "diff_sig") resultfile << diff_sig;
                 else {
                     if (ptidx==0) cout << "Invalid result format \"" << formats[j] << "\" is ignored." << endl;
                 }
