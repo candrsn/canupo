@@ -55,8 +55,8 @@
 using namespace std;
 using namespace boost;
 
-const char* all_result_formats[] = {"diff", "dev1", "dev2", "shift1", "shift2", "c1", "c2", "n1", "n2", "sn1", "sn2", "np1", "np2", "diff_bsdev", "shift1_bsdev", "shift2_bsdev", "ksi1", "ksi2", "n1angle_bs", "n2angle_bs", "diff_ci_low", "diff_ci_high", "diff_sig"};
-const int nresformats = 23;
+const char* all_result_formats[] = {"diff", "dev1", "dev2", "shift1", "shift2", "c1", "c2", "n1", "n2", "sn1", "sn2", "np1", "np2", "diff_bsdev", "shift1_bsdev", "shift2_bsdev", "ksi1", "ksi2", "n1angle_bs", "n2angle_bs", "diff_ci_low", "diff_ci_high", "diff_sig", "normal_dev1", "normal_dev2"};
+const int nresformats = 25;
 const char* default_result_formats[] = {"c1","n1","diff","diff_sig"};
 const int num_default_result_formats = 4;
 
@@ -127,7 +127,8 @@ normaldiff normal_scale(s) : [cylinder_base : [cylinder_length : ]] p1.xyz[:p1re
                          #              When option \"q\" is activated the interquartile ranges are used instead of standard deviations.\n\
                          # - diff_bsdev: deviation of the diff value, estimated by bootstrapping.\n\
                          # - shift1_bsdev shift2_bsdev: deviation of the shift values, estimated by bootstrapping.\n\
-                         # - ksi1 ksi2: a shortcut for sn1/dev1 and sn2/dev2\n\
+                         # - normal_dev1 normal_dev2: standard deviation of the points around the plane corresponding to the normal, including all points within neighborhood at the normal scale sn1/sn2\n\
+                         # - ksi1 ksi2: a shortcut for sn1/normal_dev1 and sn2/normal_dev2\n\
                          # - n1angle_bs n2angle_bs: average angle (in degrees) between the normals and their mean value during normal bootstrapping. This can be seen as a kind of mean angular deviation around the normal, and is an indicator of how the normal is stable at that point. Requires the \"n\" flag.\n\
   input: opt_flags       # Optional flags. Some may be combined together. Ex: \"hqb\".\n\
                          # Available flags are:\n\
@@ -218,8 +219,8 @@ void resample(const vector<double>& original, vector<double>& resampled) {
 
 inline double inverse_normal_cdf(double p) {
     // use non-inf arithmetic, faster
-    if (p==0) return -numeric_limits<double>::max();
-    if (p==1) return numeric_limits<double>::max();
+    if (p<=0) return -numeric_limits<double>::max();
+    if (p>=1) return numeric_limits<double>::max();
 //    try {
     return M_SQRT2 * boost::math::erf_inv(2.*p-1.);
 //     } catch(...) {
@@ -359,6 +360,7 @@ int main(int argc, char** argv) {
     bool compute_normal_angles = false, compute_shift_bsdev = false;
     double n1angle_bs = 0, n2angle_bs = 0;
     bool use_BCa = false;
+    bool compute_normal_plane_dev = false;
     
     char_separator<char> colsep(":");
     char_separator<char> commasep(",");
@@ -387,6 +389,7 @@ int main(int argc, char** argv) {
             for (int i=0; i<num_default_result_formats; ++i) formats.push_back(default_result_formats[i]);
         }
         for (auto format : formats) {
+            if (format=="ksi1" || format=="ksi2" || format=="normal_dev1" || format=="normal_dev2") compute_normal_plane_dev = true;
             if (format=="n1angle_bs" || format=="n2angle_bs") compute_normal_angles = true;
             if (format=="shift1_bsdev" || format=="shift2_bsdev") compute_shift_bsdev = true;
             if (format=="diff_ci_low" || format=="diff_ci_high" || format=="diff_sig") use_BCa = true;
@@ -604,6 +607,7 @@ int main(int argc, char** argv) {
         vector<int> neigh_num_1(nscales,0), neigh_num_2(nscales,0);
         vector<Point> neighsums_1, neighsums_2;
         
+        if ((!force_vertical) || compute_normal_plane_dev)
         // Scales are sorted from max to lowest
         for (int scaleidx = 0; scaleidx<nscales; ++scaleidx) {
             // Neighborhood search only on max radius
@@ -668,7 +672,7 @@ int main(int argc, char** argv) {
         // bootstrapping is then done on that scale for the normal computations
         int normal_scale_idx_1 = 0, normal_scale_idx_2 = 0;
         
-        if (nscales>1) {
+        if (nscales>1 && !force_vertical) {
             double svalues[3];
             // avoid code dup below
             // but some dup in bootstrapping as I'm lazy to get rid of it
@@ -749,12 +753,19 @@ int main(int argc, char** argv) {
             normal_bs_sample1 = new vector<Point>(num_normal_bootstrap_iter);
             normal_bs_sample2 = new vector<Point>(num_normal_bootstrap_iter);
         }
+        
+        double normal_dev1 = 0, normal_dev2 = 0;
+        
+        // largest possible A, reused at each bootstrap step
+        vector<double> A1(neigh_num_1[0] * 3);
+        vector<double> A2(neigh_num_2[0] * 3);
+        vector<double>* A_ref[2] = {&A1, &A2};
 
         // We have all core point neighbors at all scales in each data set
         // and the correct scales for the computation
         // Now bootstrapping...
         for (int n_bootstrap_iter = 0; n_bootstrap_iter < num_normal_bootstrap_iter; ++n_bootstrap_iter) {
-            
+    
             Point normal_bs_1, normal_bs_2;
             int npts_scale0_bs_1, npts_scale0_bs_2;
             
@@ -770,40 +781,36 @@ int main(int argc, char** argv) {
             vector<DistPoint<Point> >* neighbors_ref[2] = {&neighbors_1, &neighbors_2};
             vector<int>* neigh_num_ref[2] = {&neigh_num_1, &neigh_num_2};
             vector<Point>* resampled_neighbors_ref[2] = {&resampled_neighbors_1, &resampled_neighbors_2};
-            
+            double* normal_dev_ref[2] = {&normal_dev1, &normal_dev2};
+            int npts_scaleN_1 = 0, npts_scaleN_2 = 0;
+            int* npts_scaleN_ref[2] = {&npts_scaleN_1, &npts_scaleN_2};
+                        
             // loop on both pt sets
             for (int ref12_idx = 0; ref12_idx < 2; ++ref12_idx) {
                 Point& normal = *normal_bs_ref[ref12_idx];
                 // vertical normals need none of the SVD business
                 if (force_vertical) {
                     normal.z = (deltaref.z<0) ? -1 : 1;
-                    continue;                    
+                    // but they may require a deviation around the plane
+                    if (!compute_normal_plane_dev) continue;
                 }
 
                 vector<DistPoint<Point> >& neighbors = *neighbors_ref[ref12_idx];
-                int& npts_scale0 = *npts_scale0_bs_ref[ref12_idx];
-                npts_scale0 = (*neigh_num_ref[ref12_idx])[0];
-                //if (npts_scale0==0) continue; // ensured >=3 at this point
-                // resampling with replacement
-                Point avg = 0;
-                vector<double> A(npts_scale0 * 3);
-                //int_dist(rng); // boost 1.47 is so much better :(
-                /*
-                boost::uniform_int<int> int_dist(0, npts_scale0-1);
-                boost::variate_generator<boost::mt11213b&, boost::uniform_int<int> > randint(rng, int_dist);
-                */
                 int normal_sidx = *normal_scale_idx_ref[ref12_idx];
-                int npts_scaleN = 0;
+                int npts_scale_base = (*neigh_num_ref[ref12_idx])[normal_sidx];
+                Point avg = 0;
+                vector<double>& A = *A_ref[ref12_idx];
+                int& npts_scaleN = *npts_scaleN_ref[ref12_idx];
                 double radiussq = scalesvec[normal_sidx] * scalesvec[normal_sidx] * 0.25;
                 Point bspt;
-                for (int i=0; i<npts_scale0; ++i) {
+                for (int i=0; i<npts_scale_base; ++i) {
                     Point* pt = neighbors[i].pt;
                     if (num_normal_bootstrap_iter>1) {
                         //int selectedidx = randint();
-                        int selectedidx = randint(npts_scale0);
+                        int selectedidx = randint(npts_scale_base);
                         pt = neighbors[selectedidx].pt;
                         // add some gaussian noise with dev specified by the user on each coordinate
-                        if (pos_dev>0) {
+                        if (pos_dev>0 && !force_vertical) {
                             bspt = *pt;
                             bspt.x += poserr_rand(); //poserr_dist(rng);
                             bspt.y += poserr_rand();
@@ -817,14 +824,14 @@ int main(int argc, char** argv) {
                     ++npts_scaleN;
                     avg += *pt;
                     A[i] = pt->x;
-                    A[i+npts_scale0] = pt->y;
-                    A[i+npts_scale0*2] = pt->z;
+                    A[i+npts_scale_base] = pt->y;
+                    A[i+npts_scale_base*2] = pt->z;
                 }
                 
                 // need to reshape A, colomn-major for Fortran :(
-                if (npts_scaleN<npts_scale0) {
-                    for (int i=0; i<npts_scaleN; ++i) A[i+npts_scaleN] = A[i+npts_scale0];
-                    for (int i=0; i<npts_scaleN; ++i) A[i+npts_scaleN*2] = A[i+npts_scale0*2];
+                if (npts_scaleN<npts_scale_base) {
+                    for (int i=0; i<npts_scaleN; ++i) A[i+npts_scaleN] = A[i+npts_scale_base];
+                    for (int i=0; i<npts_scaleN; ++i) A[i+npts_scaleN*2] = A[i+npts_scale_base*2];
                 }
                 // now finish the averaging
                 avg /= npts_scaleN;
@@ -833,32 +840,34 @@ int main(int argc, char** argv) {
                     A[i+npts_scaleN] -= avg.y;
                     A[i+npts_scaleN*2] -= avg.z;
                 }
-                if (force_horizontal) {
-                    if (npts_scaleN<2 && n_bootstrap_iter==0) {
-                        cout << "Warning: Invalid core point / data file / scale combination: less than 2 points at max scale for core point " << (ptidx+1) << " in data set " << ref12_idx+1 << endl;
-                    } else {
-                        // column-wise A: no need to reshape so as to skip z
-                        // SVD decomposition handled by LAPACK
-                        svd(npts_scaleN, 2, &A[0], &svalues[0], false, &eigenvectors[0]);
-                        // The total least squares solution in the horizontal plane
-                        // is given by the singular vector with minimal singular value
-                        int mins = 0; if (svalues[1]<svalues[0]) mins = 1;
-                        normal = Point(eigenvectors[mins], eigenvectors[2+mins], 0);
-                    }
-                } else {
-                    if (npts_scaleN<3 && n_bootstrap_iter==0) {
-                        cout << "Warning: Invalid core point / data file / scale combination: less than 3 points at max scale for core point " << (ptidx+1) << " in data set " << ref12_idx+1 << endl;
-                    } else {
-                        svd(npts_scaleN, 3, &A[0], &svalues[0], false, &eigenvectors[0]);
-                        // column-major matrix, eigenvectors as rows
-                        Point e1(eigenvectors[0], eigenvectors[3], eigenvectors[6]);
-                        Point e2(eigenvectors[1], eigenvectors[4], eigenvectors[7]);
-                        normal = e1.cross(e2);
-                    }
-                }
                 
-                // normal orientation... simple with external help
-                if (normal.dot(deltaref)<0) normal *= -1;
+                if (!force_vertical) {
+                    if (force_horizontal) {
+                        if (npts_scaleN<2 && n_bootstrap_iter==0) {
+                            cout << "Warning: Invalid core point / data file / scale combination: less than 2 points at max scale for core point " << (ptidx+1) << " in data set " << ref12_idx+1 << endl;
+                        } else {
+                            // column-wise A: no need to reshape so as to skip z
+                            // SVD decomposition handled by LAPACK
+                            svd(npts_scaleN, 2, &A[0], &svalues[0], false, &eigenvectors[0]);
+                            // The total least squares solution in the horizontal plane
+                            // is given by the singular vector with minimal singular value
+                            int mins = 0; if (svalues[1]<svalues[0]) mins = 1;
+                            normal = Point(eigenvectors[mins], eigenvectors[2+mins], 0);
+                        }
+                    } else {
+                        if (npts_scaleN<3 && n_bootstrap_iter==0) {
+                            cout << "Warning: Invalid core point / data file / scale combination: less than 3 points at max scale for core point " << (ptidx+1) << " in data set " << ref12_idx+1 << endl;
+                        } else {
+                            svd(npts_scaleN, 3, &A[0], &svalues[0], false, &eigenvectors[0]);
+                            // column-major matrix, eigenvectors as rows
+                            Point e1(eigenvectors[0], eigenvectors[3], eigenvectors[6]);
+                            Point e2(eigenvectors[1], eigenvectors[4], eigenvectors[7]);
+                            normal = e1.cross(e2);
+                        }
+                    }
+                    // normal orientation... simple with external help
+                    if (normal.dot(deltaref)<0) normal *= -1;
+                }
             }
             
             // replace the local iteration value for the options "1", "2", and "m"
@@ -898,6 +907,28 @@ int main(int argc, char** argv) {
                     normal_bs_2 = normal_bs_1;
                 }
             }
+            
+            if (compute_normal_plane_dev) for (int ref12_idx = 0; ref12_idx < 2; ++ref12_idx) {
+                vector<double>& A = *A_ref[ref12_idx];
+                int& npts_scaleN = *npts_scaleN_ref[ref12_idx];
+                Point& normal = *normal_bs_ref[ref12_idx];
+                double avg_dist_to_plane = 0.;
+                double ssq_dist_to_plane = 0.;
+                for (int i=0; i<npts_scaleN; ++i) {
+                    // A is now centered on 0, plane goes on 0
+                    Point a(A[i], A[i+npts_scaleN], A[i+npts_scaleN*2]);
+                    // so dist is easy to compute
+                    double d = a.dot(normal);
+                    avg_dist_to_plane += d;
+                    ssq_dist_to_plane += d*d;
+                }
+                if (npts_scaleN>1) {
+                    avg_dist_to_plane /= npts_scaleN;
+                    ssq_dist_to_plane = (ssq_dist_to_plane - npts_scaleN * avg_dist_to_plane * avg_dist_to_plane) / (npts_scaleN-1.);
+                    ssq_dist_to_plane = max(0.,ssq_dist_to_plane);
+                }
+                *normal_dev_ref[ref12_idx] += sqrt(ssq_dist_to_plane);
+            }
                 
             // bootstrap mean normal
             normal_1 += normal_bs_1;
@@ -911,6 +942,11 @@ int main(int argc, char** argv) {
         
         normal_1.normalize();
         normal_2.normalize();
+        
+        if (compute_normal_plane_dev) {
+            normal_dev1 /= num_normal_bootstrap_iter;
+            normal_dev2 /= num_normal_bootstrap_iter;
+        }
 
         // angles between normals and bs mean = a kind of directional deviation...
         // ... and a way to detect bad normals
@@ -1175,8 +1211,10 @@ int main(int argc, char** argv) {
                 else if (formats[j] == "diff_bsdev") resultfile << diff_bsdev;
                 else if (formats[j] == "shift1_bsdev") resultfile << c1shift_bsdev;
                 else if (formats[j] == "shift2_bsdev") resultfile << c2shift_bsdev;
-                else if (formats[j] == "ksi1") resultfile << (scalesvec[normal_scale_idx_1] / c1dev);
-                else if (formats[j] == "ksi2") resultfile << (scalesvec[normal_scale_idx_2] / c2dev);
+                else if (formats[j] == "normal_dev1") resultfile << normal_dev1;
+                else if (formats[j] == "normal_dev2") resultfile << normal_dev2;
+                else if (formats[j] == "ksi1") resultfile << (scalesvec[normal_scale_idx_1] / normal_dev1);
+                else if (formats[j] == "ksi2") resultfile << (scalesvec[normal_scale_idx_2] / normal_dev2);
                 else if (formats[j] == "n1angle_bs") resultfile << n1angle_bs;
                 else if (formats[j] == "n2angle_bs") resultfile << n2angle_bs;
                 else if (formats[j] == "diff_ci_low") resultfile << ci_low;
