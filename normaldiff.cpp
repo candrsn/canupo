@@ -1200,8 +1200,8 @@ int main(int argc, char** argv) {
                 ci_high = (*bs_dist)[idxhigh];
             }
         } else if (normal_ci && !use_median) {
-            ci_low = sample_diff + z_low * sample_dev / sqrt(num_bootstrap_iter);
-            ci_high = sample_diff + z_high * sample_dev / sqrt(num_bootstrap_iter);
+            ci_low = sample_diff + z_low * sample_dev / sqrt(np1*np2);
+            ci_high = sample_diff + z_high * sample_dev / sqrt(np1*np2);
         }
         int diff_sig = (np1>=num_pt_sig) && (np2>=num_pt_sig) && (diff>=ci_low) && (diff<=ci_high);
         
