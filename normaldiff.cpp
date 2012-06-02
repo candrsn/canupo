@@ -964,22 +964,68 @@ int main(int argc, char** argv) {
             daa1 = new vector<FloatType>(np1);
             daa2 = new vector<FloatType>(np2);
         }
-        
+
         // Confidence interval estimation using the bias-corrected accelerated BCa technique
         // activated on demand, adds some computations...
         FloatType z0_sum = 0, sample_diff = 0, BC_acceleration_factor = 0.;
+        // for the mean, OK:
+        // mean(a*n1-b*n2) = mean(a)*n1-mean(b)*n2
+        // NOTE: assume uncorrelated variations on each cloud
+        //       which is justified by the measurement process
+        //       i.e. laser scan repeated twice on similar scenes
+        // var(a*n1-b*n2) = var(a)*n1-var(b)*n2
+        // dev = sqrt(sum) and NOT sum sqrt
+        // for the median, more tricky...
         FloatType sample_dev = 0;
         if (normal_ci || use_BCa) {
-            // rely on random sampling when there are too many combinations
-            vector<FloatType> sample_deltanorm(min(np1*np2,np_prod_max),0.);
-            if (np1*np2>np_prod_max) for (int i=0; i<np_prod_max; ++i) {
-                FloatType d1 = distances_along_axis_1[randint(np1)];
-                FloatType d2 = distances_along_axis_2[randint(np2)];
-                sample_deltanorm[i] = (d2 * normal_2 - d1 * normal_1).norm();
-            } else for (int i=0; i<np1; ++i) for (int j=0; j<np2; ++j) {
-                FloatType d1 = distances_along_axis_1[i];
-                FloatType d2 = distances_along_axis_2[j];
-                sample_deltanorm[i*np2+j] = (d2 * normal_2 - d1 * normal_1).norm();
+            if (use_median) {
+                // rely on random sampling when there are too many combinations
+                vector<FloatType> sample_deltanorm(min(np1*np2,np_prod_max),0.);
+                if (np1*np2>np_prod_max) for (int i=0; i<np_prod_max; ++i) {
+                    FloatType d1 = distances_along_axis_1[randint(np1)];
+                    FloatType d2 = distances_along_axis_2[randint(np2)];
+                    sample_deltanorm[i] = (d2 * normal_2 - d1 * normal_1).norm();
+                } else for (int i=0; i<np1; ++i) for (int j=0; j<np2; ++j) {
+                    FloatType d1 = distances_along_axis_1[i];
+                    FloatType d2 = distances_along_axis_2[j];
+                    sample_deltanorm[i*np2+j] = (d2 * normal_2 - d1 * normal_1).norm();
+                }
+                sort(sample_deltanorm.begin(), sample_deltanorm.end());
+                sample_diff = median(&sample_deltanorm[0], sample_deltanorm.size());
+                sample_dev = interquartile(&sample_deltanorm[0], sample_deltanorm.size());
+                if (use_BCa) {
+                    // need some all-minus-one stat average
+                    vector<FloatType> allm(sample_deltanorm.size(), 0.);
+                    int half = sample_deltanorm.size() / 2;
+                    if (sample_deltanorm.size() % 2 == 0) {
+                        // removing points below the median index in the original vector
+                        // does not change the median in the vector without i
+                        // ori (even): | x | x | x | x | x | x |
+                        // rem<np1/2:  | x |   | x | m | x | x |
+                        // rem>=np1/2: | x | x | m |   | x | x |
+                        for (int i=0; i<half; ++i) allm[i] = sample_deltanorm[half];
+                        for (int i=half; i<allm.size(); ++i) allm[i] = sample_deltanorm[half-1];
+                    } else {
+                        // ori (odd):  | x | x | x | x | x | x | x |
+                        // rem<np1/2:  | x |   | x | m | m | x | x |
+                        // rem==np1/2: | x | x | m |   | m | x | x |
+                        // rem>np1/2:  | x | x | m | m | x |   | x |
+                        if (allm.size()>1) {
+                            FloatType med = (sample_deltanorm[half] + sample_deltanorm[half+1]) * 0.5;
+                            for (int i=0; i<half; ++i) allm[i] = med;
+                            // np1 odd and >1, at least 3
+                            allm[half] = (sample_deltanorm[half-1] + sample_deltanorm[half+1]) * 0.5;
+                            med = (sample_deltanorm[half-1] + sample_deltanorm[half]) * 0.5;
+                            for (int i=half+1; i<allm.size(); ++i) allm[i] = med;
+                        }
+                    }
+                }
+            } else {
+                mean_dev(&distances_along_axis_1[0], np1, avgd1, devd1);
+                mean_dev(&distances_along_axis_2[0], np2, avgd2, devd2);
+                Point core_shift_diff = avgd2 * normal_2 - avgd1 * normal_1;
+                sample_diff = core_shift_diff.norm();
+                sample_dev = sqrt((avgd2 * avgd2 * normal_2 - avgd1 * avgd1 * normal_1).norm2());
             }
         }
         if (use_BCa) {
