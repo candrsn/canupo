@@ -1034,6 +1034,32 @@ int main(int argc, char** argv) {
             daa1 = new vector<double>(np1);
             daa2 = new vector<double>(np2);
         }
+        
+        // Notes on using the normality assumption
+        
+        // d = dist(c+s1.n1,c+s2.n2)
+        // d^2 = s1^2 + s2^2 - 2.s1.s2.cos(n1,n2)
+        // E[d] is a bit problematic
+        // E[d] = ∬ d(s1,s2) p(s1,s2) δs1 δs2
+        // using p(s1,s2) = G(s1)G(s2) independent gaussians separation
+        // E[d] = m ∬ sqrt(s1^2 + s2^2 - 2.s1.s2.cos(n1,n2)) G(s1)G(s2) δs1 δs2
+        // Using signed distances such that m = sign( (s2n2-s1n1).extpt )
+        // ⇒ Can be integrated numerically
+        // var(d) = E[d^2] - E[d]^2
+        // E[d^2] = E[s1^2 + s2^2 - 2.s1.s2.cos(n1,n2)]
+        // Using independence of variations in each cloud, E[s1s2]=E[s1]E[s2]
+        // E[d^2] = E[s1^2] + E[s2^2] - 2.E[s1].E[s2].cos(n1,n2)
+        // Easy E[d^2], difficult E[d], but manageable
+        
+        // Check that this is consistent with n1=n2 ⇒ cos(n1,n2)=1
+        // E'[d] = m ∬ sqrt(s1^2 + s2^2 - 2.s1.s2) G(s1)G(s2) δs1 δs2
+        // E'[d] = m ∬ |s1-s2| G(s1)G(s2) δs1 δs2
+        // E'[d] = ∬ (s2-s1) G(s1)G(s2) δs1 δs2
+        // ± E'[d] = ∬ s2 G(s1)G(s2) δs1 δs2 - ∬ s1 G(s1)G(s2) δs1 δs2
+        // ± E'[d] = ∫ G(s1) (∫s2G(s2)δs2) δs1 - ∫ G(s2) (∫s1G(s1)δs1) δs2
+        // ± E'[d] = ∫ G(s1) E[s2] δs1 - ∫ G(s2) E[s1] δs2
+        // ± E'[d] = E[s2] ∫ G(s1) δs1 - E[s1] ∫ G(s2) δs2
+        // ± E'[d] = E[s2] - E[s1] = E[s2-s1]    OK, this is the 1D case !!!
 
         // Confidence interval estimation using the bias-corrected accelerated BCa technique
         // activated on demand, adds some computations...
@@ -1087,6 +1113,32 @@ int main(int argc, char** argv) {
                 vec3 mu1(avgd1, avgd1, avgd1);
                 vec3 mu2(avgd2, avgd2, avgd2);
                 Point core_shift_var = normal_2 * (mu2 - mu).memmul(mu2 - mu)
+                
+                // In the (c,n1,n2) plane
+                // shift1 = s1...
+                // d = dist(c+s1.n1,c+s2.n2)
+                // d^2 = s1^2 + s2^2 - 2s1s2cos(n1,n2)
+                // scalar formula, no need for multivariate/cov!
+                // var(d) = E[d^2] - E[d]^2
+                // E[d^2] OK
+                // E[d] more problematic
+                // E[d] = ∫_0^∞ d p(d)
+                // ... intractable
+                
+                
+                // In the (c,n1,n2) plane
+                // Σ = cov(X,Y)
+                // use diff_dev = sqrt |Σ|
+                // as the determinant is the change in area in 2D
+                // Σ = E[ (s1.n1)*(s2.n2^T) ] - (E[s1]n1)*(E[s2]n2)^T
+                // Σ = E[ s1.s2.(n1*n2^T) ] - E[s1]*E[s2](n1*n2^T)
+                // Σ = E[ s1.s2 ].(n1*n2^T) - E[s1]*E[s2](n1*n2^T)
+                // Σ = (E[ s1.s2 ] - E[s1]*E[s2]).(n1*n2^T)
+                // Σ = cov(s1,s2).(n1*n2^T)
+                // |Σ| = cov(s1,s2)^D |n1*n2^T|   with D the dimension for n1,n2
+                // In 2D, sqrt |Σ| = cov(s1,s2) sqrt |n1*n2^T|
+                
+                
                 
                 // diff = | E[Y].n2 - E[X].n1 |
                 // in the 1D case, when both normals are equal
