@@ -1112,7 +1112,7 @@ int main(int argc, char** argv) {
             }
             if (!use_median) {
                 vector<double> samples(0);
-                if (same_normal) {
+                if (same_normal && !use_BCa) {
                     if (num_bootstrap_iter==1) {
                         mean_dev(&distances_along_axis_1[0], np1, c1shift, c1dev);
                         mean_dev(&distances_along_axis_2[0], np2, c2shift, c2dev);
@@ -1168,8 +1168,8 @@ int main(int argc, char** argv) {
                     // hope to use a fine enough discretization...
                     // ...at every 0.02 quantile in each dist, shall be OK
                     vector<double> x1(50), x2(50), p1(50), p2(50);
-                    struct DP {double d, p, c;};
-                    vector<DP> dp(49*49, {0.,0.,0.});
+                    struct DP {double d, p;};
+                    vector<DP> dp(49*49, {0.,0.});
                     for (int i=1; i<=49; ++i) {
                         x1[i] = quantile(G1,i * 0.02);
                         p1[i] = pdf(G1,x1[i]);
@@ -1179,6 +1179,8 @@ int main(int argc, char** argv) {
                         p2[j] = pdf(G2,x2[j]);
                     }
                     double cosn1n2 = normal_1.dot(normal_2);
+                    double mind = numeric_limits<double>::max();
+                    double maxd = -numeric_limits<double>::max();
                     for (int i=1; i<=49; ++i) for (int j=1; j<=49; ++j) {
                         //(i-1)*49+(j-1)
                         dp[i*49+j-50].d = sqrt(max(0.,x1[i]*x1[i]+x2[j]*x2[j]-2*x1[i]*x2[j]*cosn1n2));
@@ -1186,20 +1188,35 @@ int main(int argc, char** argv) {
                         Point sn = (x2[j] * normal_2 - x1[i] * normal_1);
                         if (sn.dot(deltaref)<0) dp[i*49+j-50].d *= -1;
                         
+                        if (dp[i*49+j-50].d<mind) mind = dp[i*49+j-50].d;
+                        if (dp[i*49+j-50].d>maxd) maxd = dp[i*49+j-50].d;
+                        
                         dp[i*49+j-50].p = p1[i] * p2[j];
                     }
-                    sort(dp.begin(),dp.end(),[](const DP& dp1, const DP& dp2){
-                        return (dp1.d<dp2.d);
-                    });
-                    // integrate (trapeze method) to convert to CDF, update CI bounds
-                    dp[0].c = dp[0].p;
-                    ci_low = dp[0].c;
-                    ci_high = dp[0].c;
-                    for (int i=1; i<49*49; ++i) {
-                        dp[i].c = dp[i-1].c + 0.5*(dp[i].d-dp[i-1].d)*(dp[i].p+dp[i-1].p);
-                        if (dp[i].c<=cdf_low) ci_low = dp[i].d;
-                        ci_high = dp[i].d;
-                        if (dp[i].c>cdf_high) break;
+                    // now fill 200 bins within min/max range
+                    double bins[200]; for (int i=0; i<200; ++i) bins[i] = 0;
+                    double extent = maxd - mind;
+                    mind = (mind + maxd - extent)*0.5;
+                    double binsize = extent / 200.0;
+                    double binsizeinv = 200.0 / extent;
+                    for (int i=0; i<49*49; ++i) {
+                        int idx = max(0,min(199,(int)floor((dp[i].d - mind) * binsizeinv)));
+                        bins[idx] += dp[i].p;
+                    }
+                    // integrate to convert to CDF
+                    for (int i=1; i<200; ++i) bins[i] += bins[i-1];
+                    // renormalize to 1 to compensate discretization
+                    // update CI bounds
+                    ci_low = mind + 0.5 * binsize;
+                    ci_high = mind + 0.5 * binsize;
+                    double m = bins[0];
+                    double r = bins[199] - bins[0];
+                    for (int i=0; i<200; ++i) {
+                        bins[i] = (bins[i] - m) / r;
+                        double center = mind+(i+0.5)*binsize;
+                        if (bins[i]<=cdf_low) ci_low = center;
+                        ci_high = center;
+                        if (bins[i]>cdf_high) break;
                     }
                 // BCa case
                 } else {
