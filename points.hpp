@@ -80,6 +80,7 @@ struct PointTemplate : public Base, boost::addable<PointTemplate<Base>, boost::s
     inline PointTemplate& operator*=(const FloatType& f) {x*=f; y*=f; z*=f; return *this;}
     inline PointTemplate& operator/=(const FloatType& f) {x/=f; y/=f; z/=f; return *this;}
     
+    inline PointTemplate& memmul(const PointTemplate& v) {x*=v.x; y*=v.y; z*=v.z; return *this;}
     inline FloatType norm2() const {return x*x + y*y + z*z;}
     inline FloatType norm() const {return sqrt(norm2());}
     inline FloatType dot(const PointTemplate& v) const {return x*v.x + y*v.y + z*v.z;}

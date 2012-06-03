@@ -1047,7 +1047,7 @@ int main(int argc, char** argv) {
         // var(a*n1-b*n2) = var(a)*n1-var(b)*n2
         // dev = sqrt(sum) and NOT sum sqrt
         // for the median, more tricky...
-        double sample_dev = 0;
+        double sample_diff_mean_dev = 0;
         double ci_low = 0., ci_high = 0.;
         if (normal_ci || use_BCa) {
             // use median ⇒ no BCa, see below for using the bootstrap distribution instead
@@ -1074,8 +1074,35 @@ int main(int argc, char** argv) {
             if (!use_median) {
                 mean_dev(&distances_along_axis_1[0], np1, avgd1, devd1);
                 mean_dev(&distances_along_axis_2[0], np2, avgd2, devd2);
-                Point core_shift_diff = avgd2 * normal_2 - avgd1 * normal_1;
-                sample_diff = core_shift_diff.norm();
+                Point mu = avgd2 * normal_2 - avgd1 * normal_1;
+                sample_diff = mu.norm();
+                // mixture of normal distributions
+                // E[X] = μ = ∑ wi μi
+                // here weigths are normal2 and -normal1, X is each coordinate
+                // μ_x = n2x μ2 - n1x μ1, etc.
+                // then sample_diff = sqrt(μ_x^2 + μ_y^2 + μ_z^2)
+                // E[(X-μ)^2] = ∑ wi ( (μi - μ)^2 + var_i )
+                // here v_x = n2x.( (μ2 - μ_x)^2 + devd2*devd2 ) - n1x ...
+                // etc
+                vec3 mu1(avgd1, avgd1, avgd1);
+                vec3 mu2(avgd2, avgd2, avgd2);
+                Point core_shift_var = normal_2 * (mu2 - mu).memmul(mu2 - mu)
+                
+                // diff = | E[Y].n2 - E[X].n1 |
+                // in the 1D case, when both normals are equal
+                // diff = E[Y] - E[X] ok
+                // otherwise... diff = | E[Y.n2-X.n1] |  ≠  E[ |Y.n2-X.n1| ]
+                // diff = | E[Y.n2-X.n1] | = sqrt( E[Z]_x^2 + E[Z]_y^2 + E[Z]_z^2) , Z=Y.n2-X.n1
+                // diff = sqrt( E[Z_x]^2 + E[Z_y]^2 + E[Z_z]^2)
+                // var(Z_x) = E[Z_x^2] - E[Z_x]^2
+                // diff = sqrt( E[Z_x^2]+E[Z_y^2]+E[Z_z^2] - var(Z_x)-var(Z_y)-var(Z_z))
+                // diff = sqrt( E[|Z|^2] - var(Z_x)-var(Z_y)-var(Z_z))
+                
+                // var(a-b)=var(a)-var(b) for uncorrelated data, which we assume
+                // var(diff) = var(shift2 * normal2) - var(shift1 * normal1), and assuming uncorrelated coordinates,
+                // var(diff) = var(shift2) * normal2^2 - var(shift1) * normal1^2
+                // var(diff) = var(shift2) - var(shift1)
+                sample_diff_mean_dev
                 sample_dev = sqrt((avgd2 * avgd2 * normal_2 - avgd1 * avgd1 * normal_1).norm2());
                 if (use_BCa) {
                     // need some all-minus-one stat average
@@ -1200,8 +1227,9 @@ int main(int argc, char** argv) {
                 ci_high = (*bs_dist)[idxhigh];
             }
         } else if (normal_ci && !use_median) {
-            ci_low = sample_diff + z_low * sample_dev / sqrt(np1*np2);
-            ci_high = sample_diff + z_high * sample_dev / sqrt(np1*np2);
+            // hmm, not correct…
+            ci_low = sample_diff + z_low * sample_diff_mean_dev;
+            ci_high = sample_diff + z_high * sample_diff_mean_dev;
         }
         int diff_sig = (np1>=num_pt_sig) && (np2>=num_pt_sig) && (diff>=ci_low) && (diff<=ci_high);
         
