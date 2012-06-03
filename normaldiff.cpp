@@ -477,9 +477,12 @@ int main(int argc, char** argv) {
         return help("Invalid confidence interval for the c flag, shall be between 0 and 100");
     }
     double z_low = 0., z_high = 0.;
+    double cdf_low = 0., cdf_high = 0.;
     if (use_BCa || normal_ci) {
-        z_low = inverse_normal_cdf(0.5 - confidence_interval_percent/200.);
-        z_high = inverse_normal_cdf(0.5 + confidence_interval_percent/200.);
+        cdf_low = 0.5 - confidence_interval_percent/200.;
+        cdf_high = 0.5 + confidence_interval_percent/200.;
+        z_low = inverse_normal_cdf(cdf_low);
+        z_high = inverse_normal_cdf(cdf_high);
     }
     
     vector<double> *bs_dist = 0;
@@ -1069,14 +1072,18 @@ int main(int argc, char** argv) {
         // ± E'[d] = E[s2] - E[s1] = E[s2-s1]    OK, this is the 1D case !!!
 
         double avgd1, avgd2, devd1, devd2;
-        double z0_sum = 0, sample_diff = 0, BC_acceleration_factor = 0.;
+        double sample_diff = 0, BC_acceleration_factor = 0.;
         
-        double sample_dev = 0;
+        //double sample_dev = 0;
         double ci_low = 0., ci_high = 0.;
-        if (normal_ci || use_BCa) {
+        double c1shift = 0, c2shift = 0;
+        double c1dev = 0, c2dev = 0;
+        double diff = 0;
+        // work on sample distribution
+        if (normal_ci || use_BCa || (num_bootstrap_iter==1)) {
             // use median ⇒ no BCa, see below for using the bootstrap distribution instead
             // use the quartiles for the confidence_interval_percent then
-            if (use_median && normal_ci) {
+            if (use_median && (normal_ci || (num_bootstrap_iter==1))) {
                 // rely on random sampling when there are too many combinations
                 vector<double> sample_deltanorm(min(np1*np2,np_prod_max),0.);
                 if (np1*np2>np_prod_max) for (int i=0; i<np_prod_max; ++i) {
@@ -1089,42 +1096,34 @@ int main(int argc, char** argv) {
                     sample_deltanorm[i*np2+j] = (d2 * normal_2 - d1 * normal_1).norm();
                 }
                 sort(sample_deltanorm.begin(), sample_deltanorm.end());
-                int idxlow = max(0, min((int)floor(((1.-confidence_interval_percent*0.01) * 0.5) * sample_deltanorm.size()), (int)sample_deltanorm.size()-1));
-                int idxhigh = max(0, min((int)floor((1.-(1.-confidence_interval_percent*0.01) * 0.5) * sample_deltanorm.size()), (int)sample_deltanorm.size()-1));
-                ci_low = sample_deltanorm[idxlow];
-                ci_high = sample_deltanorm[idxhigh];
+                if (normal_ci) {
+                    int idxlow = max(0, min((int)floor(((1.-confidence_interval_percent*0.01) * 0.5) * sample_deltanorm.size()), (int)sample_deltanorm.size()-1));
+                    int idxhigh = max(0, min((int)floor((1.-(1.-confidence_interval_percent*0.01) * 0.5) * sample_deltanorm.size()), (int)sample_deltanorm.size()-1));
+                    ci_low = sample_deltanorm[idxlow];
+                    ci_high = sample_deltanorm[idxhigh];
+                }
+                if (num_bootstrap_iter==1) {
+                    c1shift = median(&distances_along_axis_1[0], np1);
+                    c2shift = median(&distances_along_axis_2[0], np2);
+                    c1dev = interquartile(&distances_along_axis_1[0], np1);
+                    c2dev = interquartile(&distances_along_axis_2[0], np2);
+                    diff = median(&sample_deltanorm[0], sample_deltanorm.size());
+                }
             }
             if (!use_median) {
-                mean_dev(&distances_along_axis_1[0], np1, avgd1, devd1);
-                mean_dev(&distances_along_axis_2[0], np2, avgd2, devd2);
+                vector<double> samples(0);
                 if (same_normal) {
-                    sample_diff = avgd2 - avgd1;
-                    // assumes independence of variations in each cloud
-                    // var(a-b)=var(a)+var(-b) and no covariance
-                    sample_dev = sqrt(devd2*devd2+devd1*devd1);
+                    if (num_bootstrap_iter==1) {
+                        mean_dev(&distances_along_axis_1[0], np1, c1shift, c1dev);
+                        mean_dev(&distances_along_axis_2[0], np2, c2shift, c2dev);
+                        diff = sample_diff = c2shift - c1shift;
+                    }
+                    else sample_diff = mean(&distances_along_axis_2[0], np2) - mean(&distances_along_axis_1[0], np1);
                 }
                 else {
-                    // argh, now we must estimate the tricky E[d] when n1≠n2
-/*                    struct D3 {double s1, s2, d;};
-                    const int nsamples = min(np1*np2,np_prod_max);
-                    vector<D3> samples(nsamples);
-                    if (np1*np2>np_prod_max) for (int i=0; i<np_prod_max; ++i) {
-                        samples[i].s1 = distances_along_axis_1[randint(np1)];
-                        samples[i].s2 = distances_along_axis_2[randint(np2)];
-                        samples[i].d = (samples[i].s2 * normal_2 - samples[i].s1 * normal_1).norm();
-                    } else for (int i=0; i<np1; ++i) for (int j=0; j<np2; ++j) {
-                        int idx = i*np2+j;
-                        samples[idx].s1 = distances_along_axis_1[i];
-                        samples[idx].s2 = distances_along_axis_2[j];
-                        samples[idx].d = (distances_along_axis_2[j] * normal_2 - distances_along_axis_1[i] * normal_1).norm();
-                    }
-*/
-                    sample_diff = 0.; sample_dev = 0.;
-                    double Ed_th = 0., sumwedth=0.;
-                    boost::math::normal G1(avgd1, devd1);
-                    boost::math::normal G2(avgd2, devd2);
-                    double cosn1n2 = n1.dot(n2);
-                    
+                    sample_diff = 0.;
+                    int nsamples = min(np1*np2,np_prod_max);
+                    if (use_BCa) samples.resize(nsamples);
                     for (int sidx=0; sidx<nsamples; ++sidx) {
                         int i1, i2;
                         if (nsamples==np_prod_max) {
@@ -1136,138 +1135,98 @@ int main(int argc, char** argv) {
                         }
                         double s1 = distances_along_axis_1[i1];
                         double s2 = distances_along_axis_2[i2];
-                        double d = (distances_along_axis_2[i2] * normal_2 - distances_along_axis_1[i1] * normal_1).norm();
+                        Point sn = (distances_along_axis_2[i2] * normal_2 - distances_along_axis_1[i1] * normal_1);
+                        double d = sn.norm();
+                        if (sn.dot(deltaref)<0) d *= -1;
                         sample_diff += d;
-                        sample_dev += d*d;
-                        
-                        if (normal_ci) {
-                            double weight = G1(s1)*G2(s2);
-                            sumwedth += weight;
-                            Ed_th += sqrt(max(0.,s1*s1+s2*s2-2.*s1*s2*cosn1n2))*weight;
-                        }
+                        //sample_dev += d*d;
+                        if (use_BCa) samples[sidx] = d;
                     }
                     sample_diff /= nsamples;
-                    sample_dev = (nsamples>1) ? sqrt(max(0.,(sample_dev - nsamples*sample_diff*sample_diff) / (nsamples - 1.))) : 0;
-                    
-                    // assumption of normality around each plane case
-                    if (normal_ci) {
-                        // integration over all space shall be 1
-                        // but there are always roundoff errors, renormalize now
-                        if (sumwedth!=0) Ed_th /= sumwedth;
-                        
-                    // BCa case
-                    } else {
+                    //sample_dev = (nsamples>1) ? sqrt(max(0.,(sample_dev - nsamples*sample_diff*sample_diff) / (nsamples - 1.))) : 0;
+                    if (num_bootstrap_iter==1) {
+                        mean_dev(&distances_along_axis_1[0], np1, c1shift, c1dev);
+                        mean_dev(&distances_along_axis_2[0], np2, c2shift, c2dev);
+                        diff = sample_diff;
                     }
-                    
                 }
-                // mixture of normal distributions
-                // E[X] = μ = ∑ wi μi
-                // here weigths are normal2 and -normal1, X is each coordinate
-                // μ_x = n2x μ2 - n1x μ1, etc.
-                // then sample_diff = sqrt(μ_x^2 + μ_y^2 + μ_z^2)
-                // E[(X-μ)^2] = ∑ wi ( (μi - μ)^2 + var_i )
-                // here v_x = n2x.( (μ2 - μ_x)^2 + devd2*devd2 ) - n1x ...
-                // etc
-                vec3 mu1(avgd1, avgd1, avgd1);
-                vec3 mu2(avgd2, avgd2, avgd2);
-                Point core_shift_var = normal_2 * (mu2 - mu).memmul(mu2 - mu)
                 
-                // In the (c,n1,n2) plane
-                // shift1 = s1...
-                // d = dist(c+s1.n1,c+s2.n2)
-                // d^2 = s1^2 + s2^2 - 2s1s2cos(n1,n2)
-                // scalar formula, no need for multivariate/cov!
-                // var(d) = E[d^2] - E[d]^2
-                // E[d^2] OK
-                // E[d] more problematic
-                // E[d] = ∫_0^∞ d p(d)
-                // ... intractable
-                
-                
-                // In the (c,n1,n2) plane
-                // Σ = cov(X,Y)
-                // use diff_dev = sqrt |Σ|
-                // as the determinant is the change in area in 2D
-                // Σ = E[ (s1.n1)*(s2.n2^T) ] - (E[s1]n1)*(E[s2]n2)^T
-                // Σ = E[ s1.s2.(n1*n2^T) ] - E[s1]*E[s2](n1*n2^T)
-                // Σ = E[ s1.s2 ].(n1*n2^T) - E[s1]*E[s2](n1*n2^T)
-                // Σ = (E[ s1.s2 ] - E[s1]*E[s2]).(n1*n2^T)
-                // Σ = cov(s1,s2).(n1*n2^T)
-                // |Σ| = cov(s1,s2)^D |n1*n2^T|   with D the dimension for n1,n2
-                // In 2D, sqrt |Σ| = cov(s1,s2) sqrt |n1*n2^T|
-                
-                
-                
-                // diff = | E[Y].n2 - E[X].n1 |
-                // in the 1D case, when both normals are equal
-                // diff = E[Y] - E[X] ok
-                // otherwise... diff = | E[Y.n2-X.n1] |  ≠  E[ |Y.n2-X.n1| ]
-                // diff = | E[Y.n2-X.n1] | = sqrt( E[Z]_x^2 + E[Z]_y^2 + E[Z]_z^2) , Z=Y.n2-X.n1
-                // diff = sqrt( E[Z_x]^2 + E[Z_y]^2 + E[Z_z]^2)
-                // var(Z_x) = E[Z_x^2] - E[Z_x]^2
-                // diff = sqrt( E[Z_x^2]+E[Z_y^2]+E[Z_z^2] - var(Z_x)-var(Z_y)-var(Z_z))
-                // diff = sqrt( E[|Z|^2] - var(Z_x)-var(Z_y)-var(Z_z))
-                
-                // var(a-b)=var(a)-var(b) for uncorrelated data, which we assume
-                // var(diff) = var(shift2 * normal2) - var(shift1 * normal1), and assuming uncorrelated coordinates,
-                // var(diff) = var(shift2) * normal2^2 - var(shift1) * normal1^2
-                // var(diff) = var(shift2) - var(shift1)
-                sample_diff_mean_dev
-                sample_dev = sqrt((avgd2 * avgd2 * normal_2 - avgd1 * avgd1 * normal_1).norm2());
-                if (use_BCa) {
-                    // need some all-minus-one stat average
-                    vector<double> allm1(np1, 0.);
-                    vector<double> allm2(np2, 0.);
-                    double sumd1 = avgd1 * np1;
-                    double sumd2 = avgd2 * np2;
-                    // now the all-minus-one values
-                    // shall ideally be computed on the diff values distribution, but it's
-                    // hard to have (n-1) stats on that. would be possible perhaps by considering
-                    // all np1*np2 possible combination and doing (n-1) stats on that...
-                    // quite heavy computationally
-                    if (np1>1) for (int i=0; i<np1; ++i) {
-                        allm1[i] = (sumd1 - distances_along_axis_1[i]) / (np1 - 1.0);
+                // assumption of normality around each plane case
+                if (normal_ci) {
+                    // compute the quantiles directly from the theoretical distribution
+                    if (num_bootstrap_iter==1) {
+                        avgd1 = c1shift; devd1 = c1dev;
+                        avgd2 = c2shift; devd2 = c2dev;
+                    } else {
+                        mean_dev(&distances_along_axis_1[0], np1, avgd1, devd1);
+                        mean_dev(&distances_along_axis_2[0], np2, avgd2, devd2);
                     }
-                    if (np2>1) for (int i=0; i<np2; ++i) {
-                        allm2[i] = (sumd2 - distances_along_axis_2[i]) / (np2 - 1.0);
+                    boost::math::normal G1(avgd1, devd1);
+                    boost::math::normal G2(avgd2, devd2);
+                    // go from ±4σ in each distribution, i.e. p ≈ 5.34e-5
+                    // which is more than enough for quantile estimation
+                    // hope to use a fine enough discretization...
+                    // ...at every 0.02 quantile in each dist, shall be OK
+                    vector<double> x1(50), x2(50), p1(50), p2(50);
+                    struct DP {double d, p, c;};
+                    vector<DP> dp(49*49, {0.,0.,0.});
+                    for (int i=1; i<=49; ++i) {
+                        x1[i] = quantile(G1,i * 0.02);
+                        p1[i] = pdf(G1,x1[i]);
                     }
-                    double meanm1 = mean(&allm1[0], np1);
-                    double meanm2 = mean(&allm2[0], np2);
-                    double sumdmsq1 = 0., sumdmth1 = 0;
-                    double sumdmsq2 = 0., sumdmth2 = 0;
-                    for (auto x : allm1) {
-                        double dm2 = (x - meanm1) * (x - meanm1);
-                        sumdmth1 += (x - meanm1) * dm2;
-                        sumdmsq1 += dm2;
+                    for (int j=1; j<=49; ++j) {
+                        x2[j] = quantile(G2,j * 0.02);
+                        p2[j] = pdf(G2,x2[j]);
                     }
-                    for (auto x : allm2) {
-                        double dm2 = (x - meanm2) * (x - meanm2);
-                        sumdmth2 += (x - meanm2) * dm2;
-                        sumdmsq2 += dm2;
+                    double cosn1n2 = normal_1.dot(normal_2);
+                    for (int i=1; i<=49; ++i) for (int j=1; j<=49; ++j) {
+                        //(i-1)*49+(j-1)
+                        dp[i*49+j-50].d = sqrt(max(0.,x1[i]*x1[i]+x2[j]*x2[j]-2*x1[i]*x2[j]*cosn1n2));
+
+                        Point sn = (x2[j] * normal_2 - x1[i] * normal_1);
+                        if (sn.dot(deltaref)<0) dp[i*49+j-50].d *= -1;
+                        
+                        dp[i*49+j-50].p = p1[i] * p2[j];
                     }
-                    // var(b*n2-a*n1) = var(b)*n2-var(a)*n1, uncorrelated
-                    if (np1>1) {sumdmsq1 /= np1-1; sumdmth1 /= np1-1;}
-                    if (np2>1) {sumdmsq2 /= np2-1; sumdmth2 /= np2-1;} // unsure /(n-1)...
-                    Point pdmsq = sumdmsq2 * normal_2 - sumdmsq1 * normal_1;
-                    Point pdmth = sumdmth2 * normal_2 - sumdmth1 * normal_1;
-                    double dmsq = pdmsq.norm2();
-                    double dmth = pdmth.x*pdmth.x*pdmth.x + pdmth.y*pdmth.y*pdmth.y + pdmth.z*pdmth.z*pdmth.z;
-                    if (dmsq>0) BC_acceleration_factor = dmth / (6.*sqrt(dmsq*dmsq*dmsq));
+                    sort(dp.begin(),dp.end(),[](const DP& dp1, const DP& dp2){
+                        return (dp1.d<dp2.d);
+                    });
+                    // integrate (trapeze method) to convert to CDF, update CI bounds
+                    dp[0].c = dp[0].p;
+                    ci_low = dp[0].c;
+                    ci_high = dp[0].c;
+                    for (int i=1; i<49*49; ++i) {
+                        dp[i].c = dp[i-1].c + 0.5*(dp[i].d-dp[i-1].d)*(dp[i].p+dp[i-1].p);
+                        if (dp[i].c<=cdf_low) ci_low = dp[i].d;
+                        ci_high = dp[i].d;
+                        if (dp[i].c>cdf_high) break;
+                    }
+                // BCa case
+                } else {
+                    // Mean value statistic, formula (7.4) in Efron's 87 paper
+                    double s3 = 0., s2 = 0.;
+                    int nsamples = min(np1*np2,np_prod_max);
+                    for (int sidx=0; sidx<nsamples; ++sidx) {
+                        double Ui = samples[sidx] - sample_diff;
+                        double Ui2 = Ui*Ui;
+                        s2 += Ui2;
+                        s3 += Ui2 * Ui;
+                    }
+                    BC_acceleration_factor = s3 / (6. * sqrt(s2*s2*s2));
+                    // ci_low, ci_high done below
                 }
             }
         }
                         
-        // bootstrap, at last
-        double c1shift = 0, c2shift = 0;
+        // bootstrap, if needed. case num_bootstrap_iter==1 done above
+        double diff_bsdev = 0;
+        double z0_sum = 0;
         double c1shift_bsdev = 0, c2shift_bsdev = 0;
-        double c1dev = 0, c2dev = 0;
-        double diff = 0, diff_bsdev = 0;
-        for (int bootstrap_iter = 0; bootstrap_iter < num_bootstrap_iter; ++bootstrap_iter) {
+        if (num_bootstrap_iter>1) for (int bootstrap_iter = 0; bootstrap_iter < num_bootstrap_iter; ++bootstrap_iter) {
             // resample the distances vectors
-            if (num_bootstrap_iter>1) {
-                resample(distances_along_axis_1, *daa1);
-                resample(distances_along_axis_2, *daa2);
-            }
+            resample(distances_along_axis_1, *daa1);
+            resample(distances_along_axis_2, *daa2);
+            double bsdiff = 0;
             if (use_median) {
                 sort(daa1->begin(), daa1->end());
                 sort(daa2->begin(), daa2->end());
@@ -1275,11 +1234,55 @@ int main(int argc, char** argv) {
                 avgd2 = median(&(*daa2)[0], daa2->size());
                 devd1 = interquartile(&(*daa1)[0], daa1->size());
                 devd2 = interquartile(&(*daa2)[0], daa2->size());
+                int nsamples = min(np1*np2,np_prod_max);
+                vector<double> samples(nsamples);
+                for (int sidx=0; sidx<nsamples; ++sidx) {
+                    int i1, i2;
+                    if (nsamples==np_prod_max) {
+                        i1 = randint(np1);
+                        i2 = randint(np2);
+                    } else {
+                        i1 = sidx / np2;
+                        i2 = sidx - i1 * np2;
+                    }
+                    double s1 = (*daa1)[i1];
+                    double s2 = (*daa2)[i2];
+                    Point sn = ((*daa2)[i2] * normal_2 - (*daa1)[i1] * normal_1);
+                    double d = sn.norm();
+                    if (sn.dot(deltaref)<0) d *= -1;
+                    samples[sidx] = d;
+                }
+                sort(samples.begin(), samples.end());
+                bsdiff = median(&samples[0], nsamples);
             } else {
                 mean_dev(&(*daa1)[0], daa1->size(), avgd1, devd1);
                 mean_dev(&(*daa2)[0], daa2->size(), avgd2, devd2);
+                if (same_normal) bsdiff = avgd2 - avgd1;
+                else {
+                    int nsamples = min(np1*np2,np_prod_max);
+                    bsdiff = 0.;
+                    for (int sidx=0; sidx<nsamples; ++sidx) {
+                        int i1, i2;
+                        if (nsamples==np_prod_max) {
+                            i1 = randint(np1);
+                            i2 = randint(np2);
+                        } else {
+                            i1 = sidx / np2;
+                            i2 = sidx - i1 * np2;
+                        }
+                        double s1 = (*daa1)[i1];
+                        double s2 = (*daa2)[i2];
+                        Point sn = ((*daa2)[i2] * normal_2 - (*daa1)[i1] * normal_1);
+                        double d = sn.norm();
+                        if (sn.dot(deltaref)<0) d *= -1;
+                        bsdiff += d;
+                    }
+                    bsdiff /= nsamples;
+                }
             }
             
+            diff += bsdiff;
+            diff_bsdev += bsdiff*bsdiff;
             c1shift += avgd1;
             c1shift_bsdev += avgd1 * avgd1; // for bootstrap distribution dev
             c1dev += devd1;
@@ -1287,19 +1290,10 @@ int main(int argc, char** argv) {
             c2shift_bsdev += avgd2 * avgd2;
             c2dev += devd2;
             
-            Point core_shift_diff = avgd2 * normal_2 - avgd1 * normal_1;
-            double deltanorm = core_shift_diff.norm();
-            // signed distance according to the normal direction
-            if (core_shift_diff.dot(normal_1+normal_2)<0) deltanorm *= -1;
-            diff += deltanorm;
-            diff_bsdev += deltanorm * deltanorm;
+            if (bsdiff < sample_diff) ++z0_sum;
             
-            if (deltanorm < sample_diff) ++z0_sum;
-            
-            if (bs_dist) (*bs_dist)[bootstrap_iter] = deltanorm;
+            if (bs_dist) (*bs_dist)[bootstrap_iter] = bsdiff;
         }
-        
-        if (num_bootstrap_iter>1) {delete daa1; delete daa2;}
         
         // finish bootstrap stats
         c1shift /= num_bootstrap_iter;
@@ -1309,6 +1303,7 @@ int main(int argc, char** argv) {
         diff /= num_bootstrap_iter;
         
         if (num_bootstrap_iter>1) {
+            delete daa1; delete daa2;
             diff_bsdev = sqrt( (diff_bsdev - diff*diff*num_bootstrap_iter)/(num_bootstrap_iter-1.0) );
             c1shift_bsdev = sqrt( (c1shift_bsdev - c1shift*c1shift*num_bootstrap_iter)/(num_bootstrap_iter-1.0) );
             c2shift_bsdev = sqrt( (c2shift_bsdev - c2shift*c2shift*num_bootstrap_iter)/(num_bootstrap_iter-1.0) );
@@ -1319,7 +1314,7 @@ int main(int argc, char** argv) {
             c2shift_bsdev = 0;
         }
 
-        // output confidence intervals, if needed
+        // finish the computation of confidence intervals if needed
         if (use_BCa) {
             sort(bs_dist->begin(), bs_dist->end());
             if (use_median) {
@@ -1336,11 +1331,8 @@ int main(int argc, char** argv) {
                 ci_low = (*bs_dist)[idxlow];
                 ci_high = (*bs_dist)[idxhigh];
             }
-        } else if (normal_ci && !use_median) {
-            // hmm, not correct…
-            ci_low = sample_diff + z_low * sample_diff_mean_dev;
-            ci_high = sample_diff + z_high * sample_diff_mean_dev;
         }
+        
         int diff_sig = (np1>=num_pt_sig) && (np2>=num_pt_sig) && (diff>=ci_low) && (diff<=ci_high);
         
         Point core1 = corepoints[ptidx] + c1shift * normal_1;
