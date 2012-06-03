@@ -38,6 +38,7 @@
 #include <boost/tokenizer.hpp>
 
 #include <boost/math/special_functions/erf.hpp>
+#include <boost/math/distributions/normal.hpp>
 
 #include <boost/format.hpp>
 
@@ -410,6 +411,8 @@ int main(int argc, char** argv) {
     double confidence_interval_percent = 95.;
     bool normal_ci = false;
     int num_pt_sig = 10;
+    
+    int np_prod_max = 10000;
     
     if (argc>separator+6) {
         int extra_info_idx = separator+6;
@@ -1034,6 +1037,10 @@ int main(int argc, char** argv) {
             daa1 = new vector<double>(np1);
             daa2 = new vector<double>(np2);
         }
+
+        // allow for some small numerical roundoff errors
+        // The unique normal case simplifies a lot the confidence interval algorithms
+        bool same_normal = (normal_1.dot(normal_2)>1.-1e-6);
         
         // Notes on using the normality assumption
         
@@ -1061,26 +1068,16 @@ int main(int argc, char** argv) {
         // ± E'[d] = E[s2] ∫ G(s1) δs1 - E[s1] ∫ G(s2) δs2
         // ± E'[d] = E[s2] - E[s1] = E[s2-s1]    OK, this is the 1D case !!!
 
-        // Confidence interval estimation using the bias-corrected accelerated BCa technique
-        // activated on demand, adds some computations...
         double avgd1, avgd2, devd1, devd2;
         double z0_sum = 0, sample_diff = 0, BC_acceleration_factor = 0.;
-        // for the mean, OK:
-        // mean(a*n1-b*n2) = mean(a)*n1-mean(b)*n2
-        // NOTE: assume uncorrelated variations on each cloud
-        //       which is justified by the measurement process
-        //       i.e. laser scan repeated twice on similar scenes
-        // var(a*n1-b*n2) = var(a)*n1-var(b)*n2
-        // dev = sqrt(sum) and NOT sum sqrt
-        // for the median, more tricky...
-        double sample_diff_mean_dev = 0;
+        
+        double sample_dev = 0;
         double ci_low = 0., ci_high = 0.;
         if (normal_ci || use_BCa) {
             // use median ⇒ no BCa, see below for using the bootstrap distribution instead
             // use the quartiles for the confidence_interval_percent then
             if (use_median && normal_ci) {
                 // rely on random sampling when there are too many combinations
-                const int np_prod_max = 10000;
                 vector<double> sample_deltanorm(min(np1*np2,np_prod_max),0.);
                 if (np1*np2>np_prod_max) for (int i=0; i<np_prod_max; ++i) {
                     double d1 = distances_along_axis_1[randint(np1)];
@@ -1100,8 +1097,69 @@ int main(int argc, char** argv) {
             if (!use_median) {
                 mean_dev(&distances_along_axis_1[0], np1, avgd1, devd1);
                 mean_dev(&distances_along_axis_2[0], np2, avgd2, devd2);
-                Point mu = avgd2 * normal_2 - avgd1 * normal_1;
-                sample_diff = mu.norm();
+                if (same_normal) {
+                    sample_diff = avgd2 - avgd1;
+                    // assumes independence of variations in each cloud
+                    // var(a-b)=var(a)+var(-b) and no covariance
+                    sample_dev = sqrt(devd2*devd2+devd1*devd1);
+                }
+                else {
+                    // argh, now we must estimate the tricky E[d] when n1≠n2
+/*                    struct D3 {double s1, s2, d;};
+                    const int nsamples = min(np1*np2,np_prod_max);
+                    vector<D3> samples(nsamples);
+                    if (np1*np2>np_prod_max) for (int i=0; i<np_prod_max; ++i) {
+                        samples[i].s1 = distances_along_axis_1[randint(np1)];
+                        samples[i].s2 = distances_along_axis_2[randint(np2)];
+                        samples[i].d = (samples[i].s2 * normal_2 - samples[i].s1 * normal_1).norm();
+                    } else for (int i=0; i<np1; ++i) for (int j=0; j<np2; ++j) {
+                        int idx = i*np2+j;
+                        samples[idx].s1 = distances_along_axis_1[i];
+                        samples[idx].s2 = distances_along_axis_2[j];
+                        samples[idx].d = (distances_along_axis_2[j] * normal_2 - distances_along_axis_1[i] * normal_1).norm();
+                    }
+*/
+                    sample_diff = 0.; sample_dev = 0.;
+                    double Ed_th = 0., sumwedth=0.;
+                    boost::math::normal G1(avgd1, devd1);
+                    boost::math::normal G2(avgd2, devd2);
+                    double cosn1n2 = n1.dot(n2);
+                    
+                    for (int sidx=0; sidx<nsamples; ++sidx) {
+                        int i1, i2;
+                        if (nsamples==np_prod_max) {
+                            i1 = randint(np1);
+                            i2 = randint(np2);
+                        } else {
+                            i1 = sidx / np2;
+                            i2 = sidx - i1 * np2;
+                        }
+                        double s1 = distances_along_axis_1[i1];
+                        double s2 = distances_along_axis_2[i2];
+                        double d = (distances_along_axis_2[i2] * normal_2 - distances_along_axis_1[i1] * normal_1).norm();
+                        sample_diff += d;
+                        sample_dev += d*d;
+                        
+                        if (normal_ci) {
+                            double weight = G1(s1)*G2(s2);
+                            sumwedth += weight;
+                            Ed_th += sqrt(max(0.,s1*s1+s2*s2-2.*s1*s2*cosn1n2))*weight;
+                        }
+                    }
+                    sample_diff /= nsamples;
+                    sample_dev = (nsamples>1) ? sqrt(max(0.,(sample_dev - nsamples*sample_diff*sample_diff) / (nsamples - 1.))) : 0;
+                    
+                    // assumption of normality around each plane case
+                    if (normal_ci) {
+                        // integration over all space shall be 1
+                        // but there are always roundoff errors, renormalize now
+                        if (sumwedth!=0) Ed_th /= sumwedth;
+                        
+                    // BCa case
+                    } else {
+                    }
+                    
+                }
                 // mixture of normal distributions
                 // E[X] = μ = ∑ wi μi
                 // here weigths are normal2 and -normal1, X is each coordinate
