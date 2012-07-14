@@ -224,14 +224,14 @@ inline double inverse_normal_cdf(double p) {
     if (p<=0) return -numeric_limits<double>::max();
     if (p>=1) return numeric_limits<double>::max();
 //    try {
-    return M_SQRT2 * boost::math::erf_inv(2.*p-1.);
+    return 1.4142135623730950488016887242096981 * boost::math::erf_inv(2.*p-1.);
 //     } catch(...) {
 //         cout << "inverse_normal_cdf error: p=" << p << endl;
 //         return 0;
 //     }
 }
 inline double normal_cumulative(double x) {
-    return 0.5 * (1. + boost::math::erf(x*M_SQRT1_2));
+    return 0.5 * (1. + boost::math::erf(x*0.7071067811865475244008443621048490));
 }
 
 /*
@@ -465,7 +465,10 @@ int main(int argc, char** argv) {
     }
     if (num_bootstrap_iter==1) {
         if (compute_shift_bsdev) return help("Warning: cannot compute the shift bootstrap deviation without bootstrapping, set the b flag.");
-        if (use_BCa) normal_ci = true; // default to normal assumption without bootstrap
+        if (use_BCa) {
+            normal_ci = true; // default to normal assumption without bootstrap
+            use_BCa = false;
+        }
     }
     // honor the g flag
     if (normal_ci && !use_median) use_BCa = false;
@@ -1111,6 +1114,7 @@ int main(int argc, char** argv) {
                 }
             }
             if (!use_median) {
+                int nsamples = np1*np2;
                 vector<double> samples(0);
                 if (same_normal && !use_BCa) {
                     if (num_bootstrap_iter==1) {
@@ -1122,7 +1126,7 @@ int main(int argc, char** argv) {
                 }
                 else {
                     sample_diff = 0.;
-                    int nsamples = min(np1*np2,np_prod_max);
+                    nsamples = min(np1*np2,np_prod_max);
                     if (use_BCa) samples.resize(nsamples);
                     for (int sidx=0; sidx<nsamples; ++sidx) {
                         int i1, i2;
@@ -1181,6 +1185,7 @@ int main(int argc, char** argv) {
                     double cosn1n2 = normal_1.dot(normal_2);
                     double mind = numeric_limits<double>::max();
                     double maxd = -numeric_limits<double>::max();
+                    double meand = 0, sump = 0;
                     for (int i=1; i<=49; ++i) for (int j=1; j<=49; ++j) {
                         //(i-1)*49+(j-1)
                         dp[i*49+j-50].d = sqrt(max(0.,x1[i]*x1[i]+x2[j]*x2[j]-2*x1[i]*x2[j]*cosn1n2));
@@ -1188,11 +1193,21 @@ int main(int argc, char** argv) {
                         Point sn = (x2[j] * normal_2 - x1[i] * normal_1);
                         if (sn.dot(deltaref)<0) dp[i*49+j-50].d *= -1;
                         
-                        if (dp[i*49+j-50].d<mind) mind = dp[i*49+j-50].d;
-                        if (dp[i*49+j-50].d>maxd) maxd = dp[i*49+j-50].d;
-                        
                         dp[i*49+j-50].p = p1[i] * p2[j];
+                        
+                        meand += dp[i*49+j-50].d * dp[i*49+j-50].p;
+                        sump += dp[i*49+j-50].p;
                     }
+                    meand /= sump;
+                    // estimate the sample mean stats, not the distance stats
+                    // convert to same distribution rescaled to have sample mean dev
+                    double smeanfactor = 1.0 / sqrt((double)nsamples);
+                    for (int i=0; i<49*49; ++i) {
+                        dp[i].d = meand + (dp[i].d - meand) * smeanfactor;
+                        if (dp[i].d<mind) mind = dp[i].d;
+                        if (dp[i].d>maxd) maxd = dp[i].d;
+                    }
+                    
                     // now fill 200 bins within min/max range
                     double bins[200]; for (int i=0; i<200; ++i) bins[i] = 0;
                     double extent = maxd - mind;
@@ -1219,10 +1234,9 @@ int main(int argc, char** argv) {
                         if (bins[i]>cdf_high) break;
                     }
                 // BCa case
-                } else {
+                } else if (use_BCa) {
                     // Mean value statistic, formula (7.4) in Efron's 87 paper
                     double s3 = 0., s2 = 0.;
-                    int nsamples = min(np1*np2,np_prod_max);
                     for (int sidx=0; sidx<nsamples; ++sidx) {
                         double Ui = samples[sidx] - sample_diff;
                         double Ui2 = Ui*Ui;
