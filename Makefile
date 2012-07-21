@@ -34,6 +34,7 @@ ifdef win32
     CXX=i686-w64-mingw32-g++
     STRIPCMD=i686-w64-mingw32-strip
     CXXFLAGS=-std=c++0x -static -pipe -march=corei7 -mfpmath=sse -msse2 -O3 -DNDEBUG -I/usr/local/mingw/include -L/usr/local/mingw/lib -DDEFINE_GETLINE=1 -DNO_MMAP 
+#    CXXFLAGS=-std=c++0x -static -pipe -march=i686 -mfpmath=sse -msse2 -O3 -DNDEBUG -I/usr/local/mingw/include -L/usr/local/mingw/lib -DDEFINE_GETLINE=1 -DNO_MMAP 
     LAPACK=-llapack -lblas -lgfortran
     CAIRO=-mwindows -mconsole -lcairo -lpixman-1 -lpng -lz -lfontconfig -liconv -lfreetype -lexpat -lws2_32 -lmsimg32
     PACKDIR=canupo_windows_static_32bits
@@ -47,7 +48,7 @@ else
     STRIP=/bin/true
 endif
 
-PACKED_CANUPO=canupo$(EXT) density$(EXT) suggest_classifier_svm$(EXT) suggest_classifier_lda$(EXT) msc_tool$(EXT) validate_classifier$(EXT) combine_classifiers$(EXT) classify$(EXT) filter$(EXT) resample$(EXT) prm_info$(EXT)
+PACKED_CANUPO=canupo$(EXT) density$(EXT) suggest_classifier_svm$(EXT) suggest_classifier_lda$(EXT) msc_tool$(EXT) validate_classifier$(EXT) combine_classifiers$(EXT) classify$(EXT) filter$(EXT) resample$(EXT) prm_info$(EXT) set_to_core$(EXT)
 
 ALL=$(PACKED_CANUPO) normaldiff$(EXT)
 
@@ -111,6 +112,10 @@ classify$(EXT):
 
 filter$(EXT):
 	$(CXX) $(CXXFLAGS) filter.cpp -o filter$(EXT)
+	@$(STRIP) filter$(EXT)
+
+set_to_core$(EXT):
+	$(CXX) $(CXXFLAGS) set_to_core.cpp -o set_to_core$(EXT)
 	@$(STRIP) filter$(EXT)
 
 resample$(EXT):

@@ -175,12 +175,15 @@ struct DistPoint {
 };
 
 // only classic notation supported, no fancy hex or the like that atof can handle
+// Usage: for (char* x = line; *x!=0;) {value = fast_atof_next_token(x); ... }
+// only classic notation supported, no fancy hex or the like that atof can handle
 inline FloatType fast_atof_next_token(char* &str) {
+    FloatType value = 0;
+    FloatType neg = 1;
+    if (*str==0) return 0;
     while ((*str==' ')||(*str=='\t')||(*str=='\n')||(*str=='\r')) {
         ++str; if (*str==0) return 0;
     }
-    FloatType value = 0;
-    FloatType neg = 1;
     for (;;++str) {
         switch(*str) {
             default: ++str;// break on invalid characters
@@ -198,15 +201,18 @@ inline FloatType fast_atof_next_token(char* &str) {
             case '8': value = value * 10 + 8; continue;
             case '9': value = value * 10 + 9; continue;
             case '.': {
-                ++str; if (*str==0) return value*neg; // useless terminal .
                 FloatType tenpow = 10;
+                ++str; if (*str==0) return value*neg; // useless terminal .
                 while ((*str>='0')&&(*str<='9')) {
                     value += (*str - '0') / tenpow;
                     tenpow *= 10;
                     ++str; if (*str==0) return value*neg;
                 } 
                 // ignore unknown characters other than e or E
-                if (*str!='e'&&*str!='E') return value*neg;
+                if (*str!='e'&&*str!='E') {
+                    while ((*str==' ')||(*str=='\t')||(*str=='\n')||(*str=='\r')) ++str;
+                    return value*neg;
+                }
             }
             case 'e':
             case 'E': {
@@ -214,7 +220,7 @@ inline FloatType fast_atof_next_token(char* &str) {
                 bool div = false;
                 for (++str;;++str) {
                     switch(*str) {
-                        default:
+                        default: ++str;
                         case 0: {
                             // non-recursive fast-exponentiation
                             // TODO: IEEE754 tricks... dependent of FloatType
@@ -227,6 +233,7 @@ inline FloatType fast_atof_next_token(char* &str) {
                             }
                             if (div) return value*neg/expoval; return value*neg*expoval;
                         }
+                        case '+': div = false; continue;
                         case '-': div = true; continue;
                         case '0': exponum *= 10; continue;
                         case '1': exponum = exponum * 10 + 1; continue;

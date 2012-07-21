@@ -144,11 +144,11 @@ normaldiff normal_scale(s) : [cylinder_base : [cylinder_length : ]] p1.xyz[:p1re
                          #  n: Number of bootstrap iterations for the estimation of the normals. 0 (the default) disables this bootstrapping. This option is useless when the normal is fixed to be vertical.\n\
                          #  c: Confidence interval (in %) for setting the significance bounds. Default is 95. This option is only effective when computing the diff_ci_xxx parameters.\n\
                          #  p: Minimal number of points that shall be in the cylinders (the np1 and np2 values), below which the the diff is considered not significant (the diff_sig value is set to 0). Default is 10.\n\
-                         #  g: Assume a normal (gaussian) distribution of the point distances around the mean shift(1/2) values for estimating the confidence interval of the diff values. The default (when g is not set) is to estimate the confidence interval for the mean/dev using the Bias-Corrected-accelerated bootstrapping technique when bootstrapping is active.\n\
                          #  q: Use the interquartile range and the median instead of standard deviation and mean, in order to define the new core point. The confidence intervals, if requested, are computed using the quantiles set by the c flag, either on the bootstrapped distribution (if available) or on a distribution of combinations of diffs between the clouds (can actually be slower and less reliable than bootstrap, check it!)\n\
                          #  e: provide the standard deviation of the Error on the point positions\n\
                          #     in p1 and p2 as extra info. This is a parameter provided by the device\n\
                          #     used for measuring p1 and p2. It is incorporated in the bootstrapping.\n\
+                         #  g: EXPERIMENTAL. Assume a normal (Gaussian) distribution of the point distances around the mean shift(1/2) values for estimating the confidence interval of the diff values. The default (when g is not set) is to estimate the confidence interval for the mean/dev using the Bias-Corrected-accelerated bootstrapping technique when bootstrapping is active.\n\
   input: extra_info      # Extra parameters for the \"e\", \"s\", \"b\", \"n\", \"c\" and \"p\" flags,\n\
                          # given in the same order as these flags were specified.\n\
                          # Ex: normaldiff (all other opts) ehb 1e-2 1000\n\
@@ -464,10 +464,12 @@ int main(int argc, char** argv) {
         pos_dev = 0;
     }
     if (num_bootstrap_iter==1) {
-        if (compute_shift_bsdev) return help("Warning: cannot compute the shift bootstrap deviation without bootstrapping, set the b flag.");
-        if (use_BCa) {
-            normal_ci = true; // default to normal assumption without bootstrap
-            use_BCa = false;
+        if (compute_shift_bsdev) return help("Error: cannot compute the shift bootstrap deviation without bootstrapping, set the b flag.");
+        if (use_BCa && !normal_ci) {
+            // too experimental, do not set any confidence interval then
+            // normal_ci = true;
+            // use_BCa = false;
+            return help("Error: confidence interval cannot be computed with bootstrap and only one iteration.");
         }
     }
     // honor the g flag
@@ -632,29 +634,31 @@ int main(int argc, char** argv) {
             if (scaleidx==0) {
                 // we have all neighbors, unsorted, but with distances computed already
                 // use scales = diameters, not radius
-                if (p1reducedfname.empty())
-                    p1.findNeighbors(back_inserter(neighbors_1), corepoints[ptidx], scalesvec[scaleidx] * 0.5);
-                else 
-                    p1reduced.findNeighbors(back_inserter(neighbors_1), corepoints[ptidx], scalesvec[scaleidx] * 0.5);
-                if (p2reducedfname.empty())
-                    p2.findNeighbors(back_inserter(neighbors_2), corepoints[ptidx], scalesvec[scaleidx] * 0.5);
-                else
-                    p2reduced.findNeighbors(back_inserter(neighbors_2), corepoints[ptidx], scalesvec[scaleidx] * 0.5);
-                // Sort the neighbors from closest to farthest, so we can process all lower scales easily
-                if (nscales>1) {
-                    sort(neighbors_1.begin(), neighbors_1.end());
-                    sort(neighbors_2.begin(), neighbors_2.end());
+                if (!shift_second || compute_normal_plane_dev) {
+                    if (p1reducedfname.empty())
+                        p1.findNeighbors(back_inserter(neighbors_1), corepoints[ptidx], scalesvec[scaleidx] * 0.5);
+                    else 
+                        p1reduced.findNeighbors(back_inserter(neighbors_1), corepoints[ptidx], scalesvec[scaleidx] * 0.5);
+                    // Sort the neighbors from closest to farthest, so we can process all lower scales easily
+                    if (nscales>1) sort(neighbors_1.begin(), neighbors_1.end());
+                    neigh_num_1[scaleidx] = neighbors_1.size();
+                    // pre-compute cumulated sums
+                    // so we might as well share the intermediates to lower levels
+                    neighsums_1.resize(neighbors_1.size());
+                    if (!neighbors_1.empty()) neighsums_1[0] = *neighbors_1[0].pt;
+                    for (int i=1; i<(int)neighbors_1.size(); ++i) neighsums_1[i] = neighsums_1[i-1] + *neighbors_1[i].pt;
                 }
-                neigh_num_1[scaleidx] = neighbors_1.size();
-                neigh_num_2[scaleidx] = neighbors_2.size();
-                // pre-compute cumulated sums
-                // so we might as well share the intermediates to lower levels
-                neighsums_1.resize(neighbors_1.size());
-                if (!neighbors_1.empty()) neighsums_1[0] = *neighbors_1[0].pt;
-                for (int i=1; i<(int)neighbors_1.size(); ++i) neighsums_1[i] = neighsums_1[i-1] + *neighbors_1[i].pt;
-                neighsums_2.resize(neighbors_2.size());
-                if (!neighbors_2.empty()) neighsums_2[0] = *neighbors_2[0].pt;
-                for (int i=1; i<(int)neighbors_2.size(); ++i) neighsums_2[i] = neighsums_2[i-1] + *neighbors_2[i].pt;
+                if (!shift_first || compute_normal_plane_dev) {
+                    if (p2reducedfname.empty())
+                        p2.findNeighbors(back_inserter(neighbors_2), corepoints[ptidx], scalesvec[scaleidx] * 0.5);
+                    else
+                        p2reduced.findNeighbors(back_inserter(neighbors_2), corepoints[ptidx], scalesvec[scaleidx] * 0.5);
+                    if (nscales>1) sort(neighbors_2.begin(), neighbors_2.end());
+                    neigh_num_2[scaleidx] = neighbors_2.size();
+                    neighsums_2.resize(neighbors_2.size());
+                    if (!neighbors_2.empty()) neighsums_2[0] = *neighbors_2[0].pt;
+                    for (int i=1; i<(int)neighbors_2.size(); ++i) neighsums_2[i] = neighsums_2[i-1] + *neighbors_2[i].pt;
+                }
             }
             // lower scale : restrict previously found neighbors to the new distance
             else {
@@ -663,32 +667,43 @@ int main(int argc, char** argv) {
                 int dichofirst = 0;
                 int dicholast = neighbors_1.size();
                 int dichomed;
-                while (true) {
-                    dichomed = (dichofirst + dicholast) / 2;
-                    if (dichomed==dichofirst) break;
-                    if (radiussq==neighbors_1[dichomed].distsq) break;
-                    if (radiussq<neighbors_1[dichomed].distsq) { dicholast = dichomed; continue;}
-                    dichofirst = dichomed;
+                if (!shift_second || compute_normal_plane_dev) {
+                    while (true) {
+                        dichomed = (dichofirst + dicholast) / 2;
+                        if (dichomed==dichofirst) break;
+                        if (radiussq==neighbors_1[dichomed].distsq) break;
+                        if (radiussq<neighbors_1[dichomed].distsq) { dicholast = dichomed; continue;}
+                        dichofirst = dichomed;
+                    }
+                    // dichomed is now the last index with distance below or equal to requested radius
+                    neigh_num_1[scaleidx] = dichomed+1;
                 }
-                // dichomed is now the last index with distance below or equal to requested radius
-                neigh_num_1[scaleidx] = dichomed+1;
                 // same for cloud 2
-                dichofirst = 0;
-                dicholast = neighbors_2.size();
-                while (true) {
-                    dichomed = (dichofirst + dicholast) / 2;
-                    if (dichomed==dichofirst) break;
-                    if (radiussq==neighbors_2[dichomed].distsq) break;
-                    if (radiussq<neighbors_2[dichomed].distsq) { dicholast = dichomed; continue;}
-                    dichofirst = dichomed;
+                if (!shift_first || compute_normal_plane_dev) {
+                    dichofirst = 0;
+                    dicholast = neighbors_2.size();
+                    while (true) {
+                        dichomed = (dichofirst + dicholast) / 2;
+                        if (dichomed==dichofirst) break;
+                        if (radiussq==neighbors_2[dichomed].distsq) break;
+                        if (radiussq<neighbors_2[dichomed].distsq) { dicholast = dichomed; continue;}
+                        dichofirst = dichomed;
+                    }
+                    neigh_num_2[scaleidx] = dichomed+1;
                 }
-                neigh_num_2[scaleidx] = dichomed+1;
             }
         }
 
         // The most planar scale is only computed once if needed
         // bootstrapping is then done on that scale for the normal computations
         int normal_scale_idx_1 = 0, normal_scale_idx_2 = 0;
+        
+        int ref12_idx_begin = 0;
+        int ref12_idx_end = 2;
+        if (!compute_normal_plane_dev) {
+            if (shift_first) ref12_idx_end = 1;
+            if (shift_second) ref12_idx_begin = 1;
+        }
         
         if (nscales>1 && !force_vertical) {
             double svalues[3];
@@ -698,8 +713,8 @@ int main(int argc, char** argv) {
             vector<DistPoint<Point> >* neighbors_ref[2] = {&neighbors_1, &neighbors_2};
             vector<int>* neigh_num_ref[2] = {&neigh_num_1, &neigh_num_2};
             vector<Point>* neighsums_ref[2] = {&neighsums_1, &neighsums_2};
-            // loop on both pt sets
-            for (int ref12_idx = 0; ref12_idx < 2; ++ref12_idx) {
+            // loop on both pt sets, unless shift1/2 specified
+            for (int ref12_idx = ref12_idx_begin; ref12_idx < ref12_idx_end; ++ref12_idx) {
                 vector<DistPoint<Point> >& neighbors = *neighbors_ref[ref12_idx];
                 double maxbarycoord = -numeric_limits<double>::max();
                 for (int sidx=0; sidx<nscales; ++sidx) {
@@ -811,7 +826,7 @@ int main(int argc, char** argv) {
             int* npts_scaleN_ref[2] = {&npts_scaleN_1, &npts_scaleN_2};
                         
             // loop on both pt sets
-            for (int ref12_idx = 0; ref12_idx < 2; ++ref12_idx) {
+            for (int ref12_idx = ref12_idx_begin; ref12_idx < ref12_idx_end; ++ref12_idx) {
                 Point& normal = *normal_bs_ref[ref12_idx];
                 // vertical normals need none of the SVD business
                 if (force_vertical) {
@@ -898,20 +913,8 @@ int main(int argc, char** argv) {
             }
             
             // replace the local iteration value for the options "1", "2", and "m"
-            if (shift_first) {
-                if (normal_bs_1.norm2()==0) {
-                    cout << "Warning: null normal on Cloud 1 and option \"1\" was specified, using normal 2 for core point " << (ptidx+1) << endl;
-                    normal_bs_1 = normal_bs_2;
-                }
-                else normal_bs_2 = normal_bs_1;
-            }
-            if (shift_second) {
-                if (normal_bs_2.norm2()==0) {
-                    cout << "Warning: null normal on Cloud 2 and option \"2\" was specified, using normal 1 for core point " << (ptidx+1) << endl;
-                    normal_bs_2 = normal_bs_1;
-                }
-                else normal_bs_1 = normal_bs_2;
-            }
+            if (shift_first) normal_bs_2 = normal_bs_1;
+            if (shift_second) normal_bs_1 = normal_bs_2;
             if (shift_mean) {
                 if (normal_bs_1.norm2()==0) {
                     cout << "Warning: null normal on Cloud 1 for core point " << (ptidx+1) << endl;
@@ -1165,7 +1168,11 @@ int main(int argc, char** argv) {
                         mean_dev(&distances_along_axis_1[0], np1, avgd1, devd1);
                         mean_dev(&distances_along_axis_2[0], np2, avgd2, devd2);
                     }
+                    if (devd1==0) devd1 = avgd1 * 1e-48;
+                    if (devd1==0) devd1 = 1e-48;
                     boost::math::normal G1(avgd1, devd1);
+                    if (devd2==0) devd2 = avgd2 * 1e-48;
+                    if (devd2==0) devd2 = 1e-48;
                     boost::math::normal G2(avgd2, devd2);
                     // go from ±4σ in each distribution, i.e. p ≈ 5.34e-5
                     // which is more than enough for quantile estimation
