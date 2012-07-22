@@ -637,6 +637,8 @@ int main(int argc, char** argv) {
         vector<DistPoint<Point> > neighbors_1, neighbors_2;
         vector<int> neigh_num_1(nscales,0), neigh_num_2(nscales,0);
         vector<Point> neighsums_1, neighsums_2;
+        // only used for rough ksi estimate at this point
+        double dev_cylbase_scale1 = 0, dev_cylbase_scale2 = 0;
         
         if ((!force_vertical) || compute_normal_plane_dev || ksi_autoscale>0)
         // Scales are sorted from max to lowest
@@ -651,7 +653,51 @@ int main(int argc, char** argv) {
                     else 
                         p1reduced.findNeighbors(back_inserter(neighbors_1), corepoints[ptidx], scalesvec[scaleidx] * 0.5);
                     // Sort the neighbors from closest to farthest, so we can process all lower scales easily
-                    if (nscales>1) sort(neighbors_1.begin(), neighbors_1.end());
+                    if (nscales>1 || ksi_autoscale>0) {
+                        sort(neighbors_1.begin(), neighbors_1.end());
+                        // find the neighbors at the cylinder_base scale
+                        if (ksi_autoscale>0) {
+                            // copy-pasted and adapted from below
+                            int npts = neighbors_1.size();
+                            if (npts>=3) {
+                                Point avg = 0;
+                                for (int i=0; i<npts; ++i) avg += *neighbors_1[i].pt;
+                                avg /= npts;
+                                vector<double> A(npts * 3);
+                                for (int i=0; i<npts; ++i) {
+                                    A[i] = neighbors_1[i].pt->x - avg.x;
+                                    A[i+npts] = neighbors_1[i].pt->y - avg.y;
+                                    A[i+npts*2] = neighbors_1[i].pt->z - avg.z;
+                                }
+                                double svalues[3]; double eigenvectors[9];
+                                svd(npts, 3, &A[0], &svalues[0], false, &eigenvectors[0]);
+                                Point e1(eigenvectors[0], eigenvectors[3], eigenvectors[6]);
+                                Point e2(eigenvectors[1], eigenvectors[4], eigenvectors[7]);
+                                Point normal = e1.cross(e2);
+                                vector<double> distances_along_axis;
+                                for (int cylsec=0; cylsec<num_cyl_balls; ++cylsec) {
+                                    Point base_segment_center = corepoints[ptidx] + (cyl_section_length*0.5-cylinder_length) * normal;
+                                    double min_dist_along_axis = cylsec * cyl_section_length - cylinder_length;
+                                    double max_dist_along_axis = min_dist_along_axis + cyl_section_length;
+                                    p1.applyToNeighbors(
+                                        [&](double d2, Point* p) {
+                                            Point delta = *p - corepoints[ptidx];
+                                            double dist_along_axis = delta.dot(normal);
+                                            double dist_to_axis_sq = (delta - dist_along_axis * normal).norm2();
+                                            if (dist_to_axis_sq>cylinder_base_radius_sq) return;
+                                            if (dist_along_axis<min_dist_along_axis) return;
+                                            if (dist_along_axis>=max_dist_along_axis) return;
+                                            distances_along_axis.push_back(dist_along_axis);
+                                        },
+                                        base_segment_center + (cylsec * cyl_section_length) * normal,
+                                        cyl_ball_radius
+                                    );
+                                }
+                                double dummy_mean;
+                                mean_dev(&distances_along_axis[0], distances_along_axis.size(), dummy_mean, dev_cylbase_scale1);
+                            }
+                        }
+                    }
                     neigh_num_1[scaleidx] = neighbors_1.size();
                     // pre-compute cumulated sums
                     // so we might as well share the intermediates to lower levels
@@ -665,7 +711,51 @@ int main(int argc, char** argv) {
                     else
                         p2reduced.findNeighbors(back_inserter(neighbors_2), corepoints[ptidx], scalesvec[scaleidx] * 0.5);
                     // Sort the neighbors from closest to farthest, so we can process all lower scales easily
-                    if (nscales>1) sort(neighbors_2.begin(), neighbors_2.end());
+                    if (nscales>1 || ksi_autoscale>0) {
+                        sort(neighbors_2.begin(), neighbors_2.end());
+                        // find the neighbors at the cylinder_base scale
+                        if (ksi_autoscale>0) {
+                            // copy-pasted and adapted from below
+                            int npts = neighbors_2.size();
+                            if (npts>=3) {
+                                Point avg = 0;
+                                for (int i=0; i<npts; ++i) avg += *neighbors_2[i].pt;
+                                avg /= npts;
+                                vector<double> A(npts * 3);
+                                for (int i=0; i<npts; ++i) {
+                                    A[i] = neighbors_2[i].pt->x - avg.x;
+                                    A[i+npts] = neighbors_2[i].pt->y - avg.y;
+                                    A[i+npts*2] = neighbors_2[i].pt->z - avg.z;
+                                }
+                                double svalues[3]; double eigenvectors[9];
+                                svd(npts, 3, &A[0], &svalues[0], false, &eigenvectors[0]);
+                                Point e1(eigenvectors[0], eigenvectors[3], eigenvectors[6]);
+                                Point e2(eigenvectors[1], eigenvectors[4], eigenvectors[7]);
+                                Point normal = e1.cross(e2);
+                                vector<double> distances_along_axis;
+                                for (int cylsec=0; cylsec<num_cyl_balls; ++cylsec) {
+                                    Point base_segment_center = corepoints[ptidx] + (cyl_section_length*0.5-cylinder_length) * normal;
+                                    double min_dist_along_axis = cylsec * cyl_section_length - cylinder_length;
+                                    double max_dist_along_axis = min_dist_along_axis + cyl_section_length;
+                                    p2.applyToNeighbors(
+                                        [&](double d2, Point* p) {
+                                            Point delta = *p - corepoints[ptidx];
+                                            double dist_along_axis = delta.dot(normal);
+                                            double dist_to_axis_sq = (delta - dist_along_axis * normal).norm2();
+                                            if (dist_to_axis_sq>cylinder_base_radius_sq) return;
+                                            if (dist_along_axis<min_dist_along_axis) return;
+                                            if (dist_along_axis>=max_dist_along_axis) return;
+                                            distances_along_axis.push_back(dist_along_axis);
+                                        },
+                                        base_segment_center + (cylsec * cyl_section_length) * normal,
+                                        cyl_ball_radius
+                                    );
+                                }
+                                double dummy_mean;
+                                mean_dev(&distances_along_axis[0], distances_along_axis.size(), dummy_mean, dev_cylbase_scale2);
+                            }
+                        }
+                    }
                     neigh_num_2[scaleidx] = neighbors_2.size();
                     neighsums_2.resize(neighbors_2.size());
                     if (!neighbors_2.empty()) neighsums_2[0] = *neighbors_2[0].pt;
@@ -725,6 +815,7 @@ int main(int argc, char** argv) {
             vector<DistPoint<Point> >* neighbors_ref[2] = {&neighbors_1, &neighbors_2};
             vector<int>* neigh_num_ref[2] = {&neigh_num_1, &neigh_num_2};
             vector<Point>* neighsums_ref[2] = {&neighsums_1, &neighsums_2};
+            double* dev_cylbase_scale_ref[2] = {&dev_cylbase_scale1, &dev_cylbase_scale2};
             // loop on both pt sets, unless shift1/2 specified
             for (int ref12_idx = ref12_idx_begin; ref12_idx < ref12_idx_end; ++ref12_idx) {
                 vector<DistPoint<Point> >& neighbors = *neighbors_ref[ref12_idx];
@@ -748,36 +839,14 @@ int main(int argc, char** argv) {
                         }
 
                         if (ksi_autoscale>0) {
-                            svd(npts, 3, &A[0], &svalues[0], false, &eigenvectors[0]);
-                            Point e1(eigenvectors[0], eigenvectors[3], eigenvectors[6]);
-                            Point e2(eigenvectors[1], eigenvectors[4], eigenvectors[7]);
-                            Point normal = e1.cross(e2);
-                            vector<double> distances_along_axis;
-                            for (int cylsec=0; cylsec<num_cyl_balls; ++cylsec) {
-                                Point base_segment_center = corepoints[ptidx] + (cyl_section_length*0.5-cylinder_length) * normal;
-                                double min_dist_along_axis = cylsec * cyl_section_length - cylinder_length;
-                                double max_dist_along_axis = min_dist_along_axis + cyl_section_length;
-                                ((ref12_idx==0)?p1:p2).applyToNeighbors(
-                                    [&](double d2, Point* p) {
-                                        Point delta = *p - corepoints[ptidx];
-                                        double dist_along_axis = delta.dot(normal);
-                                        double dist_to_axis_sq = (delta - dist_along_axis * normal).norm2();
-                                        if (dist_to_axis_sq>cylinder_base_radius_sq) return;
-                                        if (dist_along_axis<min_dist_along_axis) return;
-                                        if (dist_along_axis>=max_dist_along_axis) return;
-                                        distances_along_axis.push_back(dist_along_axis);
-                                    },
-                                    base_segment_center + (cylsec * cyl_section_length) * normal,
-                                    cyl_ball_radius
-                                );
-                            }
-                            double dummy_mean = 0, dev_cyl_scale = 0;
-                            mean_dev(&distances_along_axis[0], distances_along_axis.size(), dummy_mean, dev_cyl_scale);
+                            // scales run from largest to lowest, continue looking
+                            // for ksi values that satisfy the criterion
+                            double svalcyl = *dev_cylbase_scale_ref[ref12_idx];
                             // when svalcyl==0, estimate is infinite
                             // which means all scales match, so end up with the lowest one
-                            if (dev_cyl_scale<=0) *normal_scale_idx_ref[ref12_idx] = sidx;
+                            if (svalcyl==0) *normal_scale_idx_ref[ref12_idx] = sidx;
                             else {
-                                double ksi = scalesvec[sidx] / dev_cyl_scale;
+                                double ksi = scalesvec[sidx] / svalcyl;
                                 if (ksi > ksi_autoscale) *normal_scale_idx_ref[ref12_idx] = sidx;
                             }                            
                         } else {
