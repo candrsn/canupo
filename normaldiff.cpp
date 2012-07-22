@@ -148,6 +148,7 @@ normaldiff normal_scale(s) : [cylinder_base : [cylinder_length : ]] p1.xyz[:p1re
                          #  e: provide the standard deviation of the Error on the point positions\n\
                          #     in p1 and p2 as extra info. This is a parameter provided by the device\n\
                          #     used for measuring p1 and p2. It is incorporated in the bootstrapping.\n\
+                         #  k: Value for the ksi parameter (default is 30) for selecting the scale at which the normal is computed. The smallest scale satisfying ksi > this_value will be used. See the paper for what ksi means. Use a value of 0 to disable this parameter. In that case, the scale at which the cloud looks most 2D is used instead. Note: The value of ksi computed at the normal selection stage is only an approximation of the final value given by the ksi1/2 result specifiers: these may differ, especially for contrieved geometries, it is a good idea to double-check the ksi values and the selected scales if something goes amiss.\n\
                          #  f: (default, no need to specify) Fast-but-not-too-wrong estimator for the confidence intervals. This is Fast-and-exact only when the same normal is used, when each cloud is totally independant, and the points distances to their planes are distributed according to a Gaussian in each cylinder. These assumptions may fail, in which case use either the bootstrap technique (recommended) or maintain a Gaussian assumption and allow for normals to differ (g experimental flag, not recommended)\n\
                          #  g: EXPERIMENTAL. Assume a normal (Gaussian) distribution of the point distances around the mean shift(1/2) values for estimating the confidence interval of the diff values, but allow the normals to differ. The worst case relies on monte-carlo sampling of the joint distribution, which may be slower and less precise than boostrapping. This option dos not take into account the e flag.\n\
   input: extra_info      # Extra parameters for the \"e\", \"s\", \"b\", \"n\", \"c\" and \"p\" flags,\n\
@@ -415,6 +416,7 @@ int main(int argc, char** argv) {
     bool normal_ci = false;
     bool use_BCa = false;
     int num_pt_sig = 10;
+    double ksi_autoscale = 30.0;
     
     int np_prod_max = 10000;
     
@@ -439,6 +441,9 @@ int main(int argc, char** argv) {
                 } else return help("Missing value for the n flag");
                 case 'c': if (++extra_info_idx<argc) {
                     confidence_interval_percent = atof(argv[extra_info_idx]); break;
+                } else return help("Missing value for the c flag");
+                case 'k': if (++extra_info_idx<argc) {
+                    ksi_autoscale = atof(argv[extra_info_idx]); break;
                 } else return help("Missing value for the c flag");
                 case 'f': fast_ci = true; break;
                 case 'g': normal_ci = true; break;
@@ -632,8 +637,10 @@ int main(int argc, char** argv) {
         vector<DistPoint<Point> > neighbors_1, neighbors_2;
         vector<int> neigh_num_1(nscales,0), neigh_num_2(nscales,0);
         vector<Point> neighsums_1, neighsums_2;
+        // only used for rough ksi estimate at this point
+        double dev_cylbase_scale1 = 0, dev_cylbase_scale2 = 0;
         
-        if ((!force_vertical) || compute_normal_plane_dev)
+        if ((!force_vertical) || compute_normal_plane_dev || ksi_autoscale>0)
         // Scales are sorted from max to lowest
         for (int scaleidx = 0; scaleidx<nscales; ++scaleidx) {
             // Neighborhood search only on max radius
@@ -646,7 +653,39 @@ int main(int argc, char** argv) {
                     else 
                         p1reduced.findNeighbors(back_inserter(neighbors_1), corepoints[ptidx], scalesvec[scaleidx] * 0.5);
                     // Sort the neighbors from closest to farthest, so we can process all lower scales easily
-                    if (nscales>1) sort(neighbors_1.begin(), neighbors_1.end());
+                    if (nscales>1 || ksi_autoscale>0) {
+                        sort(neighbors_1.begin(), neighbors_1.end());
+                        // find the neighbors at the cylinder_base scale
+                        if (ksi_autoscale>0) {
+                            // copy-pasted and adapted from below
+                            int dichofirst = 0;
+                            int dicholast = neighbors_1.size();
+                            int dichomed;
+                            while (true) {
+                                dichomed = (dichofirst + dicholast) / 2;
+                                if (dichomed==dichofirst) break;
+                                if (cylinder_base_radius_sq==neighbors_1[dichomed].distsq) break;
+                                if (cylinder_base_radius_sq<neighbors_1[dichomed].distsq) { dicholast = dichomed; continue;}
+                                dichofirst = dichomed;
+                            }
+                            int npts = dichomed+1;
+                            if (npts>=3) {
+                                Point avg = 0;
+                                for (int i=0; i<npts; ++i) avg += *neighbors_1[i].pt;
+                                avg /= npts;
+                                vector<double> A(npts * 3);
+                                for (int i=0; i<npts; ++i) {
+                                    // A is column-major
+                                    A[i] = neighbors_1[i].pt->x - avg.x;
+                                    A[i+npts] = neighbors_1[i].pt->y - avg.y;
+                                    A[i+npts*2] = neighbors_1[i].pt->z - avg.z;
+                                }
+                                double svalues[3];
+                                svd(npts, 3, &A[0], &svalues[0]);
+                                dev_cylbase_scale1 = svalues[2];
+                            }
+                        }
+                    }
                     neigh_num_1[scaleidx] = neighbors_1.size();
                     // pre-compute cumulated sums
                     // so we might as well share the intermediates to lower levels
@@ -659,7 +698,40 @@ int main(int argc, char** argv) {
                         p2.findNeighbors(back_inserter(neighbors_2), corepoints[ptidx], scalesvec[scaleidx] * 0.5);
                     else
                         p2reduced.findNeighbors(back_inserter(neighbors_2), corepoints[ptidx], scalesvec[scaleidx] * 0.5);
-                    if (nscales>1) sort(neighbors_2.begin(), neighbors_2.end());
+                    // Sort the neighbors from closest to farthest, so we can process all lower scales easily
+                    if (nscales>1 || ksi_autoscale>0) {
+                        sort(neighbors_2.begin(), neighbors_2.end());
+                        // find the neighbors at the cylinder_base scale
+                        if (ksi_autoscale>0) {
+                            // copy-pasted and adapted from below
+                            int dichofirst = 0;
+                            int dicholast = neighbors_2.size();
+                            int dichomed;
+                            while (true) {
+                                dichomed = (dichofirst + dicholast) / 2;
+                                if (dichomed==dichofirst) break;
+                                if (cylinder_base_radius_sq==neighbors_2[dichomed].distsq) break;
+                                if (cylinder_base_radius_sq<neighbors_2[dichomed].distsq) { dicholast = dichomed; continue;}
+                                dichofirst = dichomed;
+                            }
+                            int npts = dichomed+1;
+                            if (npts>=3) {
+                                Point avg = 0;
+                                for (int i=0; i<npts; ++i) avg += *neighbors_2[i].pt;
+                                avg /= npts;
+                                vector<double> A(npts * 3);
+                                for (int i=0; i<npts; ++i) {
+                                    // A is column-major
+                                    A[i] = neighbors_2[i].pt->x - avg.x;
+                                    A[i+npts] = neighbors_2[i].pt->y - avg.y;
+                                    A[i+npts*2] = neighbors_2[i].pt->z - avg.z;
+                                }
+                                double svalues[3];
+                                svd(npts, 3, &A[0], &svalues[0]);
+                                dev_cylbase_scale2 = svalues[2];
+                            }
+                        }
+                    }
                     neigh_num_2[scaleidx] = neighbors_2.size();
                     neighsums_2.resize(neighbors_2.size());
                     if (!neighbors_2.empty()) neighsums_2[0] = *neighbors_2[0].pt;
@@ -711,7 +783,7 @@ int main(int argc, char** argv) {
             if (shift_second) ref12_idx_begin = 1;
         }
         
-        if (nscales>1 && !force_vertical) {
+        if (ksi_autoscale>0 || (nscales>1 && !force_vertical)) {
             double svalues[3];
             // avoid code dup below
             // but some dup in bootstrapping as I'm lazy to get rid of it
@@ -719,6 +791,7 @@ int main(int argc, char** argv) {
             vector<DistPoint<Point> >* neighbors_ref[2] = {&neighbors_1, &neighbors_2};
             vector<int>* neigh_num_ref[2] = {&neigh_num_1, &neigh_num_2};
             vector<Point>* neighsums_ref[2] = {&neighsums_1, &neighsums_2};
+            double* dev_cylbase_scale_ref[2] = {&dev_cylbase_scale1, &dev_cylbase_scale2};
             // loop on both pt sets, unless shift1/2 specified
             for (int ref12_idx = ref12_idx_begin; ref12_idx < ref12_idx_end; ++ref12_idx) {
                 vector<DistPoint<Point> >& neighbors = *neighbors_ref[ref12_idx];
@@ -739,28 +812,41 @@ int main(int argc, char** argv) {
                             A[i+npts*2] = neighbors[i].pt->z - avg.z;
                         }
                         svd(npts, 3, &A[0], &svalues[0]);
-                        // The most 2D scale. For the criterion for how "2D" a scale is, see canupo
-                        // Ideally first and second eigenvalue are equal
-                        // convert to percent variance explained by each dim
-                        double totalvar = 0;
-                        for (int i=0; i<3; ++i) {
-                            // singular values are squared roots of eigenvalues
-                            svalues[i] = svalues[i] * svalues[i]; // / (neighbors.size() - 1);
-                            totalvar += svalues[i];
-                        }
-                        for (int i=0; i<3; ++i) svalues[i] /= totalvar;
-                        // ideally, 2D means first and second entries are both 1/2 and third is 0
-                        // convert to barycentric coordinates and take the coefficient of the 2D
-                        // corner as a quality measure.
-                        // Use barycentric coordinates : a for 1D, b for 2D and c for 3D
-                        // Formula on wikipedia page for barycentric coordinates
-                        // using directly the triangle in %variance space, they simplify a lot
-                        //double c = 1 - a - b; // they sum to 1
-                        // a = svalues[0] - svalues[1];
-                        double b = 2 * svalues[0] + 4 * svalues[1] - 2;
-                        if (b > maxbarycoord) {
-                            maxbarycoord = b;
-                            *normal_scale_idx_ref[ref12_idx] = sidx;
+
+                        if (ksi_autoscale>0) {
+                            // scales run from largest to lowest, continue looking
+                            // for ksi values that satisfy the criterion
+                            double svalcyl = *dev_cylbase_scale_ref[ref12_idx];
+                            // when svalcyl==0, estimate is infinite
+                            // which means all scales match, so end up with the lowest one
+cout << "svalues[2]/svalcyl=" << svalues[2]/svalcyl << ", ksi_autoscale=" << ksi_autoscale << endl;
+                            if (svalcyl==0 || (svalues[2]/svalcyl > ksi_autoscale)) {
+                                *normal_scale_idx_ref[ref12_idx] = sidx;
+                            }
+                        } else {
+                            // The most 2D scale. For the criterion for how "2D" a scale is, see canupo
+                            // Ideally first and second eigenvalue are equal
+                            // convert to percent variance explained by each dim
+                            double totalvar = 0;
+                            for (int i=0; i<3; ++i) {
+                                // singular values are squared roots of eigenvalues
+                                svalues[i] = svalues[i] * svalues[i]; // / (neighbors.size() - 1);
+                                totalvar += svalues[i];
+                            }
+                            for (int i=0; i<3; ++i) svalues[i] /= totalvar;
+                            // ideally, 2D means first and second entries are both 1/2 and third is 0
+                            // convert to barycentric coordinates and take the coefficient of the 2D
+                            // corner as a quality measure.
+                            // Use barycentric coordinates : a for 1D, b for 2D and c for 3D
+                            // Formula on wikipedia page for barycentric coordinates
+                            // using directly the triangle in %variance space, they simplify a lot
+                            //double c = 1 - a - b; // they sum to 1
+                            // a = svalues[0] - svalues[1];
+                            double b = 2 * svalues[0] + 4 * svalues[1] - 2;
+                            if (b > maxbarycoord) {
+                                maxbarycoord = b;
+                                *normal_scale_idx_ref[ref12_idx] = sidx;
+                            }
                         }
                     }                    
                 }
