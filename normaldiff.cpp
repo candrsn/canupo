@@ -140,7 +140,7 @@ normaldiff normal_scale(s) : [cylinder_base : [cylinder_length : ]] p1.xyz[:p1re
                          #     The default is to shift the core point for each cloud using the normal computed on that cloud.\n\
                          #  2: Shift the core point on both clouds using the normal computed on the second cloud.\n\
                          #  m: Shift the core point on both clouds using the mean of both normals.\n\
-                         #  b: Number of bootstrap iterations for the standard deviation around the shifted position of the core points (default is 100). 0 disables this bootstrapping\n\
+                         #  b: Number of bootstrap iterations for the standard deviation around the shifted position of the core points (default is 0, see the f flag). 0 disables this bootstrapping\n\
                          #  n: Number of bootstrap iterations for the estimation of the normals. 0 (the default) disables this bootstrapping. This option is useless when the normal is fixed to be vertical.\n\
                          #  c: Confidence interval (in %) for setting the significance bounds. Default is 95. This option is only effective when computing the diff_ci_xxx parameters.\n\
                          #  p: Minimal number of points that shall be in the cylinders (the np1 and np2 values), below which the the diff is considered not significant (the diff_sig value is set to 0). Default is 10.\n\
@@ -148,7 +148,8 @@ normaldiff normal_scale(s) : [cylinder_base : [cylinder_length : ]] p1.xyz[:p1re
                          #  e: provide the standard deviation of the Error on the point positions\n\
                          #     in p1 and p2 as extra info. This is a parameter provided by the device\n\
                          #     used for measuring p1 and p2. It is incorporated in the bootstrapping.\n\
-                         #  g: EXPERIMENTAL. Assume a normal (Gaussian) distribution of the point distances around the mean shift(1/2) values for estimating the confidence interval of the diff values. The default (when g is not set) is to estimate the confidence interval for the mean/dev using the Bias-Corrected-accelerated bootstrapping technique when bootstrapping is active.\n\
+                         #  f: (default, no need to specify) Fast-but-not-too-wrong estimator for the confidence intervals. This is Fast-and-exact only when the same normal is used, when each cloud is totally independant, and the points distances to their planes are distributed according to a Gaussian in each cylinder. These assumptions may fail, in which case use either the bootstrap technique (recommended) or maintain a Gaussian assumption and allow for normals to differ (g experimental flag, not recommended)\n\
+                         #  g: EXPERIMENTAL. Assume a normal (Gaussian) distribution of the point distances around the mean shift(1/2) values for estimating the confidence interval of the diff values, but allow the normals to differ. The worst case relies on monte-carlo sampling of the joint distribution, which may be slower and less precise than boostrapping. This option dos not take into account the e flag.\n\
   input: extra_info      # Extra parameters for the \"e\", \"s\", \"b\", \"n\", \"c\" and \"p\" flags,\n\
                          # given in the same order as these flags were specified.\n\
                          # Ex: normaldiff (all other opts) ehb 1e-2 1000\n\
@@ -361,7 +362,9 @@ int main(int argc, char** argv) {
     
     bool compute_normal_angles = false, compute_shift_bsdev = false;
     double n1angle_bs = 0, n2angle_bs = 0;
-    bool use_BCa = false;
+    // set to true below by default if confidence intervals requested
+    // disabled below if another option is set
+    bool fast_ci = false;
     bool compute_normal_plane_dev = false;
     
     char_separator<char> colsep(":");
@@ -394,7 +397,7 @@ int main(int argc, char** argv) {
             if (format=="ksi1" || format=="ksi2" || format=="normal_dev1" || format=="normal_dev2") compute_normal_plane_dev = true;
             if (format=="n1angle_bs" || format=="n2angle_bs") compute_normal_angles = true;
             if (format=="shift1_bsdev" || format=="shift2_bsdev") compute_shift_bsdev = true;
-            if (format=="diff_ci_low" || format=="diff_ci_high" || format=="diff_sig") use_BCa = true;
+            if (format=="diff_ci_low" || format=="diff_ci_high" || format=="diff_sig") fast_ci = true;
         }
         result_formats.push_back(formats);
     }
@@ -407,9 +410,10 @@ int main(int argc, char** argv) {
     bool shift_mean = false;
     double pos_dev = 0;
     double max_core_shift_distance = numeric_limits<double>::max();
-    int num_bootstrap_iter = 100, num_normal_bootstrap_iter = 1;
+    int num_bootstrap_iter = 1, num_normal_bootstrap_iter = 1;
     double confidence_interval_percent = 95.;
     bool normal_ci = false;
+    bool use_BCa = false;
     int num_pt_sig = 10;
     
     int np_prod_max = 10000;
@@ -436,6 +440,7 @@ int main(int argc, char** argv) {
                 case 'c': if (++extra_info_idx<argc) {
                     confidence_interval_percent = atof(argv[extra_info_idx]); break;
                 } else return help("Missing value for the c flag");
+                case 'f': fast_ci = true; break;
                 case 'g': normal_ci = true; break;
                 case 'p': if (++extra_info_idx<argc) {
                     num_pt_sig = atoi(argv[extra_info_idx]); break;
@@ -458,11 +463,7 @@ int main(int argc, char** argv) {
     
     if (force_horizontal && force_vertical) return help("Cannot force normals to be both horizontal and vertical!");
     
-    if (num_bootstrap_iter<=0) {
-        if (pos_dev>0) return help("e flag is ignored when there is no bootstrap");
-        num_bootstrap_iter = 1;
-        pos_dev = 0;
-    }
+    if (num_bootstrap_iter<=0) num_bootstrap_iter = 1;
     if (num_bootstrap_iter==1) {
         if (compute_shift_bsdev) return help("Error: cannot compute the shift bootstrap deviation without bootstrapping, set the b flag.");
         if (use_BCa && !normal_ci) {
@@ -475,6 +476,11 @@ int main(int argc, char** argv) {
     // honor the g flag
     if (normal_ci && !use_median) use_BCa = false;
     
+    // disable the fast estimator if another technique is specified
+    if (use_BCa || normal_ci) fast_ci = false;
+    
+    if (fast_ci && use_median) return help("Estimating confidence interval when using median/interquartile ranges needs bootstrapping. Please set the b flag");
+    
     if (num_normal_bootstrap_iter<=0) num_normal_bootstrap_iter = 1;
     if (compute_normal_angles && (num_normal_bootstrap_iter==1)) cout << "Warning: cannot compute the normal angle deviations without bootstraping the normals, set the n flag." << endl;
 
@@ -483,7 +489,7 @@ int main(int argc, char** argv) {
     }
     double z_low = 0., z_high = 0.;
     double cdf_low = 0., cdf_high = 0.;
-    if (use_BCa || normal_ci) {
+    if (fast_ci || use_BCa || normal_ci) {
         cdf_low = 0.5 - confidence_interval_percent/200.;
         cdf_high = 0.5 + confidence_interval_percent/200.;
         z_low = inverse_normal_cdf(cdf_low);
@@ -1086,7 +1092,7 @@ int main(int argc, char** argv) {
         double c1dev = 0, c2dev = 0;
         double diff = 0;
         // work on sample distribution
-        if (normal_ci || use_BCa || (num_bootstrap_iter==1)) {
+        if (fast_ci || normal_ci || use_BCa || (num_bootstrap_iter==1)) {
             // use median ⇒ no BCa, see below for using the bootstrap distribution instead
             // use the quartiles for the confidence_interval_percent then
             if (use_median && (normal_ci || (num_bootstrap_iter==1))) {
@@ -1119,13 +1125,13 @@ int main(int argc, char** argv) {
             if (!use_median) {
                 int nsamples = np1*np2;
                 vector<double> samples(0);
-                if (same_normal && !use_BCa) {
-                    if (num_bootstrap_iter==1) {
+                if (fast_ci || (same_normal && !use_BCa)) {
+                    if (fast_ci || num_bootstrap_iter==1) {
                         mean_dev(&distances_along_axis_1[0], np1, c1shift, c1dev);
                         mean_dev(&distances_along_axis_2[0], np2, c2shift, c2dev);
                         diff = sample_diff = c2shift - c1shift;
                     }
-                    else sample_diff = mean(&distances_along_axis_2[0], np2) - mean(&distances_along_axis_1[0], np1);
+                    if (num_bootstrap_iter>1) sample_diff = mean(&distances_along_axis_2[0], np2) - mean(&distances_along_axis_1[0], np1);
                 }
                 else {
                     sample_diff = 0.;
@@ -1334,13 +1340,12 @@ int main(int argc, char** argv) {
         }
         
         // finish bootstrap stats
-        c1shift /= num_bootstrap_iter;
-        c1dev /= num_bootstrap_iter;
-        c2shift /= num_bootstrap_iter;
-        c2dev /= num_bootstrap_iter;
-        diff /= num_bootstrap_iter;
-        
         if (num_bootstrap_iter>1) {
+            c1shift /= num_bootstrap_iter;
+            c1dev /= num_bootstrap_iter;
+            c2shift /= num_bootstrap_iter;
+            c2dev /= num_bootstrap_iter;
+            diff /= num_bootstrap_iter;
             delete daa1; delete daa2;
             diff_bsdev = sqrt( (diff_bsdev - diff*diff*num_bootstrap_iter)/(num_bootstrap_iter-1.0) );
             c1shift_bsdev = sqrt( (c1shift_bsdev - c1shift*c1shift*num_bootstrap_iter)/(num_bootstrap_iter-1.0) );
@@ -1353,7 +1358,11 @@ int main(int argc, char** argv) {
         }
 
         // finish the computation of confidence intervals if needed
-        if (use_BCa) {
+        if (fast_ci) {
+            ci_high = 1.96 * sqrt(c1dev*c1dev/np1 + c2dev*c2dev/np2 + pos_dev*pos_dev);
+            ci_low = -ci_high;
+        }
+        else if (use_BCa) {
             sort(bs_dist->begin(), bs_dist->end());
             if (use_median) {
                 int idxlow = max(0, min((int)floor(((1.-confidence_interval_percent*0.01) * 0.5) * num_bootstrap_iter), num_bootstrap_iter-1));
