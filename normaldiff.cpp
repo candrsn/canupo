@@ -130,7 +130,7 @@ normaldiff normal_scale(s) : [cylinder_base : [cylinder_length : ]] p1.xyz[:p1re
                          # - diff_bsdev: deviation of the diff value, estimated by bootstrapping.\n\
                          # - shift1_bsdev shift2_bsdev: deviation of the shift values, estimated by bootstrapping.\n\
                          # - normal_dev1 normal_dev2: standard deviation of the points around the plane corresponding to the normal, including all points within neighborhood at the normal scale sn1/sn2\n\
-                         # - ksi1 ksi2: a shortcut for sn1/normal_dev1 and sn2/normal_dev2\n\
+                         # - ksi1 ksi2: a shortcut for sn1/dev1 and sn2/dev2\n\
                          # - n1angle_bs n2angle_bs: average angle (in degrees) between the normals and their mean value during normal bootstrapping. This can be seen as a kind of mean angular deviation around the normal, and is an indicator of how the normal is stable at that point. Requires the \"n\" flag.\n\
   input: opt_flags       # Optional flags. Some may be combined together. Ex: \"hqb\".\n\
                          # Available flags are:\n\
@@ -148,7 +148,7 @@ normaldiff normal_scale(s) : [cylinder_base : [cylinder_length : ]] p1.xyz[:p1re
                          #  e: provide the standard deviation of the Error on the point positions\n\
                          #     in p1 and p2 as extra info. This is a parameter provided by the device\n\
                          #     used for measuring p1 and p2. It is incorporated in the bootstrapping.\n\
-                         #  k: Value for the ksi parameter (default is 30) for selecting the scale at which the normal is computed. The smallest scale satisfying ksi > this_value will be used. See the paper for what ksi means. Use a value of 0 to disable this parameter. In that case, the scale at which the cloud looks most 2D is used instead. Note: The value of ksi computed at the normal selection stage is only an approximation of the final value given by the ksi1/2 result specifiers: these may differ, especially for contrieved geometries, it is a good idea to double-check the ksi values and the selected scales if something goes amiss.\n\
+                         #  k: Value for the ksi parameter (default is 0) for selecting the scale at which the normal is computed. The smallest scale satisfying ksi > this_value will be used. See the paper for what ksi means. Use a value of 0 to disable this parameter. In that case, the scale at which the cloud looks most 2D is used instead. Note: The value of ksi computed at the normal selection stage is only an approximation of the final value given by the ksi1/2 result specifiers: these may differ, especially for contrieved geometries, it is a good idea to double-check the ksi values and the selected scales if something goes amiss. Note2: Using this selection mode takes some extra cpu.\n\
                          #  f: (default, no need to specify) Fast-but-not-too-wrong estimator for the confidence intervals. This is Fast-and-exact only when the same normal is used, when each cloud is totally independant, and the points distances to their planes are distributed according to a Gaussian in each cylinder. These assumptions may fail, in which case use either the bootstrap technique (recommended) or maintain a Gaussian assumption and allow for normals to differ (g experimental flag, not recommended)\n\
                          #  g: EXPERIMENTAL. Assume a normal (Gaussian) distribution of the point distances around the mean shift(1/2) values for estimating the confidence interval of the diff values, but allow the normals to differ. The worst case relies on monte-carlo sampling of the joint distribution, which may be slower and less precise than boostrapping. This option dos not take into account the e flag.\n\
   input: extra_info      # Extra parameters for the \"e\", \"s\", \"b\", \"n\", \"c\" and \"p\" flags,\n\
@@ -416,7 +416,7 @@ int main(int argc, char** argv) {
     bool normal_ci = false;
     bool use_BCa = false;
     int num_pt_sig = 10;
-    double ksi_autoscale = 30.0;
+    double ksi_autoscale = 0;
     
     int np_prod_max = 10000;
     
