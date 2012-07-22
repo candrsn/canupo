@@ -658,31 +658,43 @@ int main(int argc, char** argv) {
                         // find the neighbors at the cylinder_base scale
                         if (ksi_autoscale>0) {
                             // copy-pasted and adapted from below
-                            int dichofirst = 0;
-                            int dicholast = neighbors_1.size();
-                            int dichomed;
-                            while (true) {
-                                dichomed = (dichofirst + dicholast) / 2;
-                                if (dichomed==dichofirst) break;
-                                if (cylinder_base_radius_sq==neighbors_1[dichomed].distsq) break;
-                                if (cylinder_base_radius_sq<neighbors_1[dichomed].distsq) { dicholast = dichomed; continue;}
-                                dichofirst = dichomed;
-                            }
-                            int npts = dichomed+1;
+                            int npts = neighbors_1.size();
                             if (npts>=3) {
                                 Point avg = 0;
                                 for (int i=0; i<npts; ++i) avg += *neighbors_1[i].pt;
                                 avg /= npts;
                                 vector<double> A(npts * 3);
                                 for (int i=0; i<npts; ++i) {
-                                    // A is column-major
                                     A[i] = neighbors_1[i].pt->x - avg.x;
                                     A[i+npts] = neighbors_1[i].pt->y - avg.y;
                                     A[i+npts*2] = neighbors_1[i].pt->z - avg.z;
                                 }
-                                double svalues[3];
-                                svd(npts, 3, &A[0], &svalues[0]);
-                                dev_cylbase_scale1 = svalues[2];
+                                double svalues[3]; double eigenvectors[9];
+                                svd(npts, 3, &A[0], &svalues[0], false, &eigenvectors[0]);
+                                Point e1(eigenvectors[0], eigenvectors[3], eigenvectors[6]);
+                                Point e2(eigenvectors[1], eigenvectors[4], eigenvectors[7]);
+                                Point normal = e1.cross(e2);
+                                vector<double> distances_along_axis;
+                                for (int cylsec=0; cylsec<num_cyl_balls; ++cylsec) {
+                                    Point base_segment_center = corepoints[ptidx] + (cyl_section_length*0.5-cylinder_length) * normal;
+                                    double min_dist_along_axis = cylsec * cyl_section_length - cylinder_length;
+                                    double max_dist_along_axis = min_dist_along_axis + cyl_section_length;
+                                    p1.applyToNeighbors(
+                                        [&](double d2, Point* p) {
+                                            Point delta = *p - corepoints[ptidx];
+                                            double dist_along_axis = delta.dot(normal);
+                                            double dist_to_axis_sq = (delta - dist_along_axis * normal).norm2();
+                                            if (dist_to_axis_sq>cylinder_base_radius_sq) return;
+                                            if (dist_along_axis<min_dist_along_axis) return;
+                                            if (dist_along_axis>=max_dist_along_axis) return;
+                                            distances_along_axis.push_back(dist_along_axis);
+                                        },
+                                        base_segment_center + (cylsec * cyl_section_length) * normal,
+                                        cyl_ball_radius
+                                    );
+                                }
+                                double dummy_mean;
+                                mean_dev(&distances_along_axis[0], distances_along_axis.size(), dummy_mean, dev_cylbase_scale1);
                             }
                         }
                     }
@@ -704,31 +716,43 @@ int main(int argc, char** argv) {
                         // find the neighbors at the cylinder_base scale
                         if (ksi_autoscale>0) {
                             // copy-pasted and adapted from below
-                            int dichofirst = 0;
-                            int dicholast = neighbors_2.size();
-                            int dichomed;
-                            while (true) {
-                                dichomed = (dichofirst + dicholast) / 2;
-                                if (dichomed==dichofirst) break;
-                                if (cylinder_base_radius_sq==neighbors_2[dichomed].distsq) break;
-                                if (cylinder_base_radius_sq<neighbors_2[dichomed].distsq) { dicholast = dichomed; continue;}
-                                dichofirst = dichomed;
-                            }
-                            int npts = dichomed+1;
+                            int npts = neighbors_2.size();
                             if (npts>=3) {
                                 Point avg = 0;
                                 for (int i=0; i<npts; ++i) avg += *neighbors_2[i].pt;
                                 avg /= npts;
                                 vector<double> A(npts * 3);
                                 for (int i=0; i<npts; ++i) {
-                                    // A is column-major
                                     A[i] = neighbors_2[i].pt->x - avg.x;
                                     A[i+npts] = neighbors_2[i].pt->y - avg.y;
                                     A[i+npts*2] = neighbors_2[i].pt->z - avg.z;
                                 }
-                                double svalues[3];
-                                svd(npts, 3, &A[0], &svalues[0]);
-                                dev_cylbase_scale2 = svalues[2];
+                                double svalues[3]; double eigenvectors[9];
+                                svd(npts, 3, &A[0], &svalues[0], false, &eigenvectors[0]);
+                                Point e1(eigenvectors[0], eigenvectors[3], eigenvectors[6]);
+                                Point e2(eigenvectors[1], eigenvectors[4], eigenvectors[7]);
+                                Point normal = e1.cross(e2);
+                                vector<double> distances_along_axis;
+                                for (int cylsec=0; cylsec<num_cyl_balls; ++cylsec) {
+                                    Point base_segment_center = corepoints[ptidx] + (cyl_section_length*0.5-cylinder_length) * normal;
+                                    double min_dist_along_axis = cylsec * cyl_section_length - cylinder_length;
+                                    double max_dist_along_axis = min_dist_along_axis + cyl_section_length;
+                                    p2.applyToNeighbors(
+                                        [&](double d2, Point* p) {
+                                            Point delta = *p - corepoints[ptidx];
+                                            double dist_along_axis = delta.dot(normal);
+                                            double dist_to_axis_sq = (delta - dist_along_axis * normal).norm2();
+                                            if (dist_to_axis_sq>cylinder_base_radius_sq) return;
+                                            if (dist_along_axis<min_dist_along_axis) return;
+                                            if (dist_along_axis>=max_dist_along_axis) return;
+                                            distances_along_axis.push_back(dist_along_axis);
+                                        },
+                                        base_segment_center + (cylsec * cyl_section_length) * normal,
+                                        cyl_ball_radius
+                                    );
+                                }
+                                double dummy_mean;
+                                mean_dev(&distances_along_axis[0], distances_along_axis.size(), dummy_mean, dev_cylbase_scale2);
                             }
                         }
                     }
@@ -784,7 +808,7 @@ int main(int argc, char** argv) {
         }
         
         if (ksi_autoscale>0 || (nscales>1 && !force_vertical)) {
-            double svalues[3];
+            double svalues[3]; double eigenvectors[9];
             // avoid code dup below
             // but some dup in bootstrapping as I'm lazy to get rid of it
             int* normal_scale_idx_ref[2] = {&normal_scale_idx_1, &normal_scale_idx_2};
@@ -796,6 +820,8 @@ int main(int argc, char** argv) {
             for (int ref12_idx = ref12_idx_begin; ref12_idx < ref12_idx_end; ++ref12_idx) {
                 vector<DistPoint<Point> >& neighbors = *neighbors_ref[ref12_idx];
                 double maxbarycoord = -numeric_limits<double>::max();
+                // init to largest scale in case ksi condition is never verified below
+                if (ksi_autoscale>0) *normal_scale_idx_ref[ref12_idx] = 0;
                 for (int sidx=0; sidx<nscales; ++sidx) {
                     int npts = (*neigh_num_ref[ref12_idx])[sidx];
                     if (npts>=3) {
@@ -811,7 +837,6 @@ int main(int argc, char** argv) {
                             A[i+npts] = neighbors[i].pt->y - avg.y;
                             A[i+npts*2] = neighbors[i].pt->z - avg.z;
                         }
-                        svd(npts, 3, &A[0], &svalues[0]);
 
                         if (ksi_autoscale>0) {
                             // scales run from largest to lowest, continue looking
@@ -819,11 +844,14 @@ int main(int argc, char** argv) {
                             double svalcyl = *dev_cylbase_scale_ref[ref12_idx];
                             // when svalcyl==0, estimate is infinite
                             // which means all scales match, so end up with the lowest one
-cout << "svalues[2]/svalcyl=" << svalues[2]/svalcyl << ", ksi_autoscale=" << ksi_autoscale << endl;
-                            if (svalcyl==0 || (svalues[2]/svalcyl > ksi_autoscale)) {
-                                *normal_scale_idx_ref[ref12_idx] = sidx;
-                            }
+                            if (svalcyl==0) *normal_scale_idx_ref[ref12_idx] = sidx;
+                            else {
+                                double ksi = scalesvec[sidx] / svalcyl;
+                                if (ksi > ksi_autoscale) *normal_scale_idx_ref[ref12_idx] = sidx;
+                            }                            
                         } else {
+                            svd(npts, 3, &A[0], &svalues[0]);
+                            
                             // The most 2D scale. For the criterion for how "2D" a scale is, see canupo
                             // Ideally first and second eigenvalue are equal
                             // convert to percent variance explained by each dim
