@@ -148,10 +148,11 @@ normaldiff normal_scale(s) : [cylinder_base : [cylinder_length : ]] p1.xyz[:p1re
                          #  e: provide the standard deviation of the Error on the point positions\n\
                          #     in p1 and p2 as extra info. This is a parameter provided by the device\n\
                          #     used for measuring p1 and p2. It is incorporated in the bootstrapping.\n\
-                         #  k: Value for the ksi parameter (default is 0) for selecting the scale at which the normal is computed. The smallest scale satisfying ksi > this_value will be used. See the paper for what ksi means. Use a value of 0 to disable this parameter. In that case, the scale at which the cloud looks most 2D is used instead. Note: The value of ksi computed at the normal selection stage is only an approximation of the final value given by the ksi1/2 result specifiers: these may differ, especially for contrieved geometries, it is a good idea to double-check the ksi values and the selected scales if something goes amiss. Note2: Using this selection mode takes some extra cpu.\n\
+                         #  k: Value for the ksi parameter (default is 0) for selecting the scale at which the normal is computed. The smallest scale satisfying ksi > this_value will be used. See the paper for what ksi means. Use a value of 0 to disable this parameter. In that case, the scale at which the cloud looks most 2D is used instead. Note: The value of ksi computed at the normal selection stage may differ from the final value given by the ksi1/2 result specifiers in case of normal bootstrapping. Note 2: For contrieved geometries, it is a good idea to double-check the ksi values and the selected scales if something goes amiss (ksi may increase at small scales). Note3: Using this selection mode takes some extra cpu.\n\
                          #  f: (default, no need to specify) Fast-but-not-too-wrong estimator for the confidence intervals. This is Fast-and-exact only when the same normal is used, when each cloud is totally independant, and the points distances to their planes are distributed according to a Gaussian in each cylinder. These assumptions may fail, in which case use either the bootstrap technique (recommended) or maintain a Gaussian assumption and allow for normals to differ (g experimental flag, not recommended)\n\
                          #  g: EXPERIMENTAL. Assume a normal (Gaussian) distribution of the point distances around the mean shift(1/2) values for estimating the confidence interval of the diff values, but allow the normals to differ. The worst case relies on monte-carlo sampling of the joint distribution, which may be slower and less precise than boostrapping. This option dos not take into account the e flag.\n\
-  input: extra_info      # Extra parameters for the \"e\", \"s\", \"b\", \"n\", \"c\" and \"p\" flags,\n\
+                         #  w: show extra warnings.\n\
+  input: extra_info      # Extra parameters for the \"e\", \"s\", \"b\", \"n\", \"c\", \"k\" and \"p\" flags,\n\
                          # given in the same order as these flags were specified.\n\
                          # Ex: normaldiff (all other opts) ehb 1e-2 1000\n\
                          # The flags are \"e\", \"h\" and \"b\". \"h\" has no extra parameter.\n\
@@ -417,6 +418,7 @@ int main(int argc, char** argv) {
     bool use_BCa = false;
     int num_pt_sig = 10;
     double ksi_autoscale = 0;
+    bool warnings = false;
     
     int np_prod_max = 10000;
     
@@ -430,6 +432,7 @@ int main(int argc, char** argv) {
                 case 'q': use_median = true; break;
                 case 'h': force_horizontal = true; break;
                 case 'v': force_vertical = true; break;
+                case 'w': warnings = true; break;
                 case 'e': if (++extra_info_idx<argc) {
                     pos_dev = atof(argv[extra_info_idx]); break;
                 } else return help("Missing value for the e flag");
@@ -487,7 +490,7 @@ int main(int argc, char** argv) {
     if (fast_ci && use_median) return help("Estimating confidence interval when using median/interquartile ranges needs bootstrapping. Please set the b flag");
     
     if (num_normal_bootstrap_iter<=0) num_normal_bootstrap_iter = 1;
-    if (compute_normal_angles && (num_normal_bootstrap_iter==1)) cout << "Warning: cannot compute the normal angle deviations without bootstraping the normals, set the n flag." << endl;
+    if (compute_normal_angles && (num_normal_bootstrap_iter==1) && warnings) cout << "Warning: cannot compute the normal angle deviations without bootstraping the normals, set the n flag." << endl;
 
     if (confidence_interval_percent<0 || confidence_interval_percent>100) {
         return help("Invalid confidence interval for the c flag, shall be between 0 and 100");
@@ -593,6 +596,16 @@ int main(int argc, char** argv) {
         cout << endl;
     }
 
+    
+    map<string, string> formats_disp_map;
+    for (int i=0; i<(int)result_filenames.size(); ++i) {
+        for (auto f : result_formats[i]) formats_disp_map[f] = f;
+    }
+    formats_disp_map["c1"] = "c1.x c1.y c1.z";
+    formats_disp_map["c2"] = "c2.x c2.y c2.z";
+    formats_disp_map["n1"] = "n1.x n1.y n1.z";
+    formats_disp_map["n2"] = "n2.x n2.y n2.z";
+    
     vector<ofstream*> resultfiles(result_filenames.size());
     for (int i=0; i<(int)result_filenames.size(); ++i) {
         resultfiles[i] = new ofstream(result_filenames[i].c_str());
@@ -602,7 +615,7 @@ int main(int argc, char** argv) {
         vector<string>& formats = result_formats[i];
         for (int j=0; j<(int)formats.size(); ++j) {
             if (j>0) *resultfiles[i] << " ";
-            *resultfiles[i] << formats[j];
+            *resultfiles[i] << formats_disp_map[formats[j]];
         }
         *resultfiles[i] << endl;
     }
@@ -614,6 +627,9 @@ int main(int argc, char** argv) {
     double core_global_diff_mean = 0;
     double core_global_diff_min = numeric_limits<double>::max();
     double core_global_diff_max = -numeric_limits<double>::max();
+    int num_nan_diff = 0;
+    int num_nan_c1 = 0;
+    int num_nan_c2 = 0;
     
     // for each core point
     int nextpercentcomplete = 5;
@@ -637,67 +653,21 @@ int main(int argc, char** argv) {
         vector<DistPoint<Point> > neighbors_1, neighbors_2;
         vector<int> neigh_num_1(nscales,0), neigh_num_2(nscales,0);
         vector<Point> neighsums_1, neighsums_2;
-        // only used for rough ksi estimate at this point
-        double dev_cylbase_scale1 = 0, dev_cylbase_scale2 = 0;
         
-        if ((!force_vertical) || compute_normal_plane_dev || ksi_autoscale>0)
+        if (!force_vertical)
         // Scales are sorted from max to lowest
         for (int scaleidx = 0; scaleidx<nscales; ++scaleidx) {
             // Neighborhood search only on max radius
             if (scaleidx==0) {
                 // we have all neighbors, unsorted, but with distances computed already
                 // use scales = diameters, not radius
-                if (!shift_second || compute_normal_plane_dev) {
+                if (!shift_second) {
                     if (p1reducedfname.empty())
                         p1.findNeighbors(back_inserter(neighbors_1), corepoints[ptidx], scalesvec[scaleidx] * 0.5);
                     else 
                         p1reduced.findNeighbors(back_inserter(neighbors_1), corepoints[ptidx], scalesvec[scaleidx] * 0.5);
                     // Sort the neighbors from closest to farthest, so we can process all lower scales easily
-                    if (nscales>1 || ksi_autoscale>0) {
-                        sort(neighbors_1.begin(), neighbors_1.end());
-                        // find the neighbors at the cylinder_base scale
-                        if (ksi_autoscale>0) {
-                            // copy-pasted and adapted from below
-                            int npts = neighbors_1.size();
-                            if (npts>=3) {
-                                Point avg = 0;
-                                for (int i=0; i<npts; ++i) avg += *neighbors_1[i].pt;
-                                avg /= npts;
-                                vector<double> A(npts * 3);
-                                for (int i=0; i<npts; ++i) {
-                                    A[i] = neighbors_1[i].pt->x - avg.x;
-                                    A[i+npts] = neighbors_1[i].pt->y - avg.y;
-                                    A[i+npts*2] = neighbors_1[i].pt->z - avg.z;
-                                }
-                                double svalues[3]; double eigenvectors[9];
-                                svd(npts, 3, &A[0], &svalues[0], false, &eigenvectors[0]);
-                                Point e1(eigenvectors[0], eigenvectors[3], eigenvectors[6]);
-                                Point e2(eigenvectors[1], eigenvectors[4], eigenvectors[7]);
-                                Point normal = e1.cross(e2);
-                                vector<double> distances_along_axis;
-                                for (int cylsec=0; cylsec<num_cyl_balls; ++cylsec) {
-                                    Point base_segment_center = corepoints[ptidx] + (cyl_section_length*0.5-cylinder_length) * normal;
-                                    double min_dist_along_axis = cylsec * cyl_section_length - cylinder_length;
-                                    double max_dist_along_axis = min_dist_along_axis + cyl_section_length;
-                                    p1.applyToNeighbors(
-                                        [&](double d2, Point* p) {
-                                            Point delta = *p - corepoints[ptidx];
-                                            double dist_along_axis = delta.dot(normal);
-                                            double dist_to_axis_sq = (delta - dist_along_axis * normal).norm2();
-                                            if (dist_to_axis_sq>cylinder_base_radius_sq) return;
-                                            if (dist_along_axis<min_dist_along_axis) return;
-                                            if (dist_along_axis>=max_dist_along_axis) return;
-                                            distances_along_axis.push_back(dist_along_axis);
-                                        },
-                                        base_segment_center + (cylsec * cyl_section_length) * normal,
-                                        cyl_ball_radius
-                                    );
-                                }
-                                double dummy_mean;
-                                mean_dev(&distances_along_axis[0], distances_along_axis.size(), dummy_mean, dev_cylbase_scale1);
-                            }
-                        }
-                    }
+                    if (nscales>1) sort(neighbors_1.begin(), neighbors_1.end());
                     neigh_num_1[scaleidx] = neighbors_1.size();
                     // pre-compute cumulated sums
                     // so we might as well share the intermediates to lower levels
@@ -705,57 +675,13 @@ int main(int argc, char** argv) {
                     if (!neighbors_1.empty()) neighsums_1[0] = *neighbors_1[0].pt;
                     for (int i=1; i<(int)neighbors_1.size(); ++i) neighsums_1[i] = neighsums_1[i-1] + *neighbors_1[i].pt;
                 }
-                if (!shift_first || compute_normal_plane_dev) {
+                if (!shift_first) {
                     if (p2reducedfname.empty())
                         p2.findNeighbors(back_inserter(neighbors_2), corepoints[ptidx], scalesvec[scaleidx] * 0.5);
                     else
                         p2reduced.findNeighbors(back_inserter(neighbors_2), corepoints[ptidx], scalesvec[scaleidx] * 0.5);
                     // Sort the neighbors from closest to farthest, so we can process all lower scales easily
-                    if (nscales>1 || ksi_autoscale>0) {
-                        sort(neighbors_2.begin(), neighbors_2.end());
-                        // find the neighbors at the cylinder_base scale
-                        if (ksi_autoscale>0) {
-                            // copy-pasted and adapted from below
-                            int npts = neighbors_2.size();
-                            if (npts>=3) {
-                                Point avg = 0;
-                                for (int i=0; i<npts; ++i) avg += *neighbors_2[i].pt;
-                                avg /= npts;
-                                vector<double> A(npts * 3);
-                                for (int i=0; i<npts; ++i) {
-                                    A[i] = neighbors_2[i].pt->x - avg.x;
-                                    A[i+npts] = neighbors_2[i].pt->y - avg.y;
-                                    A[i+npts*2] = neighbors_2[i].pt->z - avg.z;
-                                }
-                                double svalues[3]; double eigenvectors[9];
-                                svd(npts, 3, &A[0], &svalues[0], false, &eigenvectors[0]);
-                                Point e1(eigenvectors[0], eigenvectors[3], eigenvectors[6]);
-                                Point e2(eigenvectors[1], eigenvectors[4], eigenvectors[7]);
-                                Point normal = e1.cross(e2);
-                                vector<double> distances_along_axis;
-                                for (int cylsec=0; cylsec<num_cyl_balls; ++cylsec) {
-                                    Point base_segment_center = corepoints[ptidx] + (cyl_section_length*0.5-cylinder_length) * normal;
-                                    double min_dist_along_axis = cylsec * cyl_section_length - cylinder_length;
-                                    double max_dist_along_axis = min_dist_along_axis + cyl_section_length;
-                                    p2.applyToNeighbors(
-                                        [&](double d2, Point* p) {
-                                            Point delta = *p - corepoints[ptidx];
-                                            double dist_along_axis = delta.dot(normal);
-                                            double dist_to_axis_sq = (delta - dist_along_axis * normal).norm2();
-                                            if (dist_to_axis_sq>cylinder_base_radius_sq) return;
-                                            if (dist_along_axis<min_dist_along_axis) return;
-                                            if (dist_along_axis>=max_dist_along_axis) return;
-                                            distances_along_axis.push_back(dist_along_axis);
-                                        },
-                                        base_segment_center + (cylsec * cyl_section_length) * normal,
-                                        cyl_ball_radius
-                                    );
-                                }
-                                double dummy_mean;
-                                mean_dev(&distances_along_axis[0], distances_along_axis.size(), dummy_mean, dev_cylbase_scale2);
-                            }
-                        }
-                    }
+                    if (nscales>1) sort(neighbors_2.begin(), neighbors_2.end());
                     neigh_num_2[scaleidx] = neighbors_2.size();
                     neighsums_2.resize(neighbors_2.size());
                     if (!neighbors_2.empty()) neighsums_2[0] = *neighbors_2[0].pt;
@@ -769,7 +695,7 @@ int main(int argc, char** argv) {
                 int dichofirst = 0;
                 int dicholast = neighbors_1.size();
                 int dichomed;
-                if (!shift_second || compute_normal_plane_dev) {
+                if (!shift_second) {
                     while (true) {
                         dichomed = (dichofirst + dicholast) / 2;
                         if (dichomed==dichofirst) break;
@@ -781,7 +707,7 @@ int main(int argc, char** argv) {
                     neigh_num_1[scaleidx] = dichomed+1;
                 }
                 // same for cloud 2
-                if (!shift_first || compute_normal_plane_dev) {
+                if (!shift_first) {
                     dichofirst = 0;
                     dicholast = neighbors_2.size();
                     while (true) {
@@ -815,7 +741,6 @@ int main(int argc, char** argv) {
             vector<DistPoint<Point> >* neighbors_ref[2] = {&neighbors_1, &neighbors_2};
             vector<int>* neigh_num_ref[2] = {&neigh_num_1, &neigh_num_2};
             vector<Point>* neighsums_ref[2] = {&neighsums_1, &neighsums_2};
-            double* dev_cylbase_scale_ref[2] = {&dev_cylbase_scale1, &dev_cylbase_scale2};
             // loop on both pt sets, unless shift1/2 specified
             for (int ref12_idx = ref12_idx_begin; ref12_idx < ref12_idx_end; ++ref12_idx) {
                 vector<DistPoint<Point> >& neighbors = *neighbors_ref[ref12_idx];
@@ -837,16 +762,32 @@ int main(int argc, char** argv) {
                             A[i+npts] = neighbors[i].pt->y - avg.y;
                             A[i+npts*2] = neighbors[i].pt->z - avg.z;
                         }
-
+                        
                         if (ksi_autoscale>0) {
-                            // scales run from largest to lowest, continue looking
-                            // for ksi values that satisfy the criterion
-                            double svalcyl = *dev_cylbase_scale_ref[ref12_idx];
-                            // when svalcyl==0, estimate is infinite
+                            vector<double> Acopy = A;
+                            svd(npts, 2, &Acopy[0], &svalues[0], false, &eigenvectors[0]);
+                            Point e1(eigenvectors[0], eigenvectors[3], eigenvectors[6]);
+                            Point e2(eigenvectors[1], eigenvectors[4], eigenvectors[7]);
+                            Point normal = e1.cross(e2);
+                            double avg_dist_to_plane = 0.;
+                            double ssq_dist_to_plane = 0.;
+                            for (int i=0; i<npts; ++i) {
+                                // A is now centered on 0, plane goes on 0
+                                Point a(A[i], A[i+npts], A[i+npts*2]);
+                                // so dist is easy to compute
+                                double d = a.dot(normal);
+                                avg_dist_to_plane += d;
+                                ssq_dist_to_plane += d*d;
+                            }
+                            avg_dist_to_plane /= npts;
+                            ssq_dist_to_plane = (ssq_dist_to_plane - npts * avg_dist_to_plane * avg_dist_to_plane) / (npts-1.);
+                            ssq_dist_to_plane = max(0.,ssq_dist_to_plane);
+                            
+                            // when ssq_dist_to_plane==0, estimate is infinite
                             // which means all scales match, so end up with the lowest one
-                            if (svalcyl==0) *normal_scale_idx_ref[ref12_idx] = sidx;
+                            if (ssq_dist_to_plane==0) *normal_scale_idx_ref[ref12_idx] = sidx;
                             else {
-                                double ksi = scalesvec[sidx] / svalcyl;
+                                double ksi = scalesvec[sidx] / sqrt(ssq_dist_to_plane);
                                 if (ksi > ksi_autoscale) *normal_scale_idx_ref[ref12_idx] = sidx;
                             }                            
                         } else {
@@ -1006,7 +947,7 @@ int main(int argc, char** argv) {
                 if (!force_vertical) {
                     if (force_horizontal) {
                         if (npts_scaleN<2 && n_bootstrap_iter==0) {
-                            cout << "Warning: Invalid core point / data file / scale combination: less than 2 points at max scale for core point " << (ptidx+1) << " in data set " << ref12_idx+1 << endl;
+                             if (warnings) cout << "Warning: Invalid core point / data file / scale combination: less than 2 points at max scale for core point " << (ptidx+1) << " in data set " << ref12_idx+1 << endl;
                         } else {
                             // column-wise A: no need to reshape so as to skip z
                             // SVD decomposition handled by LAPACK
@@ -1018,7 +959,7 @@ int main(int argc, char** argv) {
                         }
                     } else {
                         if (npts_scaleN<3 && n_bootstrap_iter==0) {
-                            cout << "Warning: Invalid core point / data file / scale combination: less than 3 points at max scale for core point " << (ptidx+1) << " in data set " << ref12_idx+1 << endl;
+                            if (warnings) cout << "Warning: Invalid core point / data file / scale combination: less than 3 points at max scale for core point " << (ptidx+1) << " in data set " << ref12_idx+1 << endl;
                         } else {
                             svd(npts_scaleN, 3, &A[0], &svalues[0], false, &eigenvectors[0]);
                             // column-major matrix, eigenvectors as rows
@@ -1037,11 +978,11 @@ int main(int argc, char** argv) {
             if (shift_second) normal_bs_1 = normal_bs_2;
             if (shift_mean) {
                 if (normal_bs_1.norm2()==0) {
-                    cout << "Warning: null normal on Cloud 1 for core point " << (ptidx+1) << endl;
+                    if (warnings) cout << "Warning: null normal on Cloud 1 for core point " << (ptidx+1) << endl;
                     normal_bs_1 = normal_bs_2;
                 }
                 if (normal_bs_2.norm2()==0) {
-                    cout << "Warning: null normal on Cloud 2 for core point " << (ptidx+1) << endl;
+                    if (warnings) cout << "Warning: null normal on Cloud 2 for core point " << (ptidx+1) << endl;
                     normal_bs_2 = normal_bs_1;
                 }
                 normal_bs_1 = (normal_bs_1 + normal_bs_2) * 0.5;
@@ -1049,35 +990,39 @@ int main(int argc, char** argv) {
             }
             else {
                 if (normal_bs_1.norm2()==0) {
-                    cout << "Warning: null normal on Cloud 1 for core point " << (ptidx+1) << ", setting it to the normal computed on Cloud 2" << endl;
+                    if (warnings) cout << "Warning: null normal on Cloud 1 for core point " << (ptidx+1) << ", setting it to the normal computed on Cloud 2" << endl;
                     normal_bs_1 = normal_bs_2;
                 }
                 if (normal_bs_2.norm2()==0) {
-                    cout << "Warning: null normal on Cloud 2 for core point " << (ptidx+1) << ", setting it to the normal computed on Cloud 1" << endl;
+                    if (warnings) cout << "Warning: null normal on Cloud 2 for core point " << (ptidx+1) << ", setting it to the normal computed on Cloud 1" << endl;
                     normal_bs_2 = normal_bs_1;
                 }
             }
             
-            if (compute_normal_plane_dev) for (int ref12_idx = 0; ref12_idx < 2; ++ref12_idx) {
-                vector<double>& A = *Acopy_ref[ref12_idx];
-                int& npts_scaleN = *npts_scaleN_ref[ref12_idx];
-                Point& normal = *normal_bs_ref[ref12_idx];
-                double avg_dist_to_plane = 0.;
-                double ssq_dist_to_plane = 0.;
-                for (int i=0; i<npts_scaleN; ++i) {
-                    // A is now centered on 0, plane goes on 0
-                    Point a(A[i], A[i+npts_scaleN], A[i+npts_scaleN*2]);
-                    // so dist is easy to compute
-                    double d = a.dot(normal);
-                    avg_dist_to_plane += d;
-                    ssq_dist_to_plane += d*d;
+            if (compute_normal_plane_dev) {
+                for (int ref12_idx = ref12_idx_begin; ref12_idx < ref12_idx_end; ++ref12_idx) {
+                    vector<double>& A = *Acopy_ref[ref12_idx];
+                    int& npts_scaleN = *npts_scaleN_ref[ref12_idx];
+                    Point& normal = *normal_bs_ref[ref12_idx];
+                    double avg_dist_to_plane = 0.;
+                    double ssq_dist_to_plane = 0.;
+                    for (int i=0; i<npts_scaleN; ++i) {
+                        // A is now centered on 0, plane goes on 0
+                        Point a(A[i], A[i+npts_scaleN], A[i+npts_scaleN*2]);
+                        // so dist is easy to compute
+                        double d = a.dot(normal);
+                        avg_dist_to_plane += d;
+                        ssq_dist_to_plane += d*d;
+                    }
+                    if (npts_scaleN>1) {
+                        avg_dist_to_plane /= npts_scaleN;
+                        ssq_dist_to_plane = (ssq_dist_to_plane - npts_scaleN * avg_dist_to_plane * avg_dist_to_plane) / (npts_scaleN-1.);
+                        ssq_dist_to_plane = max(0.,ssq_dist_to_plane);
+                    }
+                    *normal_dev_ref[ref12_idx] += sqrt(ssq_dist_to_plane);
                 }
-                if (npts_scaleN>1) {
-                    avg_dist_to_plane /= npts_scaleN;
-                    ssq_dist_to_plane = (ssq_dist_to_plane - npts_scaleN * avg_dist_to_plane * avg_dist_to_plane) / (npts_scaleN-1.);
-                    ssq_dist_to_plane = max(0.,ssq_dist_to_plane);
-                }
-                *normal_dev_ref[ref12_idx] += sqrt(ssq_dist_to_plane);
+                if (shift_first) normal_dev2 = normal_dev1;
+                if (shift_second) normal_dev1 = normal_dev2;
             }
                 
             // bootstrap mean normal
@@ -1473,7 +1418,7 @@ int main(int argc, char** argv) {
 
         // finish the computation of confidence intervals if needed
         if (fast_ci) {
-            ci_high = 1.96 * sqrt(c1dev*c1dev/np1 + c2dev*c2dev/np2 + pos_dev*pos_dev);
+            ci_high = z_high * (sqrt(c1dev*c1dev/np1 + c2dev*c2dev/np2) + pos_dev);
             ci_low = -ci_high;
         }
         else if (use_BCa) {
@@ -1494,10 +1439,13 @@ int main(int argc, char** argv) {
             }
         }
         
-        int diff_sig = (np1>=num_pt_sig) && (np2>=num_pt_sig) && (diff>=ci_low) && (diff<=ci_high);
+        int diff_sig = (np1>=num_pt_sig) && (np2>=num_pt_sig) && ((diff<ci_low) || (diff>ci_high));
         
-        Point core1 = corepoints[ptidx] + c1shift * normal_1;
-        Point core2 = corepoints[ptidx] + c2shift * normal_2;
+        Point core1 = isfinite(c1shift) ? corepoints[ptidx] + c1shift * normal_1 : corepoints[ptidx];
+        Point core2 = isfinite(c2shift) ? corepoints[ptidx] + c2shift * normal_2 : corepoints[ptidx];
+        
+        if (!isfinite(c1shift)) ++num_nan_c1;
+        if (!isfinite(c2shift)) ++num_nan_c2;
 
         for (int i=0; i<(int)resultfiles.size(); ++i) {
             ofstream& resultfile = *resultfiles[i];
@@ -1538,13 +1486,16 @@ int main(int argc, char** argv) {
             resultfile << endl;
         }
         
-        core_global_diff_mean += diff;
+        if (isfinite(diff)) core_global_diff_mean += diff;
+        else ++num_nan_diff;
         core_global_diff_min = min((double)core_global_diff_min, (double)diff);
         core_global_diff_max = max((double)core_global_diff_min, (double)diff);
     }
     cout << endl;
     
-    core_global_diff_mean /= corepoints.size();
+    cout << num_nan_c1 << " / " << corepoints.size() << " core points could not be projected on the first cloud" << endl;
+    cout << num_nan_c2 << " / " << corepoints.size() << " core points could not be projected on the second cloud" << endl;
+    core_global_diff_mean /= corepoints.size() - num_nan_diff;
     cout << "Global diff min / mean / max on all core points: " << core_global_diff_min << " / " << core_global_diff_mean << " / " << core_global_diff_max << endl;
 
     for (int i=0; i<(int)resultfiles.size(); ++i) resultfiles[i]->close();
