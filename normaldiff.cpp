@@ -56,14 +56,14 @@
 using namespace std;
 using namespace boost;
 
-const char* all_result_formats[] = {"diff", "dev1", "dev2", "shift1", "shift2", "c1", "c2", "n1", "n2", "sn1", "sn2", "np1", "np2", "diff_bsdev", "shift1_bsdev", "shift2_bsdev", "ksi1", "ksi2", "n1angle_bs", "n2angle_bs", "diff_ci_low", "diff_ci_high", "diff_sig", "normal_dev1", "normal_dev2", "ns1", "ns2"};
-const int nresformats = 27;
+const char* all_result_formats[] = {"diff", "dev1", "dev2", "shift1", "shift2", "c1", "c2", "n1", "n2", "sn1", "sn2", "np1", "np2", "diff_bsdev", "shift1_bsdev", "shift2_bsdev", "ksi1", "ksi2", "n1angle_bs", "n2angle_bs", "diff_ci_low", "diff_ci_high", "diff_sig", "normal_dev1", "normal_dev2", "ns1", "ns2", "c0"};
+const int nresformats = 28;
 const char* default_result_formats[] = {"c1","n1","diff","diff_sig"};
 const int num_default_result_formats = 4;
 
 int help(const char* errmsg = 0) {
 cout << "\
-normaldiff normal_scale(s) : [cylinder_base : [cylinder_length : ]] p1.xyz[:p1reduced.xyz] p2.xyz[:p2reduced.xyz] cores.xyz extpts.xyz result.txt[:format] [opt_flags [extra_info]]\n\
+normaldiff normal_scale(s) : [cylinder_base : [cylinder_length : ]] p1.xyz[:p1reduced.xyz] p2.xyz[:p2reduced.xyz] cores.xyz extpts.xyz result.txt[,format[:result2.txt,format...]] [opt_flags [extra_info]]\n\
   input: normal_scale(s) # The scale at which to compute the normal. If multiple scales\n\
                          # are given the one at which the cloud looks most 2D is used.\n\
                          # The syntax minscale:increment:maxscale is also accepted.\n\
@@ -109,6 +109,7 @@ normaldiff normal_scale(s) : [cylinder_base : [cylinder_length : ]] p1.xyz[:p1re
                          #   The surface is defined by a mean position (default) or by a median position (option \"q\").\n\
                          #   Use the format name \"c1\", all three entries are then given.\n\
                          # - c2.x c2.y c2.z: core point coordinates, shifted to surface of p2.\n\
+                         # - c0.x c0.y c0.z: original core point coordinates.\n\
                          # - n1.x n1.y n1.z: surface normal vector coordinates for p1\n\
                          #   Use the format name \"n1\", all three entries are then given.\n\
                          # - n2.x n2.y n2.z: surface normal vector coordinates for p2\n\
@@ -120,7 +121,7 @@ normaldiff normal_scale(s) : [cylinder_base : [cylinder_length : ]] p1.xyz[:p1re
                          #         by the statistical bootstrapping technique.\n\
                          # - diff_ci_low: lower bound of the confidence interval for the diff values, at 95% confidence level (default, see the c and g flags). The default is to estimate the confidence interval using the Bias-Corrected-accelerated (BCa) technique when bootstrapping is active, or to use a normality assumption otherwise.\n\
                          # - diff_ci_high: higher bound of the confidence interval for the diff values. See diff_ci_low.\n\
-                         # - diff_sig: A boolean (0 or 1) indicating whether the diff value is within the confidence interval AND whether there were enough points for estimating that interval itself. See the c, g, and p flags).\n\
+                         # - diff_sig: A boolean (0 or 1) indicating whether the diff value is outside the confidence interval AND whether there were enough points for estimating that interval itself. See the c, g, and p flags).\n\
                          # - shift1 shift2: signed distance the core points were shifted along the normals. This value is possibly averaged by bootstrap.\n\
                          # - dev1 dev2: standard deviation of the distance between: the points\n\
                          #              surrounding c1 and c2 in the cylinder; and the\n\
@@ -248,6 +249,10 @@ void resample(const vector<double>& original, vector<double>& resampled) {
 }
 */
 
+inline double nan_is_0(double x) {
+    return isfinite(x)?x:0;
+}
+
 int main(int argc, char** argv) {
 
     if (argc<8) return help();
@@ -364,9 +369,9 @@ int main(int argc, char** argv) {
     
     bool compute_normal_angles = false, compute_shift_bsdev = false;
     double n1angle_bs = 0, n2angle_bs = 0;
-    // set to true below by default if confidence intervals requested
+    // set to true below by default
     // disabled below if another option is set
-    bool fast_ci = false;
+    bool fast_ci = true;
     bool compute_normal_plane_dev = false;
     
     char_separator<char> colsep(":");
@@ -399,7 +404,6 @@ int main(int argc, char** argv) {
             if (format=="ksi1" || format=="ksi2" || format=="normal_dev1" || format=="normal_dev2") compute_normal_plane_dev = true;
             if (format=="n1angle_bs" || format=="n2angle_bs") compute_normal_angles = true;
             if (format=="shift1_bsdev" || format=="shift2_bsdev") compute_shift_bsdev = true;
-            if (format=="diff_ci_low" || format=="diff_ci_high" || format=="diff_sig") fast_ci = true;
         }
         result_formats.push_back(formats);
     }
@@ -437,6 +441,7 @@ int main(int argc, char** argv) {
                     pos_dev = atof(argv[extra_info_idx]); break;
                 } else return help("Missing value for the e flag");
                 case 'b': if (++extra_info_idx<argc) {
+                    use_BCa = true;
                     num_bootstrap_iter = atoi(argv[extra_info_idx]); break;
                 } else return help("Missing value for the b flag");
                 case 'n': if (++extra_info_idx<argc) {
@@ -511,7 +516,7 @@ int main(int argc, char** argv) {
     boost::normal_distribution<double> poserr_dist(0, pos_dev);
     boost::variate_generator<boost::mt11213b&, boost::normal_distribution<double> > poserr_rand(rng, poserr_dist);
 
-    if (num_bootstrap_iter>1 || num_normal_bootstrap_iter>1) randinit();
+    randinit();
     
     cout << "Loading cloud 1: " << p1fname << endl;
     
@@ -605,6 +610,7 @@ int main(int argc, char** argv) {
     formats_disp_map["c2"] = "c2.x c2.y c2.z";
     formats_disp_map["n1"] = "n1.x n1.y n1.z";
     formats_disp_map["n2"] = "n2.x n2.y n2.z";
+    formats_disp_map["c0"] = "c0.x c0.y c0.z";
     
     vector<ofstream*> resultfiles(result_filenames.size());
     for (int i=0; i<(int)result_filenames.size(); ++i) {
@@ -903,6 +909,7 @@ int main(int argc, char** argv) {
                 vector<double>& A = *A_ref[ref12_idx];
                 vector<double>& Acopy = *Acopy_ref[ref12_idx];
                 int& npts_scaleN = *npts_scaleN_ref[ref12_idx];
+                npts_scaleN = 0;
                 double radiussq = scalesvec[normal_sidx] * scalesvec[normal_sidx] * 0.25;
                 Point bspt;
                 for (int i=0; i<npts_scale_base; ++i) {
@@ -923,13 +930,12 @@ int main(int argc, char** argv) {
                     // filter only the points within normal scale for the normal
                     // computation below
                     if ((corepoints[ptidx] - *pt).norm2()>=radiussq) continue;
-                    ++npts_scaleN;
                     avg += *pt;
-                    A[i] = pt->x;
-                    A[i+npts_scale_base] = pt->y;
-                    A[i+npts_scale_base*2] = pt->z;
+                    A[npts_scaleN] = pt->x;
+                    A[npts_scaleN+npts_scale_base] = pt->y;
+                    A[npts_scaleN+npts_scale_base*2] = pt->z;
+                    ++npts_scaleN;
                 }
-                
                 // need to reshape A, colomn-major for Fortran :(
                 if (npts_scaleN<npts_scale_base) {
                     for (int i=0; i<npts_scaleN; ++i) A[i+npts_scaleN] = A[i+npts_scale_base];
@@ -956,12 +962,14 @@ int main(int argc, char** argv) {
                             // is given by the singular vector with minimal singular value
                             int mins = 0; if (svalues[1]<svalues[0]) mins = 1;
                             normal = Point(eigenvectors[mins], eigenvectors[2+mins], 0);
+                            normal.normalize();
                         }
                     } else {
                         if (npts_scaleN<3 && n_bootstrap_iter==0) {
                             if (warnings) cout << "Warning: Invalid core point / data file / scale combination: less than 3 points at max scale for core point " << (ptidx+1) << " in data set " << ref12_idx+1 << endl;
                         } else {
                             svd(npts_scaleN, 3, &A[0], &svalues[0], false, &eigenvectors[0]);
+//std::cout << svalues[0] << " " << svalues[1] << " " << svalues[2] << std::endl;
                             // column-major matrix, eigenvectors as rows
                             Point e1(eigenvectors[0], eigenvectors[3], eigenvectors[6]);
                             Point e2(eigenvectors[1], eigenvectors[4], eigenvectors[7]);
@@ -1452,33 +1460,34 @@ int main(int argc, char** argv) {
             vector<string>& formats = result_formats[i];
             for (int j=0; j<(int)formats.size(); ++j) {
                 if (j>0) resultfile << " ";
-                if (formats[j] == "c1") resultfile << core1.x << " " << core1.y << " " << core1.z;
-                else if (formats[j] == "c2") resultfile << core2.x << " " << core2.y << " " << core2.z;
-                else if (formats[j] == "n1") resultfile << normal_1.x << " " << normal_1.y << " " << normal_1.z;
-                else if (formats[j] == "n2") resultfile << normal_2.x << " " << normal_2.y << " " << normal_2.z;
-                else if (formats[j] == "sn1") resultfile << scalesvec[normal_scale_idx_1];
-                else if (formats[j] == "sn2") resultfile << scalesvec[normal_scale_idx_2];
-                else if (formats[j] == "ns1") resultfile << neigh_num_1[normal_scale_idx_1];
-                else if (formats[j] == "ns2") resultfile << neigh_num_2[normal_scale_idx_2];
-                else if (formats[j] == "np1") resultfile << np1;
-                else if (formats[j] == "np2") resultfile << np2;
-                else if (formats[j] == "shift1") resultfile << c1shift;
-                else if (formats[j] == "shift2") resultfile << c2shift;
-                else if (formats[j] == "dev1") resultfile << c1dev;
-                else if (formats[j] == "dev2") resultfile << c2dev;
-                else if (formats[j] == "diff") resultfile << diff;
-                else if (formats[j] == "diff_bsdev") resultfile << diff_bsdev;
-                else if (formats[j] == "shift1_bsdev") resultfile << c1shift_bsdev;
-                else if (formats[j] == "shift2_bsdev") resultfile << c2shift_bsdev;
-                else if (formats[j] == "normal_dev1") resultfile << normal_dev1;
-                else if (formats[j] == "normal_dev2") resultfile << normal_dev2;
-                else if (formats[j] == "ksi1") resultfile << (scalesvec[normal_scale_idx_1] / normal_dev1);
-                else if (formats[j] == "ksi2") resultfile << (scalesvec[normal_scale_idx_2] / normal_dev2);
-                else if (formats[j] == "n1angle_bs") resultfile << n1angle_bs;
-                else if (formats[j] == "n2angle_bs") resultfile << n2angle_bs;
-                else if (formats[j] == "diff_ci_low") resultfile << ci_low;
-                else if (formats[j] == "diff_ci_high") resultfile << ci_high;
-                else if (formats[j] == "diff_sig") resultfile << diff_sig;
+                if (formats[j] == "c1") resultfile << nan_is_0(core1.x) << " " << nan_is_0(core1.y) << " " << nan_is_0(core1.z);
+                else if (formats[j] == "c2") resultfile << nan_is_0(core2.x) << " " << nan_is_0(core2.y) << " " << nan_is_0(core2.z);
+                else if (formats[j] == "c0") resultfile << nan_is_0(corepoints[ptidx].x) << " " << nan_is_0(corepoints[ptidx].y) << " " << nan_is_0(corepoints[ptidx].z);
+                else if (formats[j] == "n1") resultfile << nan_is_0(normal_1.x) << " " << nan_is_0(normal_1.y) << " " << nan_is_0(normal_1.z);
+                else if (formats[j] == "n2") resultfile << nan_is_0(normal_2.x) << " " << nan_is_0(normal_2.y) << " " << nan_is_0(normal_2.z);
+                else if (formats[j] == "sn1") resultfile << nan_is_0(scalesvec[normal_scale_idx_1]);
+                else if (formats[j] == "sn2") resultfile << nan_is_0(scalesvec[normal_scale_idx_2]);
+                else if (formats[j] == "ns1") resultfile << nan_is_0(neigh_num_1[normal_scale_idx_1]);
+                else if (formats[j] == "ns2") resultfile << nan_is_0(neigh_num_2[normal_scale_idx_2]);
+                else if (formats[j] == "np1") resultfile << nan_is_0(np1);
+                else if (formats[j] == "np2") resultfile << nan_is_0(np2);
+                else if (formats[j] == "shift1") resultfile << nan_is_0(c1shift);
+                else if (formats[j] == "shift2") resultfile << nan_is_0(c2shift);
+                else if (formats[j] == "dev1") resultfile << nan_is_0(c1dev);
+                else if (formats[j] == "dev2") resultfile << nan_is_0(c2dev);
+                else if (formats[j] == "diff") resultfile << nan_is_0(diff);
+                else if (formats[j] == "diff_bsdev") resultfile << nan_is_0(diff_bsdev);
+                else if (formats[j] == "shift1_bsdev") resultfile << nan_is_0(c1shift_bsdev);
+                else if (formats[j] == "shift2_bsdev") resultfile << nan_is_0(c2shift_bsdev);
+                else if (formats[j] == "normal_dev1") resultfile << nan_is_0(normal_dev1);
+                else if (formats[j] == "normal_dev2") resultfile << nan_is_0(normal_dev2);
+                else if (formats[j] == "ksi1") resultfile << nan_is_0((scalesvec[normal_scale_idx_1] / normal_dev1));
+                else if (formats[j] == "ksi2") resultfile << nan_is_0((scalesvec[normal_scale_idx_2] / normal_dev2));
+                else if (formats[j] == "n1angle_bs") resultfile << nan_is_0(n1angle_bs);
+                else if (formats[j] == "n2angle_bs") resultfile << nan_is_0(n2angle_bs);
+                else if (formats[j] == "diff_ci_low") resultfile << nan_is_0(ci_low);
+                else if (formats[j] == "diff_ci_high") resultfile << nan_is_0(ci_high);
+                else if (formats[j] == "diff_sig") resultfile << nan_is_0(diff_sig);
                 else {
                     if (ptidx==0) cout << "Invalid result format \"" << formats[j] << "\" is ignored." << endl;
                 }
