@@ -624,6 +624,7 @@ int main(int argc, char** argv) {
             *resultfiles[i] << formats_disp_map[formats[j]];
         }
         *resultfiles[i] << endl;
+        resultfiles[i]->precision(20);
     }
     
     // parameters and files loaded, now the real work

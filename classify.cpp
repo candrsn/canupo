@@ -261,6 +261,7 @@ int main(int argc, char** argv) {
     
     cout << "Processing scene data" << endl;
     ofstream scene_annotated(argv[4]);
+    scene_annotated.precision(20);
 
 #ifdef CHECK_CLASSIFIER
     static const int svgSize = 800;

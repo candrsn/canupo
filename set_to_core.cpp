@@ -38,7 +38,7 @@ set_to_core cloud.xyz core.txt result.txt\n\
   input: core.xyz       # Cloud of \"core\" points, containing x,y,z\n\
                         # coordinates as the first fields on each line,\n\
                         # and an arbitrary number of extra numeric fields.\n\
-  input: result.txt     # Cloud point. Each of the original cloud.xyz line\n\
+  output: result.txt     # Cloud point. Each of the original cloud.xyz line\n\
                         # is copied with the extra fields taken from that\n\
                         # line first, then from the nearest core point.\n\
 "<<endl;
@@ -57,6 +57,7 @@ int main(int argc, char** argv) {
     
     FILE* input_file = fopen(argv[1], "r");
     ofstream output_file(argv[3]);
+    output_file.precision(20);
     cout << "Processing file" << endl;
     
     int linenum = 0;

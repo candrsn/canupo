@@ -166,6 +166,7 @@ int main(int argc, char** argv) {
         for (int msci = 0; msci < nmscfiles; ++msci) {
             ifstream mscfile(argv[2+msci], ifstream::binary);
             ofstream xyzfile(argv[arg_separator+1+msci]);
+            xyzfile.precision(20);
             // read the file header
             int ncorepoints;
             mscfile.read((char*)&ncorepoints,sizeof(ncorepoints));
