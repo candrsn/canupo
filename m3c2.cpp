@@ -63,7 +63,7 @@ const int num_default_result_formats = 4;
 
 int help(const char* errmsg = 0) {
 cout << "\
-normaldiff normal_scale(s) : [cylinder_base : [cylinder_length : ]] p1.xyz[:p1reduced.xyz] p2.xyz[:p2reduced.xyz] cores.xyz extpts.xyz result.txt[,format[:result2.txt,format...]] [opt_flags [extra_info]]\n\
+m3c2 normal_scale(s) : [cylinder_base : [cylinder_length : ]] p1.xyz[:p1reduced.xyz] p2.xyz[:p2reduced.xyz] cores.xyz extpts.xyz result.txt[,format[:result2.txt,format...]] [opt_flags [extra_info]]\n\
   input: normal_scale(s) # The scale at which to compute the normal. If multiple scales\n\
                          # are given the one at which the cloud looks most 2D is used.\n\
                          # The syntax minscale:increment:maxscale is also accepted.\n\
@@ -155,7 +155,7 @@ normaldiff normal_scale(s) : [cylinder_base : [cylinder_length : ]] p1.xyz[:p1re
                          #  w: show extra warnings.\n\
   input: extra_info      # Extra parameters for the \"e\", \"s\", \"b\", \"n\", \"c\", \"k\" and \"p\" flags,\n\
                          # given in the same order as these flags were specified.\n\
-                         # Ex: normaldiff (all other opts) ehb 1e-2 1000\n\
+                         # Ex: m3c2 (all other opts) ehb 1e-2 1000\n\
                          # The flags are \"e\", \"h\" and \"b\". \"h\" has no extra parameter.\n\
                          # So, in this order: e=1e-2 and b=1000\n\
 "<<endl;

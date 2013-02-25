@@ -4,7 +4,8 @@ else
     CXXFLAGS+=-O3 -g -DNDEBUG
 endif
 
-CXXFLAGS+=$(CPPFLAGS) -std=c++0x -march=corei7 -mfpmath=sse -msse2 -pipe
+#CXXFLAGS+=$(CPPFLAGS) -std=c++0x -march=native -mfpmath=sse -msse2 -pipe
+CXXFLAGS+=$(CPPFLAGS) -std=c++0x -march=x86-64 -mfpmath=sse -msse2 -pipe
 
 CXX=g++
 LAPACK=-llapack
@@ -19,7 +20,7 @@ PACKDIR=canupo_linux_static_64bits
 ifdef static
     CXXFLAGS+=-static -lpthread
     CAIRO=-lcairo -lpixman-1 -lpng -lz -lfontconfig -lfreetype -lexpat -lpthread
-    LAPACK=./liblapack.a ./libblas.a -lgfortran
+    LAPACK=./liblapack.a ./libblas.a -lgfortran -lpthread
     PACKDIR=canupo_linux_static_64bits
     CXX=g++-4.6
     no_openmp=1
@@ -48,9 +49,9 @@ else
     STRIP=/bin/true
 endif
 
-PACKED_CANUPO=canupo$(EXT) density$(EXT) suggest_classifier_svm$(EXT) suggest_classifier_lda$(EXT) msc_tool$(EXT) validate_classifier$(EXT) combine_classifiers$(EXT) classify$(EXT) filter$(EXT) resample$(EXT) prm_info$(EXT) set_to_core$(EXT)
+PACKED_CANUPO=canupo$(EXT) density$(EXT) suggest_classifier_svm$(EXT) suggest_classifier_lda$(EXT) msc_tool$(EXT) validate_classifier$(EXT) combine_classifiers$(EXT) classify$(EXT) filter$(EXT) resample$(EXT) prm_info$(EXT) set_to_core$(EXT) m3c2$(EXT)
 
-ALL=$(PACKED_CANUPO) normaldiff$(EXT)
+ALL=$(PACKED_CANUPO)
 
 all: $(ALL)
 
@@ -70,9 +71,9 @@ canupo$(EXT):
 	$(CXX) $(CXXFLAGS) canupo.cpp $(LAPACK) $(LDFLAGS) -o canupo$(EXT)
 	@$(STRIP) canupo$(EXT)
 
-normaldiff$(EXT):
-	$(CXX) $(CXXFLAGS) normaldiff.cpp $(LAPACK) -o normaldiff$(EXT)
-	@$(STRIP) normaldiff$(EXT)
+m3c2$(EXT):
+	$(CXX) $(CXXFLAGS) m3c2.cpp $(LAPACK) -o m3c2$(EXT)
+	@$(STRIP) m3c2$(EXT)
 
 display_normals$(EXT):
 	$(CXX) $(CXXFLAGS) display_normals.cpp -losg -losgViewer -losgGA -o display_normals$(EXT)
