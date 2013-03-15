@@ -43,6 +43,19 @@ ifdef win32
     PACKEXT=.zip
 endif
 
+ifdef win64
+    EXT=.exe
+    CXX=x86_64-w64-mingw32-g++
+    STRIPCMD=x86_64-w64-mingw32-strip
+#    CXXFLAGS=-std=c++0x -static -pipe -march=corei7 -mfpmath=sse -msse2 -O3 -DNDEBUG -I/usr/local/mingw/include -L/usr/local/mingw/lib -DDEFINE_GETLINE=1 -DNO_MMAP 
+    CXXFLAGS=-std=c++0x -static -pipe -march=x86-64 -mfpmath=sse -msse2 -O3 -DNDEBUG -I/usr/local/mingw/include -L/usr/local/mingw/lib -DDEFINE_GETLINE=1 -DNO_MMAP 
+    LAPACK=-llapack -lblas -lgfortran
+    CAIRO=-mwindows -mconsole -lcairo -lpixman-1 -lpng -lz -lfontconfig -liconv -lfreetype -lexpat -lws2_32 -lmsimg32
+    PACKDIR=canupo_windows_static_64bits
+    PACKCMD=zip -r
+    PACKEXT=.zip
+endif
+
 ifdef strip
     STRIP=echo "Stripping..."; $(STRIPCMD)
 else
