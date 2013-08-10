@@ -1,3 +1,6 @@
+SRC=$(dir $(CURDIR)/$(lastword $(MAKEFILE_LIST)))
+BUILD=$(SRC)../build/
+
 ifdef debug
     CXXFLAGS+=-g
 else
@@ -9,7 +12,7 @@ CXXFLAGS+=$(CPPFLAGS) -std=c++0x -march=x86-64 -mfpmath=sse -msse2 -pipe
 
 CXX=g++
 LAPACK=-llapack
-CAIRO=-lcairo
+CAIRO=-lcairo -lpng
 EXT=
 STRIPCMD=strip
 PACKCMD=tar cfvz
@@ -62,7 +65,7 @@ else
     STRIP=/bin/true
 endif
 
-PACKED_CANUPO=canupo$(EXT) density$(EXT) suggest_classifier_svm$(EXT) suggest_classifier_lda$(EXT) msc_tool$(EXT) validate_classifier$(EXT) combine_classifiers$(EXT) classify$(EXT) filter$(EXT) resample$(EXT) prm_info$(EXT) set_to_core$(EXT) m3c2$(EXT)
+PACKED_CANUPO=$(BUILD)canupo$(EXT) $(BUILD)density$(EXT) $(BUILD)suggest_classifier_svm$(EXT) $(BUILD)suggest_classifier_lda$(EXT) $(BUILD)msc_tool$(EXT) $(BUILD)validate_classifier$(EXT) $(BUILD)combine_classifiers$(EXT) $(BUILD)classify$(EXT) $(BUILD)filter$(EXT) $(BUILD)resample$(EXT) $(BUILD)prm_info$(EXT) $(BUILD)set_to_core$(EXT) $(BUILD)m3c2$(EXT)
 
 ALL=$(PACKED_CANUPO)
 
@@ -71,69 +74,70 @@ all: $(ALL)
 .PHONY: $(ALL)
 
 pack:
+	cd $(BUILD)
 	rm -rf $(PACKDIR)
 	mkdir -p $(PACKDIR)
-	cp $(PACKED_CANUPO) README.txt $(PACKDIR)
+	cp $(PACKED_CANUPO) $(SRC)README.txt $(PACKDIR)
 	mkdir -p $(PACKDIR)/tutorial
-	cp tutorial/floor.xyz tutorial/vegetation.xyz tutorial/scene.xyz tutorial/tutorial.pdf $(PACKDIR)/tutorial/
-	inkscape --export-pdf=$(PACKDIR)/tutorial/overview.pdf tutorial/overview.svg
+	cp $(SRC)tutorial/floor.xyz $(SRC)tutorial/vegetation.xyz $(SRC)tutorial/scene.xyz $(SRC)tutorial/tutorial.pdf $(PACKDIR)/tutorial/
+	inkscape --export-pdf=$(PACKDIR)/tutorial/overview.pdf $(SRC)tutorial/overview.svg
 	rm -f $(PACKDIR)$(PACKEXT)
 	$(PACKCMD) $(PACKDIR)$(PACKEXT) $(PACKDIR)
 
-canupo$(EXT):
-	$(CXX) $(CXXFLAGS) canupo.cpp $(LAPACK) $(LDFLAGS) -o canupo$(EXT)
+$(BUILD)canupo$(EXT):
+	$(CXX) $(CXXFLAGS) $(SRC)canupo.cpp $(LAPACK) $(LDFLAGS) -o $(BUILD)canupo$(EXT)
 	@$(STRIP) canupo$(EXT)
 
-m3c2$(EXT):
-	$(CXX) $(CXXFLAGS) m3c2.cpp $(LAPACK) -o m3c2$(EXT)
+$(BUILD)m3c2$(EXT):
+	$(CXX) $(CXXFLAGS) $(SRC)m3c2.cpp $(LAPACK) -o $(BUILD)m3c2$(EXT)
 	@$(STRIP) m3c2$(EXT)
 
-display_normals$(EXT):
-	$(CXX) $(CXXFLAGS) display_normals.cpp -losg -losgViewer -losgGA -o display_normals$(EXT)
+$(BUILD)display_normals$(EXT):
+	$(CXX) $(CXXFLAGS) $(SRC)display_normals.cpp -losg -losgViewer -losgGA -o $(BUILD)display_normals$(EXT)
 	@$(STRIP) display_normals$(EXT)
 
-density$(EXT):
-	$(CXX) $(CXXFLAGS) density.cpp -o density$(EXT)
+$(BUILD)density$(EXT):
+	$(CXX) $(CXXFLAGS) $(SRC)density.cpp -o $(BUILD)density$(EXT)
 	@$(STRIP) density$(EXT)
 
-suggest_classifier_svm$(EXT):
-	$(CXX) $(CXXFLAGS) suggest_classifier_svm.cpp $(CAIRO) -o suggest_classifier_svm$(EXT)
+$(BUILD)suggest_classifier_svm$(EXT):
+	$(CXX) $(CXXFLAGS) $(SRC)suggest_classifier_svm.cpp $(CAIRO) -o $(BUILD)suggest_classifier_svm$(EXT)
 	@$(STRIP) suggest_classifier_svm$(EXT)
 
-suggest_classifier_lda$(EXT):
-	$(CXX) $(CXXFLAGS) suggest_classifier_lda.cpp $(CAIRO) -o suggest_classifier_lda$(EXT)
+$(BUILD)suggest_classifier_lda$(EXT):
+	$(CXX) $(CXXFLAGS) $(SRC)suggest_classifier_lda.cpp $(CAIRO) -o $(BUILD)suggest_classifier_lda$(EXT)
 	@$(STRIP) suggest_classifier_lda$(EXT)
 
-msc_tool$(EXT):
-	$(CXX) $(CXXFLAGS) msc_tool.cpp $(CAIRO) -o msc_tool$(EXT)
+$(BUILD)msc_tool$(EXT):
+	$(CXX) $(CXXFLAGS) $(SRC)msc_tool.cpp $(CAIRO) -o $(BUILD)msc_tool$(EXT)
 	@$(STRIP) msc_tool$(EXT)
 
-prm_info$(EXT):
-	$(CXX) $(CXXFLAGS) prm_info.cpp -o prm_info$(EXT)
+$(BUILD)prm_info$(EXT):
+	$(CXX) $(CXXFLAGS) $(SRC)prm_info.cpp -o $(BUILD)prm_info$(EXT)
 	@$(STRIP) prm_info$(EXT)
 
-validate_classifier$(EXT):
-	$(CXX) $(CXXFLAGS) validate_classifier.cpp -o validate_classifier$(EXT)
+$(BUILD)validate_classifier$(EXT):
+	$(CXX) $(CXXFLAGS) $(SRC)validate_classifier.cpp -o $(BUILD)validate_classifier$(EXT)
 	@$(STRIP) validate_classifier$(EXT)
 
-combine_classifiers$(EXT):
-	$(CXX) $(CXXFLAGS) combine_classifiers.cpp -o combine_classifiers$(EXT)
+$(BUILD)combine_classifiers$(EXT):
+	$(CXX) $(CXXFLAGS) $(SRC)combine_classifiers.cpp -o $(BUILD)combine_classifiers$(EXT)
 	@$(STRIP) combine_classifiers$(EXT)
 
-classify$(EXT):
-	$(CXX) $(CXXFLAGS) classify.cpp -o classify$(EXT)
+$(BUILD)classify$(EXT):
+	$(CXX) $(CXXFLAGS) $(SRC)classify.cpp -o $(BUILD)classify$(EXT)
 	@$(STRIP) classify$(EXT)
 
-filter$(EXT):
-	$(CXX) $(CXXFLAGS) filter.cpp -o filter$(EXT)
+$(BUILD)filter$(EXT):
+	$(CXX) $(CXXFLAGS) $(SRC)filter.cpp -o $(BUILD)filter$(EXT)
 	@$(STRIP) filter$(EXT)
 
-set_to_core$(EXT):
-	$(CXX) $(CXXFLAGS) set_to_core.cpp -o set_to_core$(EXT)
+$(BUILD)set_to_core$(EXT):
+	$(CXX) $(CXXFLAGS) $(SRC)set_to_core.cpp -o $(BUILD)set_to_core$(EXT)
 	@$(STRIP) filter$(EXT)
 
-resample$(EXT):
-	$(CXX) $(CXXFLAGS) resample.cpp -o resample$(EXT)
+$(BUILD)resample$(EXT):
+	$(CXX) $(CXXFLAGS) $(SRC)resample.cpp -o $(BUILD)resample$(EXT)
 	@$(STRIP) resample$(EXT)
 
 clean:
