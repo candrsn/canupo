@@ -27,11 +27,14 @@ namespace dlib
             WHAT THIS OBJECT REPRESENTS
                 This object represents a radial basis function kernel
                 that works with sparse vectors.
+
+            THREAD SAFETY
+                This kernel is threadsafe.  
         !*/
 
         typedef typename T::value_type::second_type scalar_type;
         typedef T sample_type;
-        typedef dlib::memory_manager<char>::kernel_1a mem_manager_type;
+        typedef default_memory_manager mem_manager_type;
 
         const scalar_type gamma;
 
@@ -64,10 +67,10 @@ namespace dlib
         ) const;
         /*!
             requires
-                - a contains a sorted range 
-                - b contains a sorted range 
+                - a is a sparse vector
+                - b is a sparse vector
             ensures
-                - returns exp(-gamma * sparse_vector::distance_squared(a,b))
+                - returns exp(-gamma * distance_squared(a,b))
         !*/
 
         sparse_radial_basis_kernel& operator= (
@@ -128,11 +131,14 @@ namespace dlib
             WHAT THIS OBJECT REPRESENTS
                 This object represents a sigmoid kernel
                 that works with sparse vectors.
+
+            THREAD SAFETY
+                This kernel is threadsafe.  
         !*/
 
         typedef typename T::value_type::second_type scalar_type;
         typedef T sample_type;
-        typedef dlib::memory_manager<char>::kernel_1a mem_manager_type;
+        typedef default_memory_manager mem_manager_type;
 
         const scalar_type gamma;
         const scalar_type coef;
@@ -170,10 +176,10 @@ namespace dlib
         ) const;
         /*!
             requires
-                - a contains a sorted range 
-                - b contains a sorted range 
+                - a is a sparse vector
+                - b is a sparse vector
             ensures
-                - returns tanh(gamma * sparse_vector::dot(a,b) + coef)
+                - returns tanh(gamma * dot(a,b) + coef)
         !*/
 
         sparse_sigmoid_kernel& operator= (
@@ -235,11 +241,14 @@ namespace dlib
             WHAT THIS OBJECT REPRESENTS
                 This object represents a polynomial kernel
                 that works with sparse vectors.
+
+            THREAD SAFETY
+                This kernel is threadsafe.  
         !*/
 
         typedef typename T::value_type::second_type scalar_type;
         typedef T sample_type;
-        typedef dlib::memory_manager<char>::kernel_1a mem_manager_type;
+        typedef default_memory_manager mem_manager_type;
 
         const scalar_type gamma;
         const scalar_type coef;
@@ -282,10 +291,10 @@ namespace dlib
         ) const;
         /*!
             requires
-                - a contains a sorted range 
-                - b contains a sorted range 
+                - a is a sparse vector
+                - b is a sparse vector
             ensures
-                - returns pow(gamma * sparse_vector::dot(a,b) + coef, degree)
+                - returns pow(gamma * dot(a,b) + coef, degree)
         !*/
 
         sparse_polynomial_kernel& operator= (
@@ -347,11 +356,14 @@ namespace dlib
             WHAT THIS OBJECT REPRESENTS
                 This object represents a linear function kernel
                 that works with sparse vectors.
+
+            THREAD SAFETY
+                This kernel is threadsafe.  
         !*/
 
         typedef typename T::value_type::second_type scalar_type;
         typedef T sample_type;
-        typedef dlib::memory_manager<char>::kernel_1a mem_manager_type;
+        typedef default_memory_manager mem_manager_type;
 
         scalar_type operator() (
             const sample_type& a,
@@ -359,10 +371,10 @@ namespace dlib
         ) const;
         /*!
             requires
-                - a contains a sorted range 
-                - b contains a sorted range 
+                - a is a sparse vector
+                - b is a sparse vector
             ensures
-                - returns sparse_vector::dot(a,b) 
+                - returns dot(a,b) 
         !*/
 
         bool operator== (
@@ -394,6 +406,75 @@ namespace dlib
     );
     /*!
         provides deserialization support for sparse_linear_kernel 
+    !*/
+
+// ----------------------------------------------------------------------------------------
+
+    template <
+        typename T
+        >
+    struct sparse_histogram_intersection_kernel
+    {
+        /*!
+            REQUIREMENTS ON T
+                Must be a sparse vector as defined in dlib/svm/sparse_vector_abstract.h
+
+            WHAT THIS OBJECT REPRESENTS
+                This object represents a histogram intersection kernel 
+                that works with sparse vectors.
+
+            THREAD SAFETY
+                This kernel is threadsafe.  
+        !*/
+
+        typedef typename T::value_type::second_type scalar_type;
+        typedef T sample_type;
+        typedef default_memory_manager mem_manager_type;
+
+        scalar_type operator() (
+            const sample_type& a,
+            const sample_type& b
+        ) const;
+        /*!
+            requires
+                - a is a sparse vector
+                - b is a sparse vector
+                - all the values in a and b are >= 0
+            ensures
+                - Let A(i) denote the value of the ith dimension of the a vector.
+                - Let B(i) denote the value of the ith dimension of the b vector.
+                - returns sum over all i: std::min(A(i), B(i)) 
+        !*/
+
+        bool operator== (
+            const sparse_histogram_intersection_kernel& k
+        ) const;
+        /*!
+            ensures
+                - returns true
+        !*/
+    };
+
+    template <
+        typename T
+        >
+    void serialize (
+        const sparse_histogram_intersection_kernel<T>& item,
+        std::ostream& out
+    );
+    /*!
+        provides serialization support for sparse_histogram_intersection_kernel
+    !*/
+
+    template <
+        typename T
+        >
+    void deserialize (
+        sparse_histogram_intersection_kernel<T>& item,
+        std::istream& in 
+    );
+    /*!
+        provides deserialization support for sparse_histogram_intersection_kernel 
     !*/
 
 // ----------------------------------------------------------------------------------------

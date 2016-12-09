@@ -182,10 +182,16 @@ namespace dlib
                 {
                     if (PostMessage(helper_window,WM_USER+QUIT_EVENT_HANDLER_THREAD,0,0)==0)
                     {
-                        dlog << LERROR << "Unable to schedule function for execution in event handling thread.";
+                        dlog << LWARN << "Unable to schedule function for execution in event handling thread.";
+                        // No point calling wait() here since the thread isn't going to
+                        // terminate gracefully in this case.  So we just let the program
+                        // end as it will and hope for the best.
                     } 
-
-                    wait();
+                    else
+                    {
+                        // wait for the event handler thread to terminate.
+                        wait();
+                    }
                 }
 
             }
@@ -289,7 +295,7 @@ namespace dlib
             if (p.get() == 0)
             {
                 p.reset(new event_handler_thread());
-                global_mutex()->unlock();
+                M.unlock();
                 p->start_event_thread();
             }
             return p;
@@ -305,7 +311,7 @@ namespace dlib
 
         static void error_box_helper(void* param)
         {
-            ebh_param& p = *reinterpret_cast<ebh_param*>(param);
+            ebh_param& p = *static_cast<ebh_param*>(param);
 #ifdef UNICODE
             MessageBox (NULL,  convert_mbstring_to_wstring(p.text).c_str(), 
                         convert_mbstring_to_wstring(p.title).c_str(), MB_OK|MB_ICONERROR|MB_SYSTEMMODAL 

@@ -54,10 +54,28 @@ namespace dlib
             );
 
             const map_pair<domain,range>& element (
-            ) const;
+            ) const
+            {
+                DLIB_CASSERT(this->current_element_valid() == true,
+                    "\tconst map_pair<domain,range>& hash_table::element() const"
+                    << "\n\tyou can't access the current element if it doesn't exist"
+                    << "\n\tthis: " << this
+                    );
+
+                return ht_base::element();
+            }
 
             map_pair<domain,range>& element (
-            );
+            )
+            {
+                DLIB_CASSERT(this->current_element_valid() == true,
+                    "\tmap_pair<domain,range>& hash_table::element()"
+                    << "\n\tyou can't access the current element if it doesn't exist"
+                    << "\n\tthis: " << this
+                    );
+
+                return ht_base::element();
+            }
 
 
     };
@@ -87,10 +105,10 @@ namespace dlib
         range& r
     )
     {
-        DLIB_CASSERT(operator[](d) != 0 &&
-                (reinterpret_cast<const void*>(&d) != reinterpret_cast<void*>(&d_copy)) &&
-                (reinterpret_cast<const void*>(&d) != reinterpret_cast<void*>(&r)) &&
-                (reinterpret_cast<const void*>(&r) != reinterpret_cast<void*>(&d_copy)),
+        DLIB_CASSERT(this->operator[](d) != 0 &&
+                (static_cast<const void*>(&d) != static_cast<void*>(&d_copy)) &&
+                (static_cast<const void*>(&d) != static_cast<void*>(&r)) &&
+                (static_cast<const void*>(&r) != static_cast<void*>(&d_copy)),
             "\tvoid binary_search_tree::remove"
             << "\n\tthe element must be in the table for it to be removed"
             << "\n\tthis:       " << this
@@ -113,7 +131,7 @@ namespace dlib
         range& r
     )
     {
-        DLIB_CASSERT( reinterpret_cast<const void*>(&d) != reinterpret_cast<void*>(&r),
+        DLIB_CASSERT( static_cast<const void*>(&d) != static_cast<void*>(&r),
             "\tvoid binary_search_tree::add"
             << "\n\tyou can't call add() and give the same object to both arguments."
             << "\n\tthis:       " << this
@@ -157,7 +175,7 @@ namespace dlib
     )
     {
         DLIB_CASSERT(this->size() != 0 && 
-            (reinterpret_cast<const void*>(&d) != reinterpret_cast<void*>(&r)),
+            (static_cast<const void*>(&d) != static_cast<void*>(&r)),
             "\tvoid hash_table::remove_any"
             << "\n\ttable must not be empty if something is going to be removed"
             << "\n\tthis: " << this
@@ -166,42 +184,6 @@ namespace dlib
             );
 
         ht_base::remove_any(d,r);
-    }
-
-// ----------------------------------------------------------------------------------------
-
-    template <
-        typename ht_base        
-        >
-    const map_pair<typename ht_base::domain_type,typename ht_base::range_type>& hash_table_kernel_c<ht_base>::
-    element (
-    ) const
-    {
-        DLIB_CASSERT(this->current_element_valid() == true,
-            "\tconst map_pair<domain,range>& hash_table::element() const"
-            << "\n\tyou can't access the current element if it doesn't exist"
-            << "\n\tthis: " << this
-            );
-
-        return ht_base::element();
-    }
-
-// ----------------------------------------------------------------------------------------
-
-    template <
-        typename ht_base        
-        >
-    map_pair<typename ht_base::domain_type,typename ht_base::range_type>& hash_table_kernel_c<ht_base>::
-    element (
-    ) 
-    {
-        DLIB_CASSERT(this->current_element_valid() == true,
-            "\tmap_pair<domain,range>& hash_table::element()"
-            << "\n\tyou can't access the current element if it doesn't exist"
-            << "\n\tthis: " << this
-            );
-
-        return ht_base::element();
     }
 
 // ----------------------------------------------------------------------------------------

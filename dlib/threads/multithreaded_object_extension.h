@@ -6,7 +6,6 @@
 #include "multithreaded_object_extension_abstract.h"
 #include "threads_kernel.h"
 #include "auto_mutex_extension.h"
-#include "../threads.h"
 #include "rmutex_extension.h"
 #include "rsignaler_extension.h"
 #include "../algs.h"
@@ -126,7 +125,7 @@ namespace dlib
         void thread_helper(
         );
 
-        typedef member_function_pointer<>::kernel_1a_c mfp;
+        typedef member_function_pointer<> mfp;
 
         rmutex m_;
         rsignaler s;

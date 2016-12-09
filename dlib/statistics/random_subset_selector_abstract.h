@@ -5,14 +5,14 @@
 
 #include <vector>
 #include "../rand/rand_kernel_abstract.h"
-#include "../memory_manager.h"
+#include "../algs.h"
 #include "../string.h"
 
 namespace dlib
 {
     template <
         typename T,
-        typename Rand_type = dlib::rand::kernel_1a
+        typename Rand_type = dlib::rand
         >
     class random_subset_selector
     {
@@ -71,7 +71,8 @@ namespace dlib
         !*/
     public:
         typedef T type;
-        typedef memory_manager<char>::kernel_1a mem_manager_type;
+        typedef T value_type;
+        typedef default_memory_manager mem_manager_type;
         typedef Rand_type rand_type;
 
         typedef typename std::vector<T>::iterator iterator;
@@ -216,6 +217,18 @@ namespace dlib
                   this container
         !*/
 
+        const std::vector<T>& to_std_vector(
+        ) const;
+        /*!
+            ensures
+                - returns a const reference to the underlying std::vector<T> that contains
+                  all elements in this object.  That is, this function returns a vector, V,
+                  which has the following properties:  
+                    - V.size()  == this->size()
+                    - V.begin() == this->begin()
+                    - V.end()   == this->end()
+        !*/
+
         void swap (
             random_subset_selector& item
         );
@@ -348,6 +361,23 @@ namespace dlib
                 - R.max_size() == num
             - The given random_seed will be used to initialize the random number
               generator used by this function.
+    !*/
+
+// ----------------------------------------------------------------------------------------
+
+    template <
+        typename T
+        >
+    const matrix_exp mat (
+        const random_subset_selector<T>& m 
+    );
+    /*!
+        ensures
+            - returns a matrix R such that:
+                - is_col_vector(R) == true 
+                - R.size() == m.size()
+                - for all valid r:
+                  R(r) == m[r]
     !*/
 
 // ----------------------------------------------------------------------------------------

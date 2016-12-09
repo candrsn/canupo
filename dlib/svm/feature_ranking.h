@@ -33,7 +33,6 @@ namespace dlib
 
         */
         typedef typename kernel_type::scalar_type scalar_type;
-        typedef typename kernel_type::sample_type sample_type;
         typedef typename kernel_type::mem_manager_type mm;
 
 
@@ -150,7 +149,7 @@ namespace dlib
         const label_matrix_type& labels
     )
     {
-        return rank_features_impl(kc, vector_to_matrix(samples), vector_to_matrix(labels));
+        return rank_features_impl(kc, mat(samples), mat(labels));
     }
 
 // ----------------------------------------------------------------------------------------
@@ -172,7 +171,6 @@ namespace dlib
 
         */
         typedef typename kernel_type::scalar_type scalar_type;
-        typedef typename kernel_type::sample_type sample_type;
         typedef typename kernel_type::mem_manager_type mm;
 
         // make sure requires clause is not broken
@@ -266,14 +264,14 @@ namespace dlib
         const long num_features
     )
     {
-        if (vector_to_matrix(samples).nr() > 0 && num_features == vector_to_matrix(samples)(0).nr())
+        if (mat(samples).nr() > 0 && num_features == mat(samples)(0).nr())
         {
             // if we are going to rank them all then might as well do the recursive feature elimination version
-            return rank_features_impl(kc, vector_to_matrix(samples), vector_to_matrix(labels));
+            return rank_features_impl(kc, mat(samples), mat(labels));
         }
         else
         {
-            return rank_features_impl(kc, vector_to_matrix(samples), vector_to_matrix(labels), num_features);
+            return rank_features_impl(kc, mat(samples), mat(labels), num_features);
         }
     }
 
@@ -374,7 +372,6 @@ namespace dlib
             bool verbose
         )
         {
-            typedef typename sample_matrix_type::type sample_type;
             using namespace std;
 
             if (verbose)
@@ -416,8 +413,8 @@ namespace dlib
             << "\n\t is_binary_classification_problem(): " << is_binary_classification_problem(samples, labels) 
             );
 
-        return rank_features_helpers::find_gamma_with_big_centroid_gap_impl(vector_to_matrix(samples), 
-                                                             vector_to_matrix(labels),
+        return rank_features_helpers::find_gamma_with_big_centroid_gap_impl(mat(samples), 
+                                                             mat(labels),
                                                              initial_gamma,
                                                              num_sv,
                                                              false);
@@ -443,8 +440,8 @@ namespace dlib
             << "\n\t is_binary_classification_problem(): " << is_binary_classification_problem(samples, labels) 
             );
 
-        return rank_features_helpers::find_gamma_with_big_centroid_gap_impl(vector_to_matrix(samples), 
-                                                             vector_to_matrix(labels),
+        return rank_features_helpers::find_gamma_with_big_centroid_gap_impl(mat(samples), 
+                                                             mat(labels),
                                                              initial_gamma,
                                                              num_sv,
                                                              true);

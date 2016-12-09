@@ -19,13 +19,6 @@ namespace dlib
     class line_search_funct 
     {
     public:
-        // You get an error on this line when you pass in a global function to this function.
-        // You have to either use a function object or pass a pointer to your global function
-        // by taking its address using the & operator.  (This check is here because gcc 4.0
-        // has a bug that causes it to silently corrupt return values from functions that
-        // invoked through a reference)
-        COMPILE_TIME_ASSERT(is_function<funct>::value == false);
-
         line_search_funct(const funct& f_, const T& start_, const T& direction_) 
             : f(f_),start(start_), direction(direction_), matrix_r(0), scalar_r(0)
         {}
@@ -77,13 +70,6 @@ namespace dlib
     template <typename funct, typename T>
     const line_search_funct<funct,T> make_line_search_function(const funct& f, const T& start, const T& direction) 
     { 
-        // You get an error on this line when you pass in a global function to this function.
-        // You have to either use a function object or pass a pointer to your global function
-        // by taking its address using the & operator.  (This check is here because gcc 4.0
-        // has a bug that causes it to silently corrupt return values from functions that
-        // invoked through a reference)
-        COMPILE_TIME_ASSERT(is_function<funct>::value == false);
-
         COMPILE_TIME_ASSERT(is_matrix<T>::value);
         DLIB_ASSERT (
             is_col_vector(start) && is_col_vector(direction) && start.size() == direction.size(),
@@ -102,13 +88,6 @@ namespace dlib
     template <typename funct, typename T>
     const line_search_funct<funct,T> make_line_search_function(const funct& f, const T& start, const T& direction, double& f_out) 
     { 
-        // You get an error on this line when you pass in a global function to this function.
-        // You have to either use a function object or pass a pointer to your global function
-        // by taking its address using the & operator.  (This check is here because gcc 4.0
-        // has a bug that causes it to silently corrupt return values from functions that
-        // invoked through a reference)
-        COMPILE_TIME_ASSERT(is_function<funct>::value == false);
-
         COMPILE_TIME_ASSERT(is_matrix<T>::value);
         DLIB_ASSERT (
             is_col_vector(start) && is_col_vector(direction) && start.size() == direction.size(),
@@ -127,13 +106,6 @@ namespace dlib
     template <typename funct, typename T>
     const line_search_funct<funct,T> make_line_search_function(const funct& f, const T& start, const T& direction, T& grad_out) 
     { 
-        // You get an error on this line when you pass in a global function to this function.
-        // You have to either use a function object or pass a pointer to your global function
-        // by taking its address using the & operator.  (This check is here because gcc 4.0
-        // has a bug that causes it to silently corrupt return values from functions that
-        // invoked through a reference)
-        COMPILE_TIME_ASSERT(is_function<funct>::value == false);
-
         COMPILE_TIME_ASSERT(is_matrix<T>::value);
         DLIB_ASSERT (
             is_col_vector(start) && is_col_vector(direction) && start.size() == direction.size(),
@@ -155,7 +127,8 @@ namespace dlib
         double f0,
         double d0,
         double f1,
-        double d1
+        double d1,
+        double limit = 1
     )
     {
         const double n = 3*(f1 - f0) - 2*d0 - d1;
@@ -189,8 +162,77 @@ namespace dlib
         else
             x = x2;
 
+        // now make sure the minimum is within the allowed range of [0,limit] 
+        return put_in_range(0,limit,x);
+    }
+
+// ----------------------------------------------------------------------------------------
+
+    inline double poly_min_extrap (
+        double f0,
+        double d0,
+        double f1
+    )
+    {
+        const double temp = 2*(f1 - f0 - d0);
+        if (std::abs(temp) <= d0*std::numeric_limits<double>::epsilon())
+            return 0.5;
+
+        const double alpha = -d0/temp;
+
         // now make sure the minimum is within the allowed range of (0,1) 
-        return put_in_range(0,1,x);
+        return put_in_range(0,1,alpha);
+    }
+
+// ----------------------------------------------------------------------------------------
+
+    inline double poly_min_extrap (
+        double f0,
+        double d0,
+        double x1,
+        double f_x1,
+        double x2,
+        double f_x2
+    )
+    {
+        DLIB_ASSERT(0 < x1 && x1 < x2,"Invalid inputs were given to this function");
+        // The contents of this function follow the equations described on page 58 of the
+        // book Numerical Optimization by Nocedal and Wright, second edition.
+        matrix<double,2,2> m;
+        matrix<double,2,1> v;
+
+        const double aa2 = x2*x2;
+        const double aa1 = x1*x1;
+        m =  aa2,       -aa1,
+            -aa2*x2, aa1*x1;   
+        v = f_x1 - f0 - d0*x1,
+            f_x2 - f0 - d0*x2;
+
+
+        double temp = aa2*aa1*(x1-x2);
+
+        // just take a guess if this happens
+        if (temp == 0)
+        {
+            return x1/2.0;
+        }
+
+        matrix<double,2,1> temp2;
+        temp2 = m*v/temp;
+        const double a = temp2(0);
+        const double b = temp2(1);
+
+        temp = b*b - 3*a*d0;
+        if (temp < 0 || a == 0)
+        {
+            // This is probably a line so just pick the lowest point
+            if (f0 < f_x2)
+                return 0;
+            else
+                return x2;
+        }
+        temp = (-b + std::sqrt(temp))/(3*a);
+        return put_in_range(0, x2, temp);
     }
 
 // ----------------------------------------------------------------------------------------
@@ -251,14 +293,6 @@ namespace dlib
         unsigned long max_iter 
     )
     {
-        // You get an error on this line when you pass in a global function to this function.
-        // You have to either use a function object or pass a pointer to your global function
-        // by taking its address using the & operator.  (This check is here because gcc 4.0
-        // has a bug that causes it to silently corrupt return values from functions that
-        // invoked through a reference)
-        COMPILE_TIME_ASSERT(is_function<funct>::value == false);
-        COMPILE_TIME_ASSERT(is_function<funct_der>::value == false);
-
         DLIB_ASSERT (
             0 < rho && rho < sigma && sigma < 1 && max_iter > 0,
             "\tdouble line_search()"
@@ -272,8 +306,10 @@ namespace dlib
         // the book Practical Methods of Optimization by R. Fletcher.   The sectioning 
         // phase is an implementation of 2.6.4 from the same book.
 
-        // tau1 > 1. Controls the alpha jump size during the search
-        const double tau1 = 9;
+        // 1 <= tau1a < tau1b. Controls the alpha jump size during the bracketing phase of
+        // the search.
+        const double tau1a = 1.4;
+        const double tau1b = 9;
 
         // it must be the case that 0 < tau2 < tau3 <= 1/2 for the algorithm to function
         // correctly but the specific values of tau2 and tau3 aren't super important.
@@ -282,7 +318,7 @@ namespace dlib
 
 
         // Stop right away and return a step size of 0 if the gradient is 0 at the starting point
-        if (std::abs(d0) < std::numeric_limits<double>::epsilon())
+        if (std::abs(d0) <= std::abs(f0)*std::numeric_limits<double>::epsilon())
             return 0;
 
         // Stop right away if the current value is good enough according to min_f
@@ -357,34 +393,34 @@ namespace dlib
                 break;
             }
 
-            if (mu <= 2*alpha - last_alpha)
+
+
+            const double temp = alpha;
+            // Pick a larger range [first, last].  We will pick the next alpha in that
+            // range.
+            double first, last;
+            if (mu > 0)
             {
-                last_alpha = alpha;
-                alpha = mu;
+                first = std::min(mu, alpha + tau1a*(alpha - last_alpha));
+                last  = std::min(mu, alpha + tau1b*(alpha - last_alpha));
             }
             else
             {
-                const double temp = alpha;
-
-                double first = 2*alpha - last_alpha;
-                double last;
-                if (mu > 0)
-                    last = std::min(mu, alpha + tau1*(alpha - last_alpha));
-                else
-                    last = std::max(mu, alpha + tau1*(alpha - last_alpha));
-
-
-                // pick a point between first and last by doing some kind of interpolation
-                if (last_alpha < alpha)
-                    alpha = last_alpha + (alpha-last_alpha)*poly_min_extrap(last_val, last_val_der, val, val_der);
-                else
-                    alpha = alpha + (last_alpha-alpha)*poly_min_extrap(val, val_der, last_val, last_val_der);
-
-                alpha = put_in_range(first,last,alpha);
-
-
-                last_alpha = temp;
+                first = std::max(mu, alpha + tau1a*(alpha - last_alpha));
+                last  = std::max(mu, alpha + tau1b*(alpha - last_alpha));
             }
+            
+
+
+            // pick a point between first and last by doing some kind of interpolation
+            if (last_alpha < alpha)
+                alpha = last_alpha + (alpha-last_alpha)*poly_min_extrap(last_val, last_val_der, val, val_der, 1e10);
+            else
+                alpha = alpha + (last_alpha-alpha)*poly_min_extrap(val, val_der, last_val, last_val_der, 1e10);
+
+            alpha = put_in_range(first,last,alpha);
+
+            last_alpha = temp;
 
             last_val = val;
             last_val_der = val_der;
@@ -417,6 +453,14 @@ namespace dlib
                 return b;
             }
 
+            // If alpha has basically become zero then just stop.  Think of it like this,
+            // if we take the largest possible alpha step will the objective function
+            // change at all?  If not then there isn't any point looking for a better
+            // alpha.
+            const double max_possible_alpha = std::max(std::abs(a),std::abs(b));
+            if (std::abs(max_possible_alpha*d0) <= std::abs(f0)*std::numeric_limits<double>::epsilon())
+                return alpha;
+
 
             if (val > f0 + rho*alpha*d0 || val >= a_val)
             {
@@ -445,6 +489,77 @@ namespace dlib
 
 // ----------------------------------------------------------------------------------------
 
+    template <
+        typename funct
+        >
+    double backtracking_line_search (
+        const funct& f, 
+        double f0,
+        double d0,
+        double alpha,
+        double rho, 
+        unsigned long max_iter 
+    )
+    {
+        DLIB_ASSERT (
+            0 < rho && rho < 1 && max_iter > 0,
+            "\tdouble backtracking_line_search()"
+            << "\n\tYou have given invalid arguments to this function"
+            << "\n\t rho:      " << rho 
+            << "\n\t max_iter: " << max_iter 
+        );
+
+        // make sure alpha is going in the right direction.  That is, it should be opposite
+        // the direction of the gradient.
+        if ((d0 > 0 && alpha > 0) ||
+            (d0 < 0 && alpha < 0))
+        {
+            alpha *= -1;
+        }
+
+        bool have_prev_alpha = false;
+        double prev_alpha = 0;
+        double prev_val = 0;
+        unsigned long iter = 0;
+        while (true)
+        {
+            ++iter;
+            const double val = f(alpha);
+            if (val <= f0 + alpha*rho*d0 || iter >= max_iter)
+            {
+                return alpha;
+            }
+            else
+            {
+                // Interpolate a new alpha.  We also make sure the step by which we
+                // reduce alpha is not super small.
+                double step;
+                if (!have_prev_alpha)
+                {
+                    if (d0 < 0)
+                        step = alpha*put_in_range(0.1,0.9, poly_min_extrap(f0, d0, val));
+                    else
+                        step = alpha*put_in_range(0.1,0.9, poly_min_extrap(f0, -d0, val));
+                    have_prev_alpha = true;
+                }
+                else
+                {
+                    if (d0 < 0)
+                        step = put_in_range(0.1*alpha,0.9*alpha, poly_min_extrap(f0, d0, alpha, val, prev_alpha, prev_val));
+                    else
+                        step = put_in_range(0.1*alpha,0.9*alpha, -poly_min_extrap(f0, -d0, -alpha, val, -prev_alpha, prev_val));
+                }
+
+                prev_alpha = alpha;
+                prev_val = val;
+
+                alpha = step;
+            }
+        }
+    }
+
+// ----------------------------------------------------------------------------------------
+
     class optimize_single_variable_failure : public error {
     public: optimize_single_variable_failure(const std::string& s):error(s){}
     };
@@ -458,25 +573,23 @@ namespace dlib
         const double begin = -1e200,
         const double end = 1e200,
         const double eps = 1e-3,
-        const long max_iter = 100
+        const long max_iter = 100,
+        const double initial_search_radius = 1
     )
     {
-        // You get an error on this line when you pass in a global function to this function.
-        // You have to either use a function object or pass a pointer to your global function
-        // by taking its address using the & operator.  (This check is here because gcc 4.0
-        // has a bug that causes it to silently corrupt return values from functions that
-        // invoked through a reference)
-        COMPILE_TIME_ASSERT(is_function<funct>::value == false);
-
         DLIB_CASSERT( eps > 0 &&
                       max_iter > 1 &&
-                      begin <= starting_point && starting_point <= end,
+                      begin <= starting_point && starting_point <= end && 
+                      initial_search_radius > 0,
                       "eps: " << eps
                       << "\n max_iter: "<< max_iter 
                       << "\n begin: "<< begin 
                       << "\n end:   "<< end 
                       << "\n starting_point: "<< starting_point 
+                      << "\n initial_search_radius: "<< initial_search_radius 
         );
+
+        double search_radius = initial_search_radius;
 
         double p1=0, p2=0, p3=0, f1=0, f2=0, f3=0;
         long f_evals = 1;
@@ -497,8 +610,8 @@ namespace dlib
 
 
         // The first thing we do is get a starting set of 3 points that are inside the [begin,end] bounds
-        p1 = max(starting_point-1, begin);
-        p3 = min(starting_point+1, end);
+        p1 = max(starting_point-search_radius, begin);
+        p3 = min(starting_point+search_radius, end);
         f1 = f(p1);
         f3 = f(p3);
 
@@ -517,7 +630,6 @@ namespace dlib
 
         // Now we have 3 points on the function.  Start looking for a bracketing set such that
         // f1 > f2 < f3 is the case.
-        double jump_size = 1;
         while ( !(f1 > f2 && f2 < f3))
         {
             // check for hitting max_iter or if the interval is now too small
@@ -544,15 +656,36 @@ namespace dlib
                 starting_point = p3;
                 return f3;
             }
+            
+            // If the left most points are identical in function value then expand out the
+            // left a bit, unless it's already at bound or we would drop that left most
+            // point anyway because it's bad.
+            if (f1==f2 && f1<f3 && p1!=begin)
+            {
+                p1 = max(p1 - search_radius, begin);
+                f1 = f(p1);
+                ++f_evals;
+                search_radius *= 2;
+                continue;
+            }
+            if (f2==f3 && f3<f1 && p3!=end)
+            {
+                p3 = min(p3 + search_radius, end);
+                f3 = f(p3);
+                ++f_evals;
+                search_radius *= 2;
+                continue;
+            }
+
 
             // if f1 is small then take a step to the left
-            if (f1 < f3)
+            if (f1 <= f3)
             { 
                 // check if the minimum is butting up against the bounds and if so then pick
                 // a point between p1 and p2 in the hopes that shrinking the interval will
                 // be a good thing to do.  Or if p1 and p2 aren't differentiated then try and
                 // get them to obtain different values.
-                if (p1 == begin || (f1 == f2 && (end-begin) < jump_size ))
+                if (p1 == begin || (f1 == f2 && (end-begin) < search_radius ))
                 {
                     p3 = p2;
                     f3 = f2;
@@ -569,10 +702,10 @@ namespace dlib
                     p2 = p1;
                     f2 = f1;
 
-                    p1 = max(p1 - jump_size, begin);
+                    p1 = max(p1 - search_radius, begin);
                     f1 = f(p1);
 
-                    jump_size *= 2;
+                    search_radius *= 2;
                 }
 
             }
@@ -583,7 +716,7 @@ namespace dlib
                 // a point between p2 and p3 in the hopes that shrinking the interval will
                 // be a good thing to do.  Or if p2 and p3 aren't differentiated then try and
                 // get them to obtain different values.
-                if (p3 == end || (f2 == f3 && (end-begin) < jump_size))
+                if (p3 == end || (f2 == f3 && (end-begin) < search_radius))
                 {
                     p1 = p2;
                     f1 = f2;
@@ -600,10 +733,10 @@ namespace dlib
                     p2 = p3;
                     f2 = f3;
 
-                    p3 = min(p3 + jump_size, end);
+                    p3 = min(p3 + search_radius, end);
                     f3 = f(p3);
 
-                    jump_size *= 2;
+                    search_radius *= 2;
                 }
             }
 
@@ -649,7 +782,7 @@ namespace dlib
             // make sure one side of the bracket isn't super huge compared to the other
             // side.  If it is then contract it.
             const double bracket_ratio = abs(p1-p2)/abs(p2-p3);
-            if ( !( bracket_ratio < 100 && bracket_ratio > 0.01) )
+            if ( !( bracket_ratio < 10 && bracket_ratio > 0.1) )
             {
                 // Force p_min to be on a reasonable side.  But only if lagrange_poly_min_extrap()
                 // didn't put it on a good side already.
@@ -711,11 +844,12 @@ namespace dlib
     }
 
 // ----------------------------------------------------------------------------------------
+
     template <typename funct>
-    class local_negate_function_object 
+    class negate_function_object 
     {
     public:
-        local_negate_function_object(const funct& f_) : f(f_){}
+        negate_function_object(const funct& f_) : f(f_){}
 
         template <typename T>
         double operator()(const T& x) const
@@ -728,7 +862,9 @@ namespace dlib
     };
 
     template <typename funct>
-    const local_negate_function_object<funct> local_negate_function(const funct& f) { return local_negate_function_object<funct>(f); }
+    const negate_function_object<funct> negate_function(const funct& f) { return negate_function_object<funct>(f); }
+
+// ----------------------------------------------------------------------------------------
 
     template <typename funct>
     double find_max_single_variable (
@@ -737,17 +873,11 @@ namespace dlib
         const double begin = -1e200,
         const double end = 1e200,
         const double eps = 1e-3,
-        const long max_iter = 100
+        const long max_iter = 100,
+        const double initial_search_radius = 1
     )
     {
-        // You get an error on this line when you pass in a global function to this function.
-        // You have to either use a function object or pass a pointer to your global function
-        // by taking its address using the & operator.  (This check is here because gcc 4.0
-        // has a bug that causes it to silently corrupt return values from functions that
-        // invoked through a reference)
-        COMPILE_TIME_ASSERT(is_function<funct>::value == false);
-
-        return -find_min_single_variable(local_negate_function(f), starting_point, begin, end, eps, max_iter);
+        return -find_min_single_variable(negate_function(f), starting_point, begin, end, eps, max_iter, initial_search_radius);
     }
 
 // ----------------------------------------------------------------------------------------

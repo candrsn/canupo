@@ -15,6 +15,25 @@ namespace test
 // -----------------------------------------------------------------------------
 
     static dlib::mutex spinner_mutex;
+    static dlib::mutex test_count_mutex;
+    dlib::uint64 test_count = 0;
+
+// -----------------------------------------------------------------------------
+
+    dlib::uint64 number_of_testing_statements_executed (
+    )
+    {
+        dlib::auto_mutex lock(test_count_mutex);
+        return test_count;
+    }
+
+    void increment_test_count (
+    )
+    {
+        test_count_mutex.lock();
+        ++test_count;
+        test_count_mutex.unlock();
+    }
 
 // -----------------------------------------------------------------------------
 
@@ -25,13 +44,16 @@ namespace test
         const char* _exp_str
     )
     {
+        test_count_mutex.lock();
+        ++test_count;
+        test_count_mutex.unlock();
         if ( !(_exp) )                                                         
         {                                                                       
-            std::ostringstream dlib__out;                                       
-                dlib__out << "\n\nError occurred at line " << line << ".\n";    
-                dlib__out << "Error occurred in file " << file << ".\n";      
-                dlib__out << "Failing expression was " << _exp_str << ".\n";           
-                throw dlib::error(dlib__out.str());      
+            std::ostringstream dlib_o_out;                                       
+            dlib_o_out << "\n\nError occurred at line " << line << ".\n";    
+            dlib_o_out << "Error occurred in file " << file << ".\n";      
+            dlib_o_out << "Failing expression was " << _exp_str << ".\n";           
+            throw dlib::error(dlib_o_out.str());      
         }
     }                                                                      
 
@@ -48,13 +70,13 @@ namespace test
 
     tester::
     tester (
-        const std::string& switch_name_,
-        const std::string& description__,
-        unsigned long num_of_args__
+        const std::string& switch_name_x,
+        const std::string& description_x,
+        unsigned long num_of_args_x
     ) :
-        switch_name(switch_name_),
-        description_(description__),
-        num_of_args_(num_of_args__)
+        switch_name(switch_name_x),
+        description_(description_x),
+        num_of_args_(num_of_args_x)
     {
         using namespace std;
         if (testers().is_in_domain(switch_name))

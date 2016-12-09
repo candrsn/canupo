@@ -1,7 +1,7 @@
 // Copyright (C) 2010  Davis E. King (davis@dlib.net)
 // License: Boost Software License   See LICENSE.txt for the full license.
-#ifndef DLIB_HoG_H__
-#define DLIB_HoG_H__
+#ifndef DLIB_HoG_Hh_
+#define DLIB_HoG_Hh_
 
 #include "hog_abstract.h"
 #include "../algs.h"
@@ -63,6 +63,18 @@ namespace dlib
             num_block_cols(0)
         {}
 
+        void clear (
+        )
+        {
+            num_block_rows = 0;
+            num_block_cols = 0;
+            hist_cells.clear();
+        }
+
+        void copy_configuration (
+            const hog_image&
+        ){}
+
         template <
             typename image_type
             >
@@ -70,9 +82,12 @@ namespace dlib
             const image_type& img
         )
         {
-            COMPILE_TIME_ASSERT( pixel_traits<typename image_type::type>::has_alpha == false );
-            load_impl(array_to_matrix(img));
+            COMPILE_TIME_ASSERT( pixel_traits<typename image_traits<image_type>::pixel_type>::has_alpha == false );
+            load_impl(mat(img));
         }
+
+        inline void unload(
+        ) { clear(); }
 
         inline unsigned long size (
         ) const { return static_cast<unsigned long>(nr()*nc()); }
@@ -82,6 +97,12 @@ namespace dlib
 
         inline long nc (
         ) const { return num_block_cols; }
+
+        long get_num_dimensions (
+        ) const
+        {
+            return block_size*block_size*num_orientation_bins;
+        }
 
         inline const descriptor_type& operator() (
             long row,
@@ -127,18 +148,6 @@ namespace dlib
             long col
         ) const
         {
-            // make sure requires clause is not broken
-            DLIB_ASSERT( 0 <= row && row < nr() &&
-                         0 <= col && col < nc(),
-                "\t rectangle hog_image::get_block_rect()"
-                << "\n\t invalid row or col argument"
-                << "\n\t row:  " << row
-                << "\n\t col:  " << col 
-                << "\n\t nr(): " << nr() 
-                << "\n\t nc(): " << nc() 
-                << "\n\t this: " << this
-                );
-
             row *= cell_stride;
             col *= cell_stride;
 
@@ -150,6 +159,89 @@ namespace dlib
             ++col;
 
             return rectangle(col, row, col+cell_size*block_size-1, row+cell_size*block_size-1);
+        }
+
+        const point image_to_feat_space (
+            const point& p
+        ) const
+        {
+
+            const long half_block = block_size/2;
+            if ((block_size%2) == 0)
+            {
+                return point(((p.x()-1)/(long)cell_size - half_block)/(long)cell_stride,
+                             ((p.y()-1)/(long)cell_size - half_block)/(long)cell_stride);
+            }
+            else
+            {
+                return point(((p.x()-1-(long)cell_size/2)/(long)cell_size - half_block)/(long)cell_stride,
+                             ((p.y()-1-(long)cell_size/2)/(long)cell_size - half_block)/(long)cell_stride);
+            }
+        }
+
+        const rectangle image_to_feat_space (
+            const rectangle& rect
+        ) const
+        {
+            return rectangle(image_to_feat_space(rect.tl_corner()), image_to_feat_space(rect.br_corner()));
+        }
+
+        const point feat_to_image_space (
+            const point& p
+        ) const
+        {
+            const long half_block = block_size/2;
+            if ((block_size%2) == 0)
+            {
+                return point((p.x()*cell_stride + half_block)*cell_size + 1,
+                             (p.y()*cell_stride + half_block)*cell_size + 1);
+            }
+            else
+            {
+                return point((p.x()*cell_stride + half_block)*cell_size + 1 + cell_size/2,
+                             (p.y()*cell_stride + half_block)*cell_size + 1 + cell_size/2);
+            }
+        }
+
+        const rectangle feat_to_image_space (
+            const rectangle& rect
+        ) const
+        {
+            return rectangle(feat_to_image_space(rect.tl_corner()), feat_to_image_space(rect.br_corner()));
+        }
+
+
+
+        // these _PRIVATE_ functions are only here as a workaround for a bug in visual studio 2005.  
+        void _PRIVATE_serialize (std::ostream& out) const
+        {
+            // serialize hist_cells
+            serialize(hist_cells.nc(),out);
+            serialize(hist_cells.nr(),out);
+            hist_cells.reset();
+            while (hist_cells.move_next())
+                serialize(hist_cells.element().values,out);
+            hist_cells.reset();
+
+
+            serialize(num_block_rows, out);
+            serialize(num_block_cols, out);
+        }
+
+        void _PRIVATE_deserialize (std::istream& in )
+        {
+            // deserialize item.hist_cells
+            long nc, nr;
+            deserialize(nc,in);
+            deserialize(nr,in);
+            hist_cells.set_size(nr,nc);
+            while (hist_cells.move_next())
+                deserialize(hist_cells.element().values,in); 
+            hist_cells.reset();
+
+
+            deserialize(num_block_rows, in);
+            deserialize(num_block_cols, in);
         }
 
     private:
@@ -190,7 +282,6 @@ namespace dlib
                 }
             }
 
-            const double pi = 3.1415926535898;
 
             // loop over all the histogram cells and fill them out
             for (long rh = 1; rh < hist_cells.nr()-1; ++rh)
@@ -245,8 +336,8 @@ namespace dlib
                             }
                             else  // if we should do some interpolation
                             {
-                                unsigned long quantized_angle_lower = std::floor(angle);
-                                unsigned long quantized_angle_upper = std::ceil(angle);
+                                unsigned long quantized_angle_lower = static_cast<unsigned long>(std::floor(angle));
+                                unsigned long quantized_angle_upper = static_cast<unsigned long>(std::ceil(angle));
 
                                 quantized_angle_lower %= num_orientation_bins;
                                 quantized_angle_upper %= num_orientation_bins;
@@ -371,7 +462,7 @@ namespace dlib
             double values[num_orientation_bins];
         };
 
-        typename array2d<histogram>::kernel_1a hist_cells;
+        array2d<histogram> hist_cells;
 
         mutable descriptor_type des;
 
@@ -383,7 +474,41 @@ namespace dlib
 
 // ----------------------------------------------------------------------------------------
 
+    template <
+        unsigned long T1,
+        unsigned long T2,
+        unsigned long T3,
+        unsigned long T4,
+        int           T5,
+        int           T6 
+        >
+    void serialize (
+        const hog_image<T1,T2,T3,T4,T5,T6>& item,
+        std::ostream& out
+    )
+    {
+        item._PRIVATE_serialize(out);
+    }
+
+    template <
+        unsigned long T1,
+        unsigned long T2,
+        unsigned long T3,
+        unsigned long T4,
+        int           T5,
+        int           T6 
+        >
+    void deserialize (
+        hog_image<T1,T2,T3,T4,T5,T6>& item,
+        std::istream& in 
+    )
+    {
+        item._PRIVATE_deserialize(in);
+    }
+
+// ----------------------------------------------------------------------------------------
+
 }
 
-#endif // DLIB_HoG_H__
+#endif // DLIB_HoG_Hh_
 

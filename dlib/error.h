@@ -52,7 +52,8 @@ namespace dlib
         EIMAGE_SAVE,
         ECAST_TO_STRING,
         ESTRING_CAST,
-        EUTF8_TO_UTF32
+        EUTF8_TO_UTF32,
+        EOPTION_PARSE
     };
 
 // ----------------------------------------------------------------------------------------
@@ -165,6 +166,7 @@ namespace dlib
             else if ( type == ECAST_TO_STRING) return "ECAST_TO_STRING";
             else if ( type == ESTRING_CAST) return "ESTRING_CAST";
             else if ( type == EUTF8_TO_UTF32) return "EUTF8_TO_UTF32";
+            else if ( type == EOPTION_PARSE) return "EOPTION_PARSE";
             else return "undefined error type";
         }
 
@@ -252,6 +254,13 @@ namespace dlib
 
         void check_for_previous_fatal_errors()
         {
+            // If dlib is being use to create plugins for some other application, like
+            // MATLAB, then don't do these checks since it terminates the over arching
+            // system.  Just let the errors go to the plugin handler and it will deal with
+            // them.
+#if defined(MATLAB_MEX_FILE)
+            return;
+#else
             static bool is_first_fatal_error = true;
             if (is_first_fatal_error == false)
             {
@@ -281,6 +290,7 @@ namespace dlib
                 std::set_terminate(&dlib_fatal_error_terminate);
             }
             is_first_fatal_error = false;
+#endif
         }
     };
 
@@ -408,6 +418,27 @@ namespace dlib
                 - #type == ETHREAD
                 - #info == ""
         !*/
+    };
+
+// ----------------------------------------------------------------------------------------
+
+    class impossible_labeling_error : public dlib::error 
+    { 
+        /*!
+            WHAT THIS OBJECT REPRESENTS
+                This is the exception thrown by code that trains object detectors (e.g.
+                structural_svm_object_detection_problem) when they detect that the set of
+                truth boxes given to the training algorithm contains some impossible to
+                obtain outputs.  
+                
+                This kind of problem can happen when the set of image positions scanned by
+                the underlying object detection method doesn't include the truth rectangle
+                as a possible output.  Another possibility is when two truth boxes are very
+                close together and hard coded non-max suppression logic would prevent two
+                boxes in such close proximity from being output.
+        !*/
+    public: 
+        impossible_labeling_error(const std::string& msg) : dlib::error(msg) {};
     };
 
 // ----------------------------------------------------------------------------------------

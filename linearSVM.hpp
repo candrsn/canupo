@@ -45,27 +45,27 @@
 
 struct LinearSVM {
 
-    typedef dlib::matrix<FloatType, 0, 1> sample_type;
+    typedef dlib::matrix<double, 0, 1> sample_type;
     typedef dlib::linear_kernel<sample_type> kernel_type;
 
     int grid_size;
-    FloatType trainer_batch_rate;
+    double trainer_batch_rate;
     
     LinearSVM(int _grid_size) : grid_size(_grid_size), trainer_batch_rate(0.1) {}
 
     struct cross_validation_objective {
         cross_validation_objective (
             const std::vector<sample_type>& samples_,
-            const std::vector<FloatType>& labels_,
+            const std::vector<double>& labels_,
             int _nfolds,
             LinearSVM* _lsvm
         ) : samples(samples_), labels(labels_), nfolds(_nfolds), lsvm(_lsvm) {}
 
-        double operator() (FloatType logarg) const {
+        double operator() (double logarg) const {
             using namespace dlib;
             // see below for changes from dlib examples
-            const FloatType arg = exp(logarg);
-            matrix<FloatType> result;
+            const double arg = exp(logarg);
+            matrix<double> result;
 
             // Make an SVM trainer and tell it what the parameters are supposed to be.
 #ifdef SVM_NU_TRAINER
@@ -99,13 +99,13 @@ struct LinearSVM {
         }
 
         const std::vector<sample_type>& samples;
-        const std::vector<FloatType>& labels;
+        const std::vector<double>& labels;
         int nfolds;
         LinearSVM* lsvm;
     };
 
 
-    FloatType crossValidate(int nfolds, const std::vector<sample_type>& samples, const std::vector<FloatType>& labels) {
+    double crossValidate(int nfolds, const std::vector<sample_type>& samples, const std::vector<double>& labels) {
         using namespace dlib;
         using namespace std;
 
@@ -144,10 +144,10 @@ struct LinearSVM {
         }
         cout << endl;
         cout << "cross-validated balanced accuracy = " << 0.5 * best_score << endl;
-        return (FloatType)exp(best_logarg);
+        return (double)exp(best_logarg);
     }
     
-    void train(int nfolds, FloatType nu, const std::vector<sample_type>& samples, const std::vector<FloatType>& labels) {
+    void train(int nfolds, double nu, const std::vector<sample_type>& samples, const std::vector<double>& labels) {
         using namespace dlib;
 #ifdef SVM_NU_TRAINER
         svm_nu_trainer<kernel_type> trainer;
@@ -168,7 +168,7 @@ struct LinearSVM {
         
         weights.clear();
         weights.resize(dim+1, 0);
-        matrix<FloatType> w(dim,1);
+        matrix<double> w(dim,1);
         w = 0;
         for (int i=0; i<decfun.alpha.nr(); ++i) {
             w += decfun.alpha(i) * decfun.basis_vectors(i);
@@ -194,14 +194,14 @@ struct LinearSVM {
         // => consistant orthogonal axis
     }
     
-    FloatType predict(const sample_type& data) {
+    double predict(const sample_type& data) {
         int dim = weights.size()-1;
-        FloatType ret = weights[dim];
+        double ret = weights[dim];
         for (int d=0; d<dim; ++d) ret += weights[d] * data(d);
         return ret;
     }
     
-    std::vector<FloatType> weights;
+    std::vector<double> weights;
 };
 
 

@@ -1,7 +1,7 @@
 // Copyright (C) 2010  Davis E. King (davis@dlib.net)
 // License: Boost Software License   See LICENSE.txt for the full license.
-#undef DLIB_LINEAR_MANIFOLD_ReGULARIZER_ABSTRACT_H__
-#ifdef DLIB_LINEAR_MANIFOLD_ReGULARIZER_ABSTRACT_H__
+#undef DLIB_LINEAR_MANIFOLD_ReGULARIZER_ABSTRACT_Hh_
+#ifdef DLIB_LINEAR_MANIFOLD_ReGULARIZER_ABSTRACT_Hh_
 
 #include <limits>
 #include <vector>
@@ -85,7 +85,7 @@ namespace dlib
                   it must in turn contain objects with an interface compatible with dlib::sample_pair
                 - edges.size() > 0
                 - contains_duplicate_pairs(edges) == false
-                - max_index_value_plus_one(edges) <= samples.size()
+                - max_index_plus_one(edges) <= samples.size()
                 - weight_funct(edges[i]) must be a valid expression that evaluates to a
                   floating point number >= 0
             ensures
@@ -132,6 +132,6 @@ namespace dlib
 
 // ----------------------------------------------------------------------------------------
 
-#endif // DLIB_LINEAR_MANIFOLD_ReGULARIZER_ABSTRACT_H__
+#endif // DLIB_LINEAR_MANIFOLD_ReGULARIZER_ABSTRACT_Hh_
 
 

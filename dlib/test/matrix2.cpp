@@ -25,7 +25,7 @@ namespace
 
     logger dlog("test.matrix2");
 
-    dlib::rand::float_1a rnd;
+    dlib::rand rnd;
 
     void matrix_test (
     )
@@ -166,38 +166,38 @@ namespace
 
         std::vector<double> stdv(4);
         std_vector_c<double> stdv_c(4);
-        dlib::array<double>::expand_1a_c arr;
+        dlib::array<double> arr;
         arr.resize(4);
         for (long i = 0; i < 4; ++i)
             stdv[i] = stdv_c[i] = arr[i] = i+1;
 
-        DLIB_TEST(vector_to_matrix(stdv)(0) == 1);
-        DLIB_TEST(vector_to_matrix(stdv)(1) == 2);
-        DLIB_TEST(vector_to_matrix(stdv)(2) == 3);
-        DLIB_TEST(vector_to_matrix(stdv)(3) == 4);
-        DLIB_TEST(vector_to_matrix(stdv).nr() == 4);
-        DLIB_TEST(vector_to_matrix(stdv).nc() == 1);
-        DLIB_TEST(vector_to_matrix(stdv).size() == 4);
-        DLIB_TEST(equal(trans(vector_to_matrix(stdv))*vector_to_matrix(stdv), trans(v)*v));
-        DLIB_TEST(equal(trans(vector_to_matrix(stdv))*vector_to_matrix(stdv), tmp(trans(v)*v)));
+        DLIB_TEST(mat(stdv)(0) == 1);
+        DLIB_TEST(mat(stdv)(1) == 2);
+        DLIB_TEST(mat(stdv)(2) == 3);
+        DLIB_TEST(mat(stdv)(3) == 4);
+        DLIB_TEST(mat(stdv).nr() == 4);
+        DLIB_TEST(mat(stdv).nc() == 1);
+        DLIB_TEST(mat(stdv).size() == 4);
+        DLIB_TEST(equal(trans(mat(stdv))*mat(stdv), trans(v)*v));
+        DLIB_TEST(equal(trans(mat(stdv))*mat(stdv), tmp(trans(v)*v)));
 
-        DLIB_TEST(vector_to_matrix(stdv_c)(0) == 1);
-        DLIB_TEST(vector_to_matrix(stdv_c)(1) == 2);
-        DLIB_TEST(vector_to_matrix(stdv_c)(2) == 3);
-        DLIB_TEST(vector_to_matrix(stdv_c)(3) == 4);
-        DLIB_TEST(vector_to_matrix(stdv_c).nr() == 4);
-        DLIB_TEST(vector_to_matrix(stdv_c).nc() == 1);
-        DLIB_TEST(vector_to_matrix(stdv_c).size() == 4);
-        DLIB_TEST(equal(trans(vector_to_matrix(stdv_c))*vector_to_matrix(stdv_c), trans(v)*v));
+        DLIB_TEST(mat(stdv_c)(0) == 1);
+        DLIB_TEST(mat(stdv_c)(1) == 2);
+        DLIB_TEST(mat(stdv_c)(2) == 3);
+        DLIB_TEST(mat(stdv_c)(3) == 4);
+        DLIB_TEST(mat(stdv_c).nr() == 4);
+        DLIB_TEST(mat(stdv_c).nc() == 1);
+        DLIB_TEST(mat(stdv_c).size() == 4);
+        DLIB_TEST(equal(trans(mat(stdv_c))*mat(stdv_c), trans(v)*v));
 
-        DLIB_TEST(vector_to_matrix(arr)(0) == 1);
-        DLIB_TEST(vector_to_matrix(arr)(1) == 2);
-        DLIB_TEST(vector_to_matrix(arr)(2) == 3);
-        DLIB_TEST(vector_to_matrix(arr)(3) == 4);
-        DLIB_TEST(vector_to_matrix(arr).nr() == 4);
-        DLIB_TEST(vector_to_matrix(arr).nc() == 1);
-        DLIB_TEST(vector_to_matrix(arr).size() == 4);
-        DLIB_TEST(equal(trans(vector_to_matrix(arr))*vector_to_matrix(arr), trans(v)*v));
+        DLIB_TEST(mat(arr)(0) == 1);
+        DLIB_TEST(mat(arr)(1) == 2);
+        DLIB_TEST(mat(arr)(2) == 3);
+        DLIB_TEST(mat(arr)(3) == 4);
+        DLIB_TEST(mat(arr).nr() == 4);
+        DLIB_TEST(mat(arr).nc() == 1);
+        DLIB_TEST(mat(arr).size() == 4);
+        DLIB_TEST(equal(trans(mat(arr))*mat(arr), trans(v)*v));
 
         DLIB_TEST(v(0) == 1);
         DLIB_TEST(v(1) == 2);
@@ -226,8 +226,10 @@ namespace
         DLIB_TEST(floor(det(m3)+0.01) == -444);
         DLIB_TEST(floor(det(dm3)+0.01) == -444);
         DLIB_TEST(min(m3) == 1);
+        DLIB_TEST(m3(min_point(m3).y(),min_point(m3).x()) == 1);
         DLIB_TEST(min(dm3) == 1);
         DLIB_TEST(max(m3) == 52);
+        DLIB_TEST(m3(max_point(m3).y(),max_point(m3).x()) == 52);
         DLIB_TEST(max(dm3) == 52);
         DLIB_TEST(sum(m3) == 112);
         DLIB_TEST(sum(dm3) == 112);
@@ -369,6 +371,33 @@ namespace
         DLIB_TEST(dm10 == m10);
         DLIB_TEST_MSG(sum(abs(sigmoid(dm10) -sigmoid(m10))) < 1e-10,sum(abs(sigmoid(dm10) -sigmoid(m10))) );
 
+        {
+            matrix<double,2,1> x, l, u, out;
+            x = 3,4;
+
+            l = 1,1;
+            u = 2,2.2;
+
+            out = 2, 2.2;
+            DLIB_TEST(equal(clamp(x, l, u) , out));
+            out = 3, 2.2;
+            DLIB_TEST(!equal(clamp(x, l, u) , out));
+            out = 2, 4.2;
+            DLIB_TEST(!equal(clamp(x, l, u) , out));
+
+            x = 1.5, 1.5;
+            out = x;
+            DLIB_TEST(equal(clamp(x, l, u) , out));
+
+            x = 0.5, 1.5;
+            out = 1, 1.5;
+            DLIB_TEST(equal(clamp(x, l, u) , out));
+
+            x = 1.5, 0.5;
+            out = 1.5, 1.0;
+            DLIB_TEST(equal(clamp(x, l, u) , out));
+
+        }
 
         matrix<double, 7, 7,MM,column_major_layout> m7;
         matrix<double> dm7(7,7);
@@ -377,15 +406,15 @@ namespace
 
         DLIB_TEST_MSG(max(abs(dm7*inv(dm7) - identity_matrix<double>(7))) < 1e-12, max(abs(dm7*inv(dm7) - identity_matrix<double>(7))));
         DLIB_TEST(equal(inv(dm7),  inv(m7)));
-        DLIB_TEST(det(dm7) == det(m7));
-        DLIB_TEST(min(dm7) == min(m7));
-        DLIB_TEST(max(dm7) == max(m7));
-        DLIB_TEST_MSG(abs(sum(dm7) - sum(m7)) < 1e-14,sum(dm7) - sum(m7));
-        DLIB_TEST(prod(dm7) == prod(m7));
-        DLIB_TEST(diag(dm7) == diag(m7));
-        DLIB_TEST(trans(dm7) == trans(m7));
-        DLIB_TEST(abs(dm7) == abs(m7));
-        DLIB_TEST(round(dm7) == round(m7));
+        DLIB_TEST(abs(det(dm7) - det(m7)) < 1e-14);
+        DLIB_TEST(abs(min(dm7) - min(m7)) < 1e-14);
+        DLIB_TEST(abs(max(dm7) - max(m7)) < 1e-14);
+        DLIB_TEST_MSG(abs(sum(dm7) - sum(m7)) < 1e-13,sum(dm7) - sum(m7));
+        DLIB_TEST(abs(prod(dm7) -prod(m7)) < 1e-14);
+        DLIB_TEST(equal(diag(dm7) , diag(m7)));
+        DLIB_TEST(equal(trans(dm7) , trans(m7)));
+        DLIB_TEST(equal(abs(dm7) , abs(m7)));
+        DLIB_TEST(equal(round(dm7) , round(m7)));
         DLIB_TEST(matrix_cast<int>(dm7) == matrix_cast<int>(m7));
         DLIB_TEST((rotate<2,3>(dm7) == rotate<2,3>(m7)));
         DLIB_TEST((sum(pointwise_multiply(dm7,dm7) - pointwise_multiply(m7,m7))) < 1e-10);
@@ -640,9 +669,8 @@ namespace
             const long M = 3;
             const long N = 3;
 
-            typedef matrix<double,0,0> mat;
 
-            matrix<double,0,0,memory_manager<char>::kernel_1a, column_major_layout> a(M,N);  
+            matrix<double,0,0,default_memory_manager, column_major_layout> a(M,N);  
             for (long r = 0; r < a.nr(); ++r)
             {
                 for (long c = 0; c < a.nc(); ++c)
@@ -651,9 +679,9 @@ namespace
                 }
             }
 
-            matrix<double,M,M,memory_manager<char>::kernel_1a, column_major_layout> u, u2;  
-            matrix<double,0,0,memory_manager<char>::kernel_1a, column_major_layout> q, q2;
-            matrix<double,N,N,memory_manager<char>::kernel_1a, column_major_layout> v, v2;
+            matrix<double,M,M,default_memory_manager, column_major_layout> u, u2;  
+            matrix<double,0,0,default_memory_manager, column_major_layout> q, q2;
+            matrix<double,N,N,default_memory_manager, column_major_layout> v, v2;
 
             matrix<double,M,N,MM, column_major_layout> a2;  
             a2 = tmp(a/2);
@@ -759,6 +787,7 @@ namespace
             matrix<double,N,N> v;
 
             matrix<double,M,N> a2;  
+            a2 = 0;
             a2 = tmp(a/2);
 
 
@@ -875,7 +904,7 @@ namespace
             const long M = 9;
             const long N = 40;
 
-            typedef matrix<double,0,0,memory_manager<char>::kernel_1a, column_major_layout> mat;
+            typedef matrix<double,0,0,default_memory_manager, column_major_layout> mat;
             mat a(M,N);  
             for (long r = 0; r < a.nr(); ++r)
             {
@@ -1075,6 +1104,27 @@ namespace
             DLIB_TEST(m == m2);
         }
 
+        {
+            print_spinner();
+            matrix<double,1,1> m1;
+            matrix<double,2,2> m2;
+            matrix<double,3,3> m3;
+            matrix<double,4,4> m4;
+
+            dlib::rand rnd;
+            for (int i = 0; i < 50; ++i)
+            {
+                m1 = randm(1,1,rnd);
+                m2 = randm(2,2,rnd);
+                m3 = randm(3,3,rnd);
+                m4 = randm(4,4,rnd);
+
+                DLIB_TEST(max(abs(m1*inv(m1) - identity_matrix(m1))) < 1e-13);
+                DLIB_TEST(max(abs(m2*inv(m2) - identity_matrix(m2))) < 1e-13);
+                DLIB_TEST(max(abs(m3*inv(m3) - identity_matrix(m3))) < 1e-13);
+                DLIB_TEST_MSG(max(abs(m4*inv(m4) - identity_matrix(m4))) < 1e-12, max(abs(m4*inv(m4) - identity_matrix(m4))));
+            }
+        }
 
     }
 

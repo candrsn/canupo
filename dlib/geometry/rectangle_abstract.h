@@ -90,9 +90,10 @@ namespace dlib
                 - #bottom() == p.y()
         !*/
 
+        template <typename T>
         rectangle (
-            const point& p1,
-            const point& p2
+            const vector<T,2>& p1,
+            const vector<T,2>& p2
         );
         /*!
             ensures
@@ -362,6 +363,16 @@ namespace dlib
             ensures
                 - returns !(*this == rect)
         !*/
+
+        bool operator< (
+            const dlib::rectangle& a,
+            const dlib::rectangle& b
+        ) const;
+        /*!
+            ensures
+                - Defines a total ordering over rectangles so they can be used in
+                  associative containers.
+        !*/
     };
 
 // ----------------------------------------------------------------------------------------
@@ -403,6 +414,26 @@ namespace dlib
 
 // ----------------------------------------------------------------------------------------
 
+    point center (
+        const dlib::rectangle& rect
+    );
+    /*!
+        ensures
+            - returns the center of the given rectangle
+    !*/
+
+// ----------------------------------------------------------------------------------------
+
+    dlib::vector<double,2> dcenter (
+        const dlib::rectangle& rect
+    );
+    /*!
+        ensures
+            - returns the center of the given rectangle using a real valued vector.  
+    !*/
+
+// ----------------------------------------------------------------------------------------
+
     inline const rectangle centered_rect (
         const point& p,
         unsigned long width,
@@ -411,6 +442,7 @@ namespace dlib
     /*!
         ensures
             - returns a rectangle R such that:
+                - center(R) == p
                 - if (width == 0 || height == 0)
                     - R.width() == 0 
                     - R.height() == 0 
@@ -418,7 +450,6 @@ namespace dlib
                     - R.width() == width
                     - R.height() == height 
                 - R.tl_corner() == point(p.x()-width/2, p.y()-height/2)
-                - The center of R is a the point p 
     !*/
 
 // ----------------------------------------------------------------------------------------
@@ -432,6 +463,7 @@ namespace dlib
     /*!
         ensures
             - returns a rectangle R such that:
+                - center(R) == p
                 - if (width == 0 || height == 0)
                     - R.width() == 0 
                     - R.height() == 0 
@@ -439,7 +471,6 @@ namespace dlib
                     - R.width() == width
                     - R.height() == height 
                 - R.tl_corner() == point(x-width/2, y-height/2)
-                - The center of R is a the point (x,y)
     !*/
 
 // ----------------------------------------------------------------------------------------
@@ -454,6 +485,46 @@ namespace dlib
             - returns centered_rect( (rect.tl_corner() + rect.br_corner())/2, width, height)
               (i.e. returns a rectangle centered on rect but with the given width
               and height)
+    !*/
+
+// ----------------------------------------------------------------------------------------
+
+    inline rectangle set_aspect_ratio (
+        const rectangle& rect,
+        double ratio
+    );
+    /*!
+        requires
+            - ratio > 0
+        ensures
+            - This function reshapes the given rectangle so that it has the given aspect
+              ratio.  In particular, this means we return a rectangle R such that the
+              following equations are as true as possible:
+                - R.width()/R.height() == ratio
+                - R.area() == rect.area()
+                - center(rect) == center(R)
+    !*/
+
+// ----------------------------------------------------------------------------------------
+
+    inline rectangle intersect (
+        const rectangle& a,
+        const rectangle& b
+    );
+    /*!
+        ensures
+            - returns a.intersect(b)
+              (i.e. returns a rectangle representing the intersection of a and b)
+    !*/
+
+// ----------------------------------------------------------------------------------------
+
+    inline unsigned long area (
+        const rectangle& a
+    );
+    /*!
+        ensures
+            - returns a.area()
     !*/
 
 // ----------------------------------------------------------------------------------------
@@ -478,6 +549,33 @@ namespace dlib
         ensures
             - return shrink_rect(rect, -num)
               (i.e. grows the given rectangle by expanding its border by num)
+    !*/
+
+// ----------------------------------------------------------------------------------------
+
+    inline const rectangle shrink_rect (
+        const rectangle& rect,
+        long width,
+        long height
+    );
+    /*!
+        ensures
+            - returns rectangle(rect.left()+width, rect.top()+height, rect.right()-width, rect.bottom()-height)
+              (i.e. shrinks the given rectangle by shrinking its left and right borders by width
+              and its top and bottom borders by height. )
+    !*/
+
+// ----------------------------------------------------------------------------------------
+
+    inline const rectangle grow_rect (
+        const rectangle& rect,
+        long width,
+        long height
+    );
+    /*!
+        ensures
+            - return shrink_rect(rect, -width, -height)
+              (i.e. grows the given rectangle by expanding its border)
     !*/
 
 // ----------------------------------------------------------------------------------------
@@ -608,6 +706,68 @@ namespace dlib
 
 // ----------------------------------------------------------------------------------------
 
+    inline size_t nearest_rect (
+        const std::vector<rectangle>& rects,
+        const point& p
+    );
+    /*!
+        requires
+            - rects.size() > 0
+        ensures
+            - returns the index of the rectangle that is closest to the point p.  In
+              particular, this function returns an IDX such that:
+                length(nearest_point(rects[IDX],p) - p)
+              is minimized.
+    !*/
+
+// ----------------------------------------------------------------------------------------
+
+    inline long distance_to_rect_edge (
+        const rectangle& rect,
+        const point& p
+    );
+    /*!
+        ensures
+            - returns the Manhattan distance between the edge of rect and p.
+    !*/
+
+// ----------------------------------------------------------------------------------------
+
+    template <typename T, typename U>
+    double distance_to_line (
+        const std::pair<vector<T,2>,vector<T,2> >& line,
+        const vector<U,2>& p
+    );
+    /*!
+        ensures
+            - returns the euclidean distance between the given line and the point p.  That
+              is, given a line that passes though the points line.first and line.second,
+              what is the distance between p and the nearest point on the line?  This
+              function returns that distance.
+    !*/
+
+// ----------------------------------------------------------------------------------------
+
+    void clip_line_to_rectangle (
+        const rectangle& box,
+        point& p1,
+        point& p2
+    );
+    /*!
+        ensures
+            - clips the line segment that goes from points p1 to p2 so that it is entirely
+              within the given box.  In particular, we will have:
+                - box.contains(#p1) == true
+                - box.contains(#p2) == true
+                - The line segment #p1 to #p2 is entirely contained within the line segment
+                  p1 to p2.  Moreover, #p1 to #p2 is the largest such line segment that
+                  fits within the given box.
+            - If the line segment does not intersect the box then the result is some
+              arbitrary line segment inside the box.
+    !*/
+
+// ----------------------------------------------------------------------------------------
+
     template <
         typename T 
         >
@@ -616,9 +776,12 @@ namespace dlib
     );
     /*!
         requires
-            - T has nr() and nc() functions that return longs
+            - It must be possible to determine the number of "rows" and "columns" in m.
+              Either by calling num_rows(m) and num_columns(m) or by calling m.nr() and
+              m.nc() to obtain the number of rows and columns respectively.  Moreover,
+              these routines should return longs.
         ensures
-            - returns rectangle(0, 0, m.nc()-1, m.nr()-1)
+            - returns rectangle(0, 0, num_columns(m)-1, num_rows(m)-1)
               (i.e. assuming T represents some kind of rectangular grid, such as
               the dlib::matrix or dlib::array2d objects, this function returns the
               bounding rectangle for that gridded object.)
@@ -626,29 +789,30 @@ namespace dlib
 
 // ----------------------------------------------------------------------------------------
 
-}
-
-namespace std
-{
+    inline rectangle operator+ (
+        const rectangle& r,
+        const point& p
+    );
     /*!
-        Define std::less<rectangle> so that you can use rectangles in the associative containers.
+        ensures
+            - returns r + rectangle(p)
+              (i.e. returns the rectangle that contains both r and p)
     !*/
-    template<>
-    struct less<dlib::rectangle> : public binary_function<dlib::rectangle,dlib::rectangle,bool>
-    {
-        inline bool operator() (const dlib::rectangle& a, const dlib::rectangle& b) const
-        { 
-            if      (a.left() < b.left()) return true;
-            else if (a.left() > b.left()) return false;
-            else if (a.top() < b.top()) return true;
-            else if (a.top() > b.top()) return false;
-            else if (a.right() < b.right()) return true;
-            else if (a.right() > b.right()) return false;
-            else if (a.bottom() < b.bottom()) return true;
-            else if (a.bottom() > b.bottom()) return false;
-            else                    return false;
-        }
-    };
+
+// ----------------------------------------------------------------------------------------
+
+    inline rectangle operator+ (
+        const point& p,
+        const rectangle& r
+    );
+    /*!
+        ensures
+            - returns r + rectangle(p)
+              (i.e. returns the rectangle that contains both r and p)
+    !*/
+
+// ----------------------------------------------------------------------------------------
+
 }
 
 #endif // DLIB_RECTANGLe_ABSTRACT_

@@ -114,7 +114,7 @@ namespace dlib
     /*!
         ensures
             - creates a new thread for the function pointed to by funct 
-            - passes it param as its parameter 
+            - passes it param as its parameter. (i.e. calls funct(param) from the new thread)
             - returns true upon success and false upon failure to create the new thread
     !*/
 
@@ -175,11 +175,10 @@ namespace dlib
         void unlock (
         ) const;
         /*!
+            requires
+                - the thread calling unlock() already has a lock on *this
             ensures
-                - if (*this is currently locked and owned by the thread calling unlock) then
-                    - #*this is unlocked (i.e. other threads may now lock this object)
-                - else
-                    - the call to unlock() has no effect
+                - #*this is unlocked (i.e. other threads may now lock this object)
         !*/
 
 

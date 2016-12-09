@@ -69,23 +69,27 @@ namespace dlib
             const T& basis_samples
         )
         {
-            load_impl(kernel_, vector_to_matrix(basis_samples));
+            load_impl(kernel_, mat(basis_samples));
         }
 
         void load(
             const linearly_independent_subset_finder<kernel_type>& lisf
         )
         {
-            // make sure requires clause is not broken
-            DLIB_ASSERT(lisf.dictionary_size() > 0,
-                "\tvoid empirical_kernel_map::load(linearly_independent_subset_finder)"
-                << "\n\t You have to give a non-empty set of basis_samples"
-                << "\n\t this: " << this
-                );
+            if (lisf.size() == 0)
+            {
+                std::ostringstream sout;
+                sout << "An empty linearly_independent_subset_finder was supplied to the\n"
+                     << "empirical_kernel_map::load() function.  One reason this might occur\n"
+                     << "is if your dataset contains only zero vectors (or vectors \n"
+                     << "approximately zero).\n";
+                clear();
+                throw empirical_kernel_map_error(sout.str());
+            }
 
             kernel = lisf.get_kernel();
             weights = trans(chol(lisf.get_inv_kernel_marix()));
-            basis.resize(lisf.dictionary_size());
+            basis.resize(lisf.size());
             for (unsigned long i = 0; i < basis.size(); ++i)
                 basis[i] = lisf[i];
 
@@ -146,7 +150,7 @@ namespace dlib
                 << "\n\t this: " << this
                 );
 
-            return decision_function<kernel_type>(trans(weights)*vect, 0, kernel, vector_to_matrix(basis));
+            return decision_function<kernel_type>(trans(weights)*vect, 0, kernel, mat(basis));
         }
 
         template <typename EXP>
@@ -164,7 +168,7 @@ namespace dlib
                 << "\n\t this: " << this
                 );
 
-            return distance_function<kernel_type>(trans(weights)*vect, dot(vect,vect), kernel, vector_to_matrix(basis));
+            return distance_function<kernel_type>(trans(weights)*vect, dot(vect,vect), kernel, mat(basis));
         }
 
         const projection_function<kernel_type> get_projection_function (
@@ -177,7 +181,7 @@ namespace dlib
                 << "\n\t this: " << this
                 );
 
-            return projection_function<kernel_type>(weights, kernel, vector_to_matrix(basis));
+            return projection_function<kernel_type>(weights, kernel, mat(basis));
         }
 
         const matrix<scalar_type,0,0,mem_manager_type> get_transformation_to (
@@ -238,7 +242,7 @@ namespace dlib
             tmat = colm(target.weights, range(0,num1-1))*kernel_matrix(kernel, basis)*trans(weights);
 
             empirical_kernel_map temp_ekm;
-            temp_ekm.load(kernel, rowm(vector_to_matrix(target.basis), range(num1,num2-1)));
+            temp_ekm.load(kernel, rowm(mat(target.basis), range(num1,num2-1)));
 
             partial_projection = temp_ekm.get_projection_function();
 

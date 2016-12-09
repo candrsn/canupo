@@ -39,6 +39,14 @@ namespace dlib
                 - returns the name of this option
         !*/
 
+        virtual const string_type& group_name (
+        ) const = 0;
+        /*!
+            ensures
+                - returns the name of the group this option is in.  If no group was set for
+                  this option then this function returns "".
+        !*/
+
         virtual const string_type& description (
         ) const = 0;
         /*!
@@ -69,7 +77,7 @@ namespace dlib
                 - arg < number_of_arguments()
                 - N < count()
             ensures
-                - returns the argth argument to the Nth occurance of this 
+                - returns the arg-th argument to the Nth occurrence of this 
                   option on the command line.
         !*/
 

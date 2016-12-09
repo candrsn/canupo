@@ -45,7 +45,11 @@ namespace dlib
     /*!
         requires
             - f == a function that returns a scalar
-            - f must take either double or a dlib::matrix that is a column vector
+            - f must have one of the following forms:
+                - double f(double)
+                - double f(dlib::matrix)  (where the matrix is a column vector)
+                - double f(T, dlib::matrix)  (where the matrix is a column vector.  In 
+                  this case the derivative of f is taken with respect to the second argument.)
             - eps > 0
         ensures
             - returns a function that represents the derivative of the function f.  It
@@ -67,26 +71,27 @@ namespace dlib
 // ----------------------------------------------------------------------------------------
 
     template <
-        typename funct
+        typename funct, 
+        typename EXP1, 
+        typename EXP2
         >
-    class negate_function_object;
-    /*!
-        This is a function object that represents the negative of some other
-        function.   
-    !*/
-
-    template <
-        typename funct
-        >
-    const negate_function_object<funct> negate_function(
-        const funct& f
+    clamped_function_object<funct,EXP1,EXP2> clamp_function (
+        const funct& f,
+        const matrix_exp<EXP1>& x_lower,
+        const matrix_exp<EXP2>& x_upper 
     );
     /*!
         requires
-            - f == a function that returns a scalar
+            - f == a function that takes a matrix and returns a scalar value.  Moreover, f
+              must be capable of taking in matrices with the same dimensions as x_lower and
+              x_upper.  So f(x_lower) must be a valid expression that evaluates to a scalar
+              value.
+            - x_lower.nr() == x_upper.nr() && x_lower.nc() == x_upper.nc()
+              (i.e. x_lower and x_upper must have the same dimensions)
+            - x_lower and x_upper must contain the same type of elements.
         ensures
-            - returns a function that represents the negation of f.  That is,
-              the returned function object represents g(x) == -f(x)
+            - returns a function object that represents the function g(x) where
+              g(x) == f(clamp(x,x_lower,x_upper))
     !*/
 
 // ----------------------------------------------------------------------------------------
@@ -169,6 +174,12 @@ namespace dlib
               first calling f() and then calling der().  That is, these two functions
               are always called in pairs with f() being called first and then der()
               being called second.
+            - Note that this function solves the maximization problem by converting it 
+              into a minimization problem.  Therefore, the values of f and its derivative
+              reported to the stopping strategy will be negated.  That is, stop_strategy
+              will see -f() and -der().  All this really means is that the status messages
+              from a stopping strategy in verbose mode will display a negated objective
+              value.
     !*/
 
 // ----------------------------------------------------------------------------------------
@@ -241,6 +252,210 @@ namespace dlib
             - returns f(#x). 
             - Uses the dlib::derivative(f,derivative_eps) function to compute gradient
               information.
+            - Note that this function solves the maximization problem by converting it 
+              into a minimization problem.  Therefore, the values of f and its derivative
+              reported to the stopping strategy will be negated.  That is, stop_strategy
+              will see -f() and -der().  All this really means is that the status messages
+              from a stopping strategy in verbose mode will display a negated objective
+              value.
+    !*/
+
+// ----------------------------------------------------------------------------------------
+// ----------------------------------------------------------------------------------------
+//                  Functions that perform box constrained optimization 
+// ----------------------------------------------------------------------------------------
+// ----------------------------------------------------------------------------------------
+
+    template <
+        typename search_strategy_type,
+        typename stop_strategy_type,
+        typename funct, 
+        typename funct_der, 
+        typename T,
+        typename EXP1,
+        typename EXP2
+        >
+    double find_min_box_constrained (
+        search_strategy_type search_strategy,
+        stop_strategy_type stop_strategy,
+        const funct& f, 
+        const funct_der& der, 
+        T& x,
+        const matrix_exp<EXP1>& x_lower,
+        const matrix_exp<EXP2>& x_upper
+    );
+    /*!
+        requires
+            - search_strategy == an object that defines a search strategy such as one 
+              of the objects from dlib/optimization/optimization_search_strategies_abstract.h
+            - stop_strategy == an object that defines a stop strategy such as one of 
+              the objects from dlib/optimization/optimization_stop_strategies_abstract.h
+            - f(x) must be a valid expression that evaluates to a double
+            - der(x) must be a valid expression that evaluates to the derivative of f() at x.
+            - is_col_vector(x) == true
+            - is_col_vector(x_lower) == true
+            - is_col_vector(x_upper) == true
+            - x.size() == x_lower.size() == x_upper.size()
+              (i.e. x, x_lower, and x_upper need to all be column vectors of the same dimensionality)
+            - min(x_upper-x_lower) >= 0
+              (i.e. x_upper must contain upper bounds relative to x_lower)
+        ensures
+            - Performs a box constrained minimization of the function f() using the given
+              search_strategy and starting from the initial point x.  That is, we try to
+              find the x value that minimizes f(x) but is also within the box constraints 
+              specified by x_lower and x_upper.  That is, we ensure that #x satisfies: 
+                - min(#x - x_lower) >= 0 && min(x_upper - #x) >= 0
+            - This function uses a backtracking line search along with a gradient projection
+              step to handle the box constraints.
+            - The function is optimized until stop_strategy decides that an acceptable
+              point has been found. 
+            - #x == the value of x that was found to minimize f() within the given box
+              constraints.
+            - returns f(#x). 
+            - The last call to f() will be made with f(#x).  
+            - When calling f() and der(), the input passed to them will always be inside
+              the box constraints defined by x_lower and x_upper.
+            - When calling der(x), it will always be the case that the last call to f() was
+              made with the same x value.  This means that you can reuse any intermediate
+              results from the previous call to f(x) inside der(x) rather than recomputing
+              them inside der(x).
+    !*/
+
+// ----------------------------------------------------------------------------------------
+
+    template <
+        typename search_strategy_type,
+        typename stop_strategy_type,
+        typename funct, 
+        typename funct_der, 
+        typename T
+        >
+    double find_min_box_constrained (
+        search_strategy_type search_strategy,
+        stop_strategy_type stop_strategy,
+        const funct& f, 
+        const funct_der& der, 
+        T& x,
+        const double x_lower,
+        const double x_upper
+    );
+    /*!
+        requires
+            - search_strategy == an object that defines a search strategy such as one 
+              of the objects from dlib/optimization/optimization_search_strategies_abstract.h
+            - stop_strategy == an object that defines a stop strategy such as one of 
+              the objects from dlib/optimization/optimization_stop_strategies_abstract.h
+            - f(x) must be a valid expression that evaluates to a double
+            - der(x) must be a valid expression that evaluates to the derivative of f() at x.
+            - is_col_vector(x) == true
+            - x_lower < x_upper
+        ensures
+            - This function is identical to find_min_box_constrained() as defined above
+              except that it takes x_lower and x_upper as doubles rather than column
+              vectors.  In this case, all variables have the same lower bound of x_lower
+              and similarly have the same upper bound of x_upper.  Therefore, this is just
+              a convenience function for calling find_max_box_constrained() when all
+              variables have the same bound constraints.
+    !*/
+
+// ----------------------------------------------------------------------------------------
+
+    template <
+        typename search_strategy_type,
+        typename stop_strategy_type,
+        typename funct, 
+        typename funct_der, 
+        typename T,
+        typename EXP1,
+        typename EXP2
+        >
+    double find_max_box_constrained (
+        search_strategy_type search_strategy,
+        stop_strategy_type stop_strategy,
+        const funct& f, 
+        const funct_der& der, 
+        T& x,
+        const matrix_exp<EXP1>& x_lower,
+        const matrix_exp<EXP2>& x_upper
+    );
+    /*!
+        requires
+            - search_strategy == an object that defines a search strategy such as one 
+              of the objects from dlib/optimization/optimization_search_strategies_abstract.h
+            - stop_strategy == an object that defines a stop strategy such as one of 
+              the objects from dlib/optimization/optimization_stop_strategies_abstract.h
+            - f(x) must be a valid expression that evaluates to a double
+            - der(x) must be a valid expression that evaluates to the derivative of f() at x.
+            - is_col_vector(x) == true
+            - is_col_vector(x_lower) == true
+            - is_col_vector(x_upper) == true
+            - x.size() == x_lower.size() == x_upper.size()
+              (i.e. x, x_lower, and x_upper need to all be column vectors of the same dimensionality)
+            - min(x_upper-x_lower) >= 0
+              (i.e. x_upper must contain upper bounds relative to x_lower)
+        ensures
+            - Performs a box constrained maximization of the function f() using the given
+              search_strategy and starting from the initial point x.  That is, we try to
+              find the x value that maximizes f(x) but is also within the box constraints 
+              specified by x_lower and x_upper.  That is, we ensure that #x satisfies: 
+                - min(#x - x_lower) >= 0 && min(x_upper - #x) >= 0
+            - This function uses a backtracking line search along with a gradient projection
+              step to handle the box constraints.
+            - The function is optimized until stop_strategy decides that an acceptable
+              point has been found. 
+            - #x == the value of x that was found to maximize f() within the given box
+              constraints.
+            - returns f(#x). 
+            - The last call to f() will be made with f(#x).  
+            - When calling f() and der(), the input passed to them will always be inside
+              the box constraints defined by x_lower and x_upper.
+            - When calling der(x), it will always be the case that the last call to f() was
+              made with the same x value.  This means that you can reuse any intermediate
+              results from the previous call to f(x) inside der(x) rather than recomputing
+              them inside der(x).
+            - Note that this function solves the maximization problem by converting it 
+              into a minimization problem.  Therefore, the values of f and its derivative
+              reported to the stopping strategy will be negated.  That is, stop_strategy
+              will see -f() and -der().  All this really means is that the status messages
+              from a stopping strategy in verbose mode will display a negated objective
+              value.
+    !*/
+
+// ----------------------------------------------------------------------------------------
+    
+    template <
+        typename search_strategy_type,
+        typename stop_strategy_type,
+        typename funct, 
+        typename funct_der, 
+        typename T
+        >
+    double find_max_box_constrained (
+        search_strategy_type search_strategy,
+        stop_strategy_type stop_strategy,
+        const funct& f, 
+        const funct_der& der, 
+        T& x,
+        const double x_lower,
+        const double x_upper
+    );
+    /*!
+        requires
+            - search_strategy == an object that defines a search strategy such as one 
+              of the objects from dlib/optimization/optimization_search_strategies_abstract.h
+            - stop_strategy == an object that defines a stop strategy such as one of 
+              the objects from dlib/optimization/optimization_stop_strategies_abstract.h
+            - f(x) must be a valid expression that evaluates to a double
+            - der(x) must be a valid expression that evaluates to the derivative of f() at x.
+            - is_col_vector(x) == true
+            - x_lower < x_upper
+        ensures
+            - This function is identical to find_max_box_constrained() as defined above
+              except that it takes x_lower and x_upper as doubles rather than column
+              vectors.  In this case, all variables have the same lower bound of x_lower
+              and similarly have the same upper bound of x_upper.  Therefore, this is just
+              a convenience function for calling find_max_box_constrained() when all
+              variables have the same bound constraints.
     !*/
 
 // ----------------------------------------------------------------------------------------

@@ -11,6 +11,7 @@
 #include "sockets_kernel_2.h"
 #include <fcntl.h>
 #include "../set.h"
+#include <netinet/tcp.h>
 
 
 
@@ -119,7 +120,7 @@ namespace dlib
                 result = result->ai_next;
 
                 ip.assign(temp);
-                if (sos.is_member(ip) == false)
+                if (sos.is_member(ip) == false && ip != "0.0.0.0")
                     sos.add(ip);
             }
 
@@ -264,7 +265,7 @@ namespace dlib
             hostent* address;
             unsigned long ipnum = inet_addr(ip.c_str());
 
-            // if inet_addr coudln't convert ip then return an error
+            // if inet_addr couldn't convert ip then return an error
             if (ipnum == INADDR_NONE)
             {
                 return OTHER_ERROR;
@@ -308,6 +309,20 @@ namespace dlib
         sdo(false),
         sdr(0)
     {}
+
+// ----------------------------------------------------------------------------------------
+
+    int connection::
+    disable_nagle()
+    {
+        int flag = 1;
+        if(setsockopt( connection_socket, IPPROTO_TCP, TCP_NODELAY, (char *)&flag, sizeof(flag) ))
+        {
+            return OTHER_ERROR;
+        }
+
+        return 0;
+    }
 
 // ----------------------------------------------------------------------------------------
 

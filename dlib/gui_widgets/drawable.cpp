@@ -6,6 +6,7 @@
 #include "drawable.h"
 
 #include <algorithm>
+#include <iostream>
 
 namespace dlib
 {
@@ -80,7 +81,7 @@ namespace dlib
         int i
     )
     {
-        drawable* d = reinterpret_cast<drawable*>(p);
+        drawable* d = static_cast<drawable*>(p);
         if (widget_set.is_member(d))
         {
             d->on_user_event(i);
@@ -518,11 +519,20 @@ namespace dlib
     ~drawable (
     )
     {
-        DLIB_ASSERT(events_are_enabled() == false,
-            "\tdrawable::~drawable()"
-            << "\n\tYou must disable events for drawable objects in their destructor by calling disable_events()."
-            << "\n\tthis:     " << this
-            );
+        try
+        {
+            DLIB_ASSERT(events_are_enabled() == false,
+                "\tdrawable::~drawable()"
+                << "\n\tYou must disable events for drawable objects in their destructor by calling disable_events()."
+                << "\n\tthis:     " << this
+                );
+        }
+        catch (std::exception& e)
+        {
+            std::cerr << e.what() << std::endl;
+            assert(false);
+            abort();
+        }
         disable_events();
     }
 

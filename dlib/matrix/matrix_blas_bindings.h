@@ -26,21 +26,42 @@ namespace dlib
         int& counter_gemv();
         int& counter_ger();
         int& counter_dot();
+        int& counter_axpy();
+        int& counter_scal();
 
         #define DLIB_TEST_BLAS_BINDING_GEMM ++counter_gemm();
         #define DLIB_TEST_BLAS_BINDING_GEMV ++counter_gemv();
         #define DLIB_TEST_BLAS_BINDING_GER ++counter_ger();
         #define DLIB_TEST_BLAS_BINDING_DOT ++counter_dot();
+        #define DLIB_TEST_BLAS_BINDING_AXPY ++counter_axpy();
+        #define DLIB_TEST_BLAS_BINDING_SCAL ++counter_scal();
 #else
         #define DLIB_TEST_BLAS_BINDING_GEMM 
         #define DLIB_TEST_BLAS_BINDING_GEMV 
         #define DLIB_TEST_BLAS_BINDING_GER 
         #define DLIB_TEST_BLAS_BINDING_DOT 
+        #define DLIB_TEST_BLAS_BINDING_AXPY
+        #define DLIB_TEST_BLAS_BINDING_SCAL
 #endif
 
+#ifndef CBLAS_H
         extern "C"
         {
             // Here we declare the prototypes for the CBLAS calls used by the BLAS bindings below
+
+            void cblas_saxpy(const int N, const float alpha, const float *X,
+                            const int incX, float *Y, const int incY);
+            void cblas_daxpy(const int N, const double alpha, const double *X,
+                            const int incX, double *Y, const int incY);
+            void cblas_caxpy(const int N, const void *alpha, const void *X,
+                            const int incX, void *Y, const int incY);
+            void cblas_zaxpy(const int N, const void *alpha, const void *X,
+                            const int incX, void *Y, const int incY);
+
+            void cblas_sscal(const int N, const float alpha, float *X, const int incX);
+            void cblas_dscal(const int N, const double alpha, double *X, const int incX);
+            void cblas_cscal(const int N, const void *alpha, void *X, const int incX);
+            void cblas_zscal(const int N, const void *alpha, void *X, const int incX);
 
             void cblas_sgemm(const enum CBLAS_ORDER Order, const enum CBLAS_TRANSPOSE TransA,
                              const enum CBLAS_TRANSPOSE TransB, const int M, const int N,
@@ -113,8 +134,65 @@ namespace dlib
                              const void *alpha, const void *X, const int incX,
                              const void *Y, const int incY, void *A, const int lda);
         }
+#endif // if not CBLAS_H
 
     // ----------------------------------------------------------------------------------------
+    // ----------------------------------------------------------------------------------------
+
+        inline void cblas_axpy(const int N, const float alpha, const float *X,
+                        const int incX, float *Y, const int incY)
+        {
+            DLIB_TEST_BLAS_BINDING_AXPY;
+            cblas_saxpy(N, alpha, X, incX, Y, incY);
+        }
+
+        inline void cblas_axpy(const int N, const double alpha, const double *X,
+                        const int incX, double *Y, const int incY)
+        {
+            DLIB_TEST_BLAS_BINDING_AXPY;
+            cblas_daxpy(N, alpha, X, incX, Y, incY);
+        }
+
+        inline void cblas_axpy(const int N, const std::complex<float>& alpha, const std::complex<float> *X,
+                        const int incX, std::complex<float> *Y, const int incY)
+        {
+            DLIB_TEST_BLAS_BINDING_AXPY;
+            cblas_caxpy(N, &alpha, X, incX, Y, incY);
+        }
+
+        inline void cblas_axpy(const int N, const std::complex<double>& alpha, const std::complex<double> *X,
+                        const int incX, std::complex<double> *Y, const int incY)
+        {
+            DLIB_TEST_BLAS_BINDING_AXPY;
+            cblas_zaxpy(N, &alpha, X, incX, Y, incY);
+        }
+
+    // ----------------------------------------------------------------------------------------
+
+        inline void cblas_scal(const int N, const float alpha, float *X)
+        {
+            DLIB_TEST_BLAS_BINDING_SCAL;
+            cblas_sscal(N, alpha, X, 1);
+        }
+
+        inline void cblas_scal(const int N, const double alpha, double *X)
+        {
+            DLIB_TEST_BLAS_BINDING_SCAL;
+            cblas_dscal(N, alpha, X, 1);
+        }
+
+        inline void cblas_scal(const int N, const std::complex<float>& alpha, std::complex<float> *X)
+        {
+            DLIB_TEST_BLAS_BINDING_SCAL;
+            cblas_cscal(N, &alpha, X, 1);
+        }
+
+        inline void cblas_scal(const int N, const std::complex<double>& alpha, std::complex<double> *X)
+        {
+            DLIB_TEST_BLAS_BINDING_SCAL;
+            cblas_zscal(N, &alpha, X, 1);
+        }
+
     // ----------------------------------------------------------------------------------------
 
         inline void cblas_gemm( const enum CBLAS_ORDER Order, const enum CBLAS_TRANSPOSE TransA,
@@ -332,10 +410,83 @@ namespace dlib
         template <typename T, long NR, long NC, typename MM>
         int get_ld (const assignable_sub_matrix<T,NR,NC,MM,column_major_layout>& m) { return m.m.nr(); }
 
+        template <typename T>
+        int get_ld (const assignable_ptr_matrix<T>& m) { return m.nc(); }
+
+        template <typename T, typename MM>
+        int get_ld (const matrix_op<op_array2d_to_mat<array2d<T,MM> > >& m) { return m.nc(); }
+        template <typename T, typename MM>
+        int get_ld (const matrix_op<op_array_to_mat<array<T,MM> > >& m) { return m.nc(); }
+        template < typename value_type, typename alloc >
+        int get_ld (const matrix_op<op_std_vect_to_mat<std::vector<value_type,alloc> > >& m) { return m.nc(); }
+        template < typename value_type, typename alloc >
+        int get_ld (const matrix_op<op_std_vect_to_mat<std_vector_c<value_type,alloc> > >& m) { return m.nc(); }
+        template <typename T>
+        int get_ld (const matrix_op<op_pointer_to_col_vect<T> >& m) { return m.nc(); }
+        template <typename T>
+        int get_ld (const matrix_op<op_pointer_to_mat<T> >& m) { return m.nc(); }
+
         // --------
+
+        // get_inc() returns the offset from one element to another.  If an object has a
+        // non-uniform offset between elements then returns 0 (e.g. a subm() view could
+        // have a non-uniform offset between elements).
+
+        template <typename T, typename MM>
+        int get_inc (const matrix_op<op_array2d_to_mat<array2d<T,MM> > >& ) { return 1; }
+        template <typename T, typename MM>
+        int get_inc (const matrix_op<op_array_to_mat<array<T,MM> > >& ) { return 1; }
+        template < typename value_type, typename alloc >
+        int get_inc (const matrix_op<op_std_vect_to_mat<std::vector<value_type,alloc> > >& ) { return 1; }
+        template < typename value_type, typename alloc >
+        int get_inc (const matrix_op<op_std_vect_to_mat<std_vector_c<value_type,alloc> > >& ) { return 1; }
+        template <typename T>
+        int get_inc (const matrix_op<op_pointer_to_col_vect<T> >& ) { return 1; }
+        template <typename T>
+        int get_inc (const matrix_op<op_pointer_to_mat<T> >& ) { return 1; }
 
         template <typename T, long NR, long NC, typename MM, typename L>
         int get_inc (const matrix<T,NR,NC,MM,L>& ) { return 1; }
+
+        template <typename T, long NR, long NC, typename MM>
+        int get_inc (const matrix_op<op_subm<matrix<T,NR,NC,MM,row_major_layout> > >& m) 
+        { 
+            // if the sub-view doesn't cover all the columns then it can't have a uniform
+            // layout.
+            if (m.nc() < m.op.m.nc())
+                return 0;
+            else
+                return 1;
+        }
+
+        template <typename T, long NR, long NC, typename MM>
+        int get_inc (const matrix_op<op_subm<matrix<T,NR,NC,MM,column_major_layout> > >& m) 
+        { 
+            if (m.nr() < m.op.m.nr())
+                return 0;
+            else
+                return 1;
+        }
+
+        template <typename T, long NR, long NC, typename MM>
+        int get_inc (const assignable_sub_matrix<T,NR,NC,MM,row_major_layout>& m) 
+        { 
+            if (m.nc() < m.m.nc())
+                return 0;
+            else
+                return 1;
+        }
+        template <typename T, long NR, long NC, typename MM>
+        int get_inc (const assignable_sub_matrix<T,NR,NC,MM,column_major_layout>& m) 
+        {
+            if (m.nr() < m.m.nr())
+                return 0;
+            else
+                return 1;
+        }
+
+        template <typename T>
+        int get_inc (const assignable_ptr_matrix<T>& ) { return 1; }
 
         template <typename T, long NR, long NC, typename MM>
         int get_inc(const matrix_op<op_colm<matrix<T,NR,NC,MM,row_major_layout> > >& m)
@@ -446,6 +597,22 @@ namespace dlib
         template <typename T, long NR, long NC, typename MM, typename L>
         T* get_ptr (assignable_sub_matrix<T,NR,NC,MM,L>& m) { return &m(0,0); }
 
+        template <typename T>
+        T* get_ptr (assignable_ptr_matrix<T>& m) { return m.ptr; }
+
+        template <typename T, typename MM>
+        const T* get_ptr (const matrix_op<op_array2d_to_mat<array2d<T,MM> > >& m) { return &m.op.array[0][0]; }
+        template <typename T, typename MM>
+        const T* get_ptr (const matrix_op<op_array_to_mat<array<T,MM> > >& m) { return &m.op.vect[0]; }
+        template < typename T, typename alloc >
+        const T* get_ptr (const matrix_op<op_std_vect_to_mat<std::vector<T,alloc> > >& m) { return &m.op.vect[0]; }
+        template < typename T, typename alloc >
+        const T* get_ptr (const matrix_op<op_std_vect_to_mat<std_vector_c<T,alloc> > >& m) { return &m.op.vect[0]; }
+        template <typename T>
+        const T* get_ptr (const matrix_op<op_pointer_to_col_vect<T> >& m) { return m.op.ptr; }
+        template <typename T>
+        const T* get_ptr (const matrix_op<op_pointer_to_mat<T> >& m) { return m.op.ptr; }
+
     // ----------------------------------------------------------------------------------------
     // ----------------------------------------------------------------------------------------
 
@@ -459,6 +626,96 @@ namespace dlib
         extern matrix<double,1,0> rv;  // general row vector
         extern matrix<double,0,1> cv;  // general column vector
         extern const double s;
+
+    // ----------------------------------------------------------------------------------------
+    // ----------------------------------------------------------------------------------------
+    //                       AXPY/SCAL overloads
+    // ----------------------------------------------------------------------------------------
+    // ----------------------------------------------------------------------------------------
+
+        DLIB_ADD_BLAS_BINDING(m)
+        {
+
+            const int N = static_cast<int>(src.size());
+            if (transpose == false && N != 0)
+            {
+                if (add_to)
+                {
+                    if (get_inc(src) && get_inc(dest))
+                        cblas_axpy(N, alpha, get_ptr(src), get_inc(src), get_ptr(dest), get_inc(dest));
+                    else
+                        matrix_assign_default(dest, src, alpha, add_to);
+                }
+                else
+                {
+                    if (get_ptr(src) == get_ptr(dest))
+                        cblas_scal(N, alpha, get_ptr(dest));
+                    else
+                        matrix_assign_default(dest, src, alpha, add_to);
+                }
+            }
+            else
+            {
+                matrix_assign_default(dest, trans(src), alpha, add_to);
+            }
+
+        } DLIB_END_BLAS_BINDING
+
+        DLIB_ADD_BLAS_BINDING(rv)
+        {
+
+            const int N = static_cast<int>(src.size());
+            if (transpose == false && N != 0)
+            {
+                if (add_to)
+                {
+                    if (get_inc(src) && get_inc(dest))
+                        cblas_axpy(N, alpha, get_ptr(src), get_inc(src), get_ptr(dest), get_inc(dest));
+                    else
+                        matrix_assign_default(dest, src, alpha, add_to);
+                }
+                else
+                {
+                    if (get_ptr(src) == get_ptr(dest))
+                        cblas_scal(N, alpha, get_ptr(dest));
+                    else
+                        matrix_assign_default(dest, src, alpha, add_to);
+                }
+            }
+            else
+            {
+                matrix_assign_default(dest, trans(src), alpha, add_to);
+            }
+
+        } DLIB_END_BLAS_BINDING
+
+        DLIB_ADD_BLAS_BINDING(cv)
+        {
+
+            const int N = static_cast<int>(src.size());
+            if (transpose == false && N != 0)
+            {
+                if (add_to)
+                {
+                    if (get_inc(src) && get_inc(dest))
+                        cblas_axpy(N, alpha, get_ptr(src), get_inc(src), get_ptr(dest), get_inc(dest));
+                    else
+                        matrix_assign_default(dest, src, alpha, add_to);
+                }
+                else
+                {
+                    if (get_ptr(src) == get_ptr(dest))
+                        cblas_scal(N, alpha, get_ptr(dest));
+                    else
+                        matrix_assign_default(dest, src, alpha, add_to);
+                }
+            }
+            else
+            {
+                matrix_assign_default(dest, trans(src), alpha, add_to);
+            }
+
+        } DLIB_END_BLAS_BINDING
 
     // ----------------------------------------------------------------------------------------
     // ----------------------------------------------------------------------------------------

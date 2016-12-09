@@ -6,6 +6,8 @@
 
 #ifdef WIN32
 
+#include <winsock2.h>
+
 #ifndef _WINSOCKAPI_
 #define _WINSOCKAPI_   /* Prevent inclusion of winsock.h in windows.h */
 #endif
@@ -15,7 +17,6 @@
 #include "sockets_kernel_1.h"
 
 #include <windows.h>
-#include <Winsock2.h>
 
 #ifndef NI_MAXHOST
 #define NI_MAXHOST 1025
@@ -205,7 +206,7 @@ namespace dlib
             hostent* address;
             unsigned long ipnum = inet_addr(ip.c_str());
 
-            // if inet_addr coudln't convert ip then return an error
+            // if inet_addr couldn't convert ip then return an error
             if (ipnum == INADDR_NONE)
             {
                 return OTHER_ERROR;
@@ -264,6 +265,20 @@ namespace dlib
         if (connection_socket != INVALID_SOCKET)
             closesocket(connection_socket);  
         delete &connection_socket;
+    }
+
+// ----------------------------------------------------------------------------------------
+
+    int connection::
+    disable_nagle()
+    {
+        int flag = 1;
+        int status = setsockopt( connection_socket, IPPROTO_TCP, TCP_NODELAY, (char *)&flag, sizeof(flag) );
+
+        if (status == SOCKET_ERROR) 
+            return OTHER_ERROR;
+        else
+            return 0;
     }
 
 // ----------------------------------------------------------------------------------------
@@ -679,7 +694,7 @@ namespace dlib
         {
             // if there is a specific ip to listen on
             sa.sin_addr.S_un.S_addr = inet_addr(ip.c_str());
-            // if inet_addr cound't convert the ip then return an error
+            // if inet_addr couldn't convert the ip then return an error
             if ( sa.sin_addr.S_un.S_addr == INADDR_NONE )
             {
                 closesocket(sock); 
@@ -693,11 +708,13 @@ namespace dlib
 
         // bind the new socket to the requested port and ip
         if (bind(sock,reinterpret_cast<sockaddr*>(&sa),sizeof(sockaddr_in))==SOCKET_ERROR)
-        {   // if there was an error 
+        {   
+            const int err = WSAGetLastError();
+            // if there was an error 
             closesocket(sock); 
 
             // if the port is already bound then return PORTINUSE
-            if (WSAGetLastError() == WSAEADDRINUSE)
+            if (err == WSAEADDRINUSE)
                 return PORTINUSE;
             else
                 return OTHER_ERROR;            
@@ -707,11 +724,12 @@ namespace dlib
         // tell the new socket to listen
         if ( listen(sock,SOMAXCONN) == SOCKET_ERROR)
         {
+            const int err = WSAGetLastError();
             // if there was an error return OTHER_ERROR
             closesocket(sock); 
 
             // if the port is already bound then return PORTINUSE
-            if (WSAGetLastError() == WSAEADDRINUSE)
+            if (err == WSAEADDRINUSE)
                 return PORTINUSE;
             else
                 return OTHER_ERROR;  
@@ -796,7 +814,7 @@ namespace dlib
         foreign_sa.sin_port = htons(foreign_port);
         foreign_sa.sin_addr.S_un.S_addr = inet_addr(foreign_ip.c_str());
 
-        // if inet_addr cound't convert the ip then return an error
+        // if inet_addr couldn't convert the ip then return an error
         if ( foreign_sa.sin_addr.S_un.S_addr == INADDR_NONE )
         {
             closesocket(sock);
@@ -838,11 +856,13 @@ namespace dlib
                 sizeof(sockaddr_in)
             ) == SOCKET_ERROR
         )
-        {   // if there was an error 
+        {   
+            const int err = WSAGetLastError();
+            // if there was an error 
             closesocket(sock); 
 
             // if the port is already bound then return PORTINUSE
-            if (WSAGetLastError() == WSAEADDRINUSE)
+            if (err == WSAEADDRINUSE)
                 return PORTINUSE;
             else
                 return OTHER_ERROR;            
@@ -856,9 +876,10 @@ namespace dlib
             ) == SOCKET_ERROR
         )
         {
+            const int err = WSAGetLastError();
             closesocket(sock); 
             // if the port is already bound then return PORTINUSE
-            if (WSAGetLastError() == WSAEADDRINUSE)
+            if (err == WSAEADDRINUSE)
                 return PORTINUSE;
             else
                 return OTHER_ERROR;  

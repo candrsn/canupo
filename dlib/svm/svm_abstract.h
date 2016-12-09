@@ -11,6 +11,7 @@
 #include "../serialize.h"
 #include "function_abstract.h"
 #include "kernel_abstract.h"
+#include "svm_nu_trainer_abstract.h"
 
 namespace dlib
 {
@@ -19,42 +20,24 @@ namespace dlib
 // ----------------------------------------------------------------------------------------
 // ----------------------------------------------------------------------------------------
 
-    class invalid_svm_nu_error : public dlib::error 
-    { 
-        /*!
-            WHAT THIS OBJECT REPRESENTS
-                This object is an exception class used to indicate that a
-                value of nu used for svm training is incompatible with a
-                particular data set.
-
-                this->nu will be set to the invalid value of nu used.
-        !*/
-
-    public: 
-        invalid_svm_nu_error(const std::string& msg, double nu_) : dlib::error(msg), nu(nu_) {};
-        const double nu;
-    };
-
-// ----------------------------------------------------------------------------------------
-
     template <
-        typename T
+        typename T,
+        typename U
         >
-    typename T::type maximum_nu (
-        const T& y
+    bool is_learning_problem (
+        const T& x,
+        const U& x_labels
     );
     /*!
         requires
-            - T == a matrix object or an object convertible to a matrix via 
-              vector_to_matrix()
-            - y.nc() == 1
-            - y.nr() > 1
-            - for all valid i:
-                - y(i) == -1 or +1
+            - T == a matrix or something convertible to a matrix via mat()
+            - U == a matrix or something convertible to a matrix via mat()
         ensures
-            - returns the maximum valid nu that can be used with the svm_nu_trainer and
-              the training set labels from the given y vector.
-              (i.e. 2.0*min(number of +1 examples in y, number of -1 examples in y)/y.nr())
+            - returns true if all of the following are true and false otherwise:
+                - is_col_vector(x) == true
+                - is_col_vector(x_labels) == true
+                - x.size() == x_labels.size() 
+                - x.size() > 0
     !*/
 
 // ----------------------------------------------------------------------------------------
@@ -69,13 +52,11 @@ namespace dlib
     );
     /*!
         requires
-            - T == a matrix or something convertible to a matrix via vector_to_matrix()
-            - U == a matrix or something convertible to a matrix via vector_to_matrix()
+            - T == a matrix or something convertible to a matrix via mat()
+            - U == a matrix or something convertible to a matrix via mat()
         ensures
             - returns true if all of the following are true and false otherwise:
-                - is_col_vector(x) == true
-                - is_col_vector(x_labels) == true
-                - x.size() == x_labels.size() 
+                - is_learning_problem(x, x_labels) == true
                 - x.size() > 1
                 - there exists at least one sample from both the +1 and -1 classes.
                   (i.e. all samples can't have the same label)
@@ -84,219 +65,288 @@ namespace dlib
     !*/
 
 // ----------------------------------------------------------------------------------------
-// ----------------------------------------------------------------------------------------
+
+    template <
+        typename sequence_type 
+        >
+    bool is_sequence_labeling_problem (
+        const std::vector<sequence_type>& samples,
+        const std::vector<std::vector<unsigned long> >& labels
+    );
+    /*!
+        ensures
+            - returns true if all of the following are true and false otherwise:
+                - is_learning_problem(samples, labels) == true
+                - for all valid i:
+                    - samples[i].size() == labels[i].size()
+                      (i.e. The size of a label sequence need to match the size of 
+                      its corresponding sample sequence)
+    !*/
+
 // ----------------------------------------------------------------------------------------
 
     template <
-        typename K 
+        typename sequence_type 
         >
-    class svm_nu_trainer
+    bool is_sequence_segmentation_problem (
+        const std::vector<sequence_type>& samples,
+        const std::vector<std::vector<std::pair<unsigned long,unsigned long> > >& segments
+    );
+    /*!
+        ensures
+            - Note that a sequence segmentation problem is a task where you are given a
+              sequence of objects (e.g. words in a sentence) and your task is to find
+              certain types of sub-sequences (e.g. proper names).
+            - returns true if all of the following are true and false otherwise:
+                - is_learning_problem(samples, segments) == true
+                - for all valid i and j:
+                    - We interpret segments[i][j] as defining a half open range starting
+                      with segments[i][j].first and ending just before segments[i][j].second.
+                    - segments[i][j].first < segments[i][j].second
+                    - segments[i][j].second <= samples[i].size()
+                      (i.e. Each segment must be contained within its associated sequence)
+                    - segments[i][j] does not overlap with any of the other ranges in
+                      segments[i].
+    !*/
+
+// ----------------------------------------------------------------------------------------
+
+    template <
+        typename lhs_type, 
+        typename rhs_type
+        >
+    bool is_assignment_problem (
+        const std::vector<std::pair<std::vector<lhs_type>, std::vector<rhs_type> > >& samples,
+        const std::vector<std::vector<long> >& labels
+    );
+    /*!
+        ensures
+            - Note that an assignment problem is a task to associate each element of samples[i].first
+              to an element of samples[i].second, or to indicate that the element doesn't associate 
+              with anything.  Therefore, labels[i] should contain the association information for
+              samples[i].
+            - This function returns true if all of the following are true and false otherwise:
+                - is_learning_problem(samples, labels) == true
+                - for all valid i:
+                    - samples[i].first.size() == labels[i].size()
+                    - for all valid j:
+                        -1 <= labels[i][j] < samples[i].second.size()
+                        (A value of -1 indicates that samples[i].first[j] isn't associated with anything.
+                        All other values indicate the associating element of samples[i].second)
+                    - All elements of labels[i] which are not equal to -1 are unique.  That is,
+                      multiple elements of samples[i].first can't associate to the same element
+                      in samples[i].second.
+    !*/
+
+// ----------------------------------------------------------------------------------------
+
+    template <
+        typename lhs_type, 
+        typename rhs_type
+        >
+    bool is_forced_assignment_problem (
+        const std::vector<std::pair<std::vector<lhs_type>, std::vector<rhs_type> > >& samples,
+        const std::vector<std::vector<long> >& labels
+    );
+    /*!
+        ensures
+            - A regular assignment problem is allowed to indicate that all elements of 
+              samples[i].first don't associate to anything.  However, a forced assignment
+              problem is required to always associate an element of samples[i].first to 
+              something in samples[i].second if there is an element of samples[i].second
+              that hasn't already been associated to something.  
+            - This function returns true if all of the following are true and false otherwise:
+                - is_assignment_problem(samples, labels) == true
+                - for all valid i:
+                    - let N denote the number of elements in labels[i] that are not equal to -1.
+                    - min(samples[i].first.size(), samples[i].second.size()) == N
+    !*/
+
+// ----------------------------------------------------------------------------------------
+
+    template <
+        typename detection_type_,
+        typename label_type_ = long
+        >
+    struct labeled_detection
     {
         /*!
-            REQUIREMENTS ON K 
-                is a kernel function object as defined in dlib/svm/kernel_abstract.h 
-
             WHAT THIS OBJECT REPRESENTS
-                This object implements a trainer for a nu support vector machine for 
-                solving binary classification problems.
-
-                The implementation of the nu-svm training algorithm used by this object is based
-                on the following excellent papers:
-                    - Chang and Lin, Training {nu}-Support Vector Classifiers: Theory and Algorithms
-                    - Chih-Chung Chang and Chih-Jen Lin, LIBSVM : a library for support vector 
-                      machines, 2001. Software available at http://www.csie.ntu.edu.tw/~cjlin/libsvm
-
+                This is a simple object, like std::pair, it just holds two objects.  It
+                serves the same purpose as std::pair except that it has informative names
+                describing its two members and is intended for use with track association
+                problems.
         !*/
 
-    public:
-        typedef K kernel_type;
-        typedef typename kernel_type::scalar_type scalar_type;
-        typedef typename kernel_type::sample_type sample_type;
-        typedef typename kernel_type::mem_manager_type mem_manager_type;
-        typedef decision_function<kernel_type> trained_function_type;
+        typedef detection_type_ detection_type;
+        typedef label_type_ label_type;
 
-        svm_nu_trainer (
-        );
-        /*!
-            ensures
-                - This object is properly initialized and ready to be used
-                  to train a support vector machine.
-                - #get_nu() == 0.1 
-                - #get_cache_size() == 200
-                - #get_epsilon() == 0.001
-        !*/
+        detection_type det;
+        label_type label;
+    };
 
-        svm_nu_trainer (
-            const kernel_type& kernel, 
-            const scalar_type& nu
-        );
-        /*!
-            requires
-                - 0 < nu <= 1
-            ensures
-                - This object is properly initialized and ready to be used
-                  to train a support vector machine.
-                - #get_kernel() == kernel
-                - #get_nu() == nu
-                - #get_cache_size() == 200
-                - #get_epsilon() == 0.001
-        !*/
-
-        void set_cache_size (
-            long cache_size
-        );
-        /*!
-            requires
-                - cache_size > 0
-            ensures
-                - #get_cache_size() == cache_size 
-        !*/
-
-        const long get_cache_size (
-        ) const;
-        /*!
-            ensures
-                - returns the number of megabytes of cache this object will use
-                  when it performs training via the this->train() function.
-                  (bigger values of this may make training go faster but won't affect 
-                  the result.  However, too big a value will cause you to run out of 
-                  memory, obviously.)
-        !*/
-
-        void set_epsilon (
-            scalar_type eps
-        );
-        /*!
-            requires
-                - eps > 0
-            ensures
-                - #get_epsilon() == eps 
-        !*/
-
-        const scalar_type get_epsilon (
-        ) const;
-        /*!
-            ensures
-                - returns the error epsilon that determines when training should stop.
-                  Generally a good value for this is 0.001.  Smaller values may result
-                  in a more accurate solution but take longer to execute.
-        !*/
-
-        void set_kernel (
-            const kernel_type& k
-        );
-        /*!
-            ensures
-                - #get_kernel() == k 
-        !*/
-
-        const kernel_type& get_kernel (
-        ) const;
-        /*!
-            ensures
-                - returns a copy of the kernel function in use by this object
-        !*/
-
-        void set_nu (
-            scalar_type nu
-        );
-        /*!
-            requires
-                - 0 < nu <= 1
-            ensures
-                - #get_nu() == nu
-        !*/
-
-        const scalar_type get_nu (
-        ) const;
-        /*!
-            ensures
-                - returns the nu svm parameter.  This is a value between 0 and
-                  1.  It is the parameter that determines the trade off between
-                  trying to fit the training data exactly or allowing more errors 
-                  but hopefully improving the generalization ability of the 
-                  resulting classifier.  Smaller values encourage exact fitting 
-                  while larger values of nu may encourage better generalization. 
-                  For more information you should consult the papers referenced 
-                  above.
-        !*/
-
-        template <
-            typename in_sample_vector_type,
-            typename in_scalar_vector_type
-            >
-        const decision_function<kernel_type> train (
-            const in_sample_vector_type& x,
-            const in_scalar_vector_type& y
-        ) const;
-        /*!
-            requires
-                - is_binary_classification_problem(x,y) == true
-                - x == a matrix or something convertible to a matrix via vector_to_matrix().
-                  Also, x should contain sample_type objects.
-                - y == a matrix or something convertible to a matrix via vector_to_matrix().
-                  Also, y should contain scalar_type objects.
-            ensures
-                - trains a nu support vector classifier given the training samples in x and 
-                  labels in y.  Training is done when the error is less than get_epsilon().
-                - returns a decision function F with the following properties:
-                    - if (new_x is a sample predicted have +1 label) then
-                        - F(new_x) >= 0
-                    - else
-                        - F(new_x) < 0
-            throws
-                - invalid_svm_nu_error
-                  This exception is thrown if get_nu() >= maximum_nu(y)
-                - std::bad_alloc
-        !*/
-
-        void swap (
-            svm_nu_trainer& item
-        );
-        /*!
-            ensures
-                - swaps *this and item
-        !*/
-    }; 
-
-    template <typename K>
-    void swap (
-        svm_nu_trainer<K>& a,
-        svm_nu_trainer<K>& b
-    ) { a.swap(b); }
+    template <
+        typename detection_type_,
+        typename label_type_ 
+        >
+    void serialize (const labeled_detection<detection_type_,label_type_>& item, std::ostream& out);
     /*!
-        provides a global swap
+        provides serialization support
+    !*/
+
+    template <
+        typename detection_type_,
+        typename label_type_ 
+        >
+    void deserialize (labeled_detection<detection_type_,label_type_>& item, std::istream& in);
+    /*!
+        provides deserialization support
+    !*/
+
+// ----------------------------------------------------------------------------------------
+
+    template <
+        typename detection_type, 
+        typename label_type 
+        >
+    bool is_track_association_problem (
+        const std::vector<std::vector<labeled_detection<detection_type,label_type> > >& samples
+    );
+    /*!
+        ensures
+            - In this tracking model you get a set of detections at each time step and are
+              expected to associate each detection with a track or have it spawn a new
+              track.  Therefore, a track association problem is a machine learning problem
+              where you are given a dataset of example input detections and are expected to
+              learn to perform the proper detection to track association.  
+            - This function checks if samples can form a valid dataset for this machine
+              learning problem and returns true if this is the case.  This means we should
+              interpret samples in the following way:
+                - samples is a track history and for each valid i:
+                    - samples[i] is a set of labeled detections from the i-th time step.
+                      Each detection has been labeled with its "true object identity".
+                      That is, all the detection throughout the history with the same
+                      label_type value are detections from the same object and therefore
+                      should be associated to the same track.
+              Putting this all together, samples is a valid track association learning
+              problem if and only if the following are all true:
+                - samples.size() > 0
+                - There are at least two values, i and j such that:
+                    - i != j
+                    - samples[i].size() > 0
+                    - samples[j].size() > 0
+                  Or in other words, there needs to be some detections in samples somewhere
+                  or it is impossible to learn anything.
+                - for all valid i:
+                    - for all valid j and k where j!=k:
+                        - samples[i][j].label != samples[i][k].label
+                          (i.e. the label_type values must be unique within each time step.
+                          Or in other words, you can't have two detections on the same
+                          object in a single time step.)
+    !*/
+
+    template <
+        typename detection_type, 
+        typename label_type 
+        >
+    bool is_track_association_problem (
+        const std::vector<std::vector<std::vector<labeled_detection<detection_type,label_type> > > >& samples
+    );
+    /*!
+        ensures
+            - returns true if is_track_association_problem(samples[i]) == true for all
+              valid i and false otherwise.
+    !*/
+
+// ----------------------------------------------------------------------------------------
+// ----------------------------------------------------------------------------------------
+// ----------------------------------------------------------------------------------------
+
+    double platt_scale (
+        const std::pair<double,double>& params,
+        const double score
+    );
+    /*!
+        ensures
+            - returns 1/(1 + std::exp(params.first*score + params.second))
+    !*/
+
+// ----------------------------------------------------------------------------------------
+
+    template <typename T, typename alloc>
+    std::pair<double,double> learn_platt_scaling (
+        const std::vector<T,alloc>& scores,
+        const std::vector<T,alloc>& labels
+    );
+    /*!
+        requires
+            - T should be either float, double, or long double 
+            - is_binary_classification_problem(scores,labels) == true
+        ensures
+            - This function learns to map scalar values into well calibrated probabilities
+              using Platt scaling.  In particular, it returns a params object such that, 
+              for all valid i:
+                - platt_scale(params,scores[i]) == the scaled version of the scalar value
+                  scores[i].  That is, the output is a number between 0 and 1.  In
+                  particular, platt_scale(params,scores[i]) is meant to represent the
+                  probability that labels[i] == +1.
+            - This function is an implementation of the algorithm described in the following
+              papers: 
+                Probabilistic Outputs for Support Vector Machines and Comparisons to
+                Regularized Likelihood Methods by John C. Platt.  March 26, 1999
+
+                A Note on Platt's Probabilistic Outputs for Support Vector Machines
+                by Hsuan-Tien Lin, Chih-Jen Lin, and Ruby C. Weng
     !*/
 
 // ----------------------------------------------------------------------------------------
 
     template <
         typename trainer_type,
-        typename in_sample_vector_type,
-        typename in_scalar_vector_type
+        typename sample_vector_type,
+        typename label_vector_type
         >
-    const probabilistic_decision_function<typename trainer_type::kernel_type> 
+    const probabilistic_function<typename trainer_type::trained_function_type> 
     train_probabilistic_decision_function (
         const trainer_type& trainer,
-        const in_sample_vector_type& x,
-        const in_scalar_vector_type& y,
+        const sample_vector_type& x,
+        const label_vector_type& y,
         const long folds
-    )
+    );
     /*!
         requires
-            - 1 < folds <= x.nr()
+            - 1 < folds <= x.size()
             - is_binary_classification_problem(x,y) == true
+            - x and y must be std::vector objects or types with a compatible interface.
             - trainer_type == some kind of batch trainer object (e.g. svm_nu_trainer)
         ensures
-            - trains a nu support vector classifier given the training samples in x and 
-              labels in y.  
-            - returns a probabilistic_decision_function that represents the trained svm.
+            - trains a classifier given the training samples in x and labels in y.  
+            - returns a probabilistic_decision_function that represents the trained classifier.
             - The parameters of the probability model are estimated by performing k-fold 
               cross validation. 
             - The number of folds used is given by the folds argument.
+            - This function is implemented using learn_platt_scaling()
         throws
             - any exceptions thrown by trainer.train()
             - std::bad_alloc
+    !*/
+
+// ----------------------------------------------------------------------------------------
+
+    template <
+        typename trainer_type
+        >
+    trainer_adapter_probabilistic<trainer_type> probabilistic (
+        const trainer_type& trainer,
+        const long folds
+    );
+    /*!
+        requires
+            - 1 < folds <= x.size()
+            - trainer_type == some kind of batch trainer object (e.g. svm_nu_trainer)
+        ensures
+            - returns a trainer adapter TA such that calling TA.train(samples, labels)
+              returns the same object as calling train_probabilistic_decision_function(trainer,samples,labels,folds).
     !*/
 
 // ----------------------------------------------------------------------------------------
@@ -310,8 +360,7 @@ namespace dlib
         typename in_sample_vector_type,
         typename in_scalar_vector_type
         >
-    const matrix<typename trainer_type::scalar_type, 1, 2, typename trainer_type::mem_manager_type> 
-    cross_validate_trainer (
+    const matrix<double,1,2> cross_validate_trainer (
         const trainer_type& trainer,
         const in_sample_vector_type& x,
         const in_scalar_vector_type& y,
@@ -320,8 +369,9 @@ namespace dlib
     /*!
         requires
             - is_binary_classification_problem(x,y) == true
-            - 1 < folds <= x.nr()
-            - trainer_type == some kind of trainer object (e.g. svm_nu_trainer)
+            - 1 < folds <= std::min(sum(y>0),sum(y<0))
+              (e.g. There must be at least as many examples of each class as there are folds)
+            - trainer_type == some kind of binary classification trainer object (e.g. svm_nu_trainer)
         ensures
             - performs k-fold cross validation by using the given trainer to solve the
               given binary classification problem for the given number of folds.
@@ -342,8 +392,7 @@ namespace dlib
         typename in_sample_vector_type,
         typename in_scalar_vector_type
         >
-    const matrix<typename dec_funct_type::scalar_type, 1, 2, typename dec_funct_type::mem_manager_type> 
-    test_binary_decision_function (
+    const matrix<double,1,2> test_binary_decision_function (
         const dec_funct_type& dec_funct,
         const in_sample_vector_type& x_test,
         const in_scalar_vector_type& y_test
@@ -439,7 +488,8 @@ namespace dlib
         requires
             - T == a matrix object or an object compatible with std::vector that contains 
               a swappable type.
-            - if samples is a matrix then is_vector(samples) == true 
+            - if (samples is a matrix) then 
+                - is_vector(samples) == true 
         ensures
             - randomizes the order of the elements inside samples 
             - A default initialized random number generator is used to perform the randomizing.
@@ -461,10 +511,87 @@ namespace dlib
         requires
             - T == a matrix object or an object compatible with std::vector that contains 
               a swappable type.
-            - if samples is a matrix then is_vector(samples) == true 
+            - rand_type == a type that implements the dlib/rand/rand_kernel_abstract.h interface
+            - if (samples is a matrix) then 
+                - is_vector(samples) == true 
         ensures
             - randomizes the order of the elements inside samples 
             - the given rnd random number generator object is used to do the randomizing
+    !*/
+
+// ----------------------------------------------------------------------------------------
+
+    template <
+        typename T,
+        typename U,
+        typename V
+        >
+    void randomize_samples (
+        T& samples,
+        U& labels,
+        V& auxiliary
+    );
+    /*!
+        requires
+            - T == a matrix object or an object compatible with std::vector that contains 
+              a swappable type.
+            - U == a matrix object or an object compatible with std::vector that contains 
+              a swappable type.
+            - V == a matrix object or an object compatible with std::vector that contains 
+              a swappable type.
+            - if (samples, labels, or auxiliary are matrix objects) then 
+                - is_vector(samples) == true 
+                - is_vector(labels) == true
+                - is_vector(auxiliary) == true
+            - samples.size() == labels.size() == auxiliary.size()
+        ensures
+            - randomizes the order of the samples, labels, and auxiliary but preserves the
+              pairing between each sample, its label, and its auxiliary value.
+            - A default initialized random number generator is used to perform the
+              randomizing.  Note that this means that each call this this function does the
+              same thing.  That is, the random number generator always uses the same seed.
+            - for all valid i:
+                - let r == the random index samples(i) was moved to.  then:
+                    - #labels(r) == labels(i)
+                    - #auxiliary(r) == auxiliary(i)
+    !*/
+
+// ----------------------------------------------------------------------------------------
+
+    template <
+        typename T,
+        typename U,
+        typename V,
+        typename rand_type
+        >
+    void randomize_samples (
+        T& samples,
+        U& labels,
+        V& auxiliary,
+        rand_type& rnd
+    );
+    /*!
+        requires
+            - T == a matrix object or an object compatible with std::vector that contains 
+              a swappable type.
+            - U == a matrix object or an object compatible with std::vector that contains 
+              a swappable type.
+            - V == a matrix object or an object compatible with std::vector that contains 
+              a swappable type.
+            - if (samples, labels, or auxiliary are matrix objects) then 
+                - is_vector(samples) == true 
+                - is_vector(labels) == true
+                - is_vector(auxiliary) == true
+            - samples.size() == labels.size() == auxiliary.size()
+            - rand_type == a type that implements the dlib/rand/rand_kernel_abstract.h interface
+        ensures
+            - randomizes the order of the samples, labels, and auxiliary but preserves the
+              pairing between each sample, its label, and its auxiliary value.
+            - the given rnd random number generator object is used to do the randomizing
+            - for all valid i:
+                - let r == the random index samples(i) was moved to.  then:
+                    - #labels(r) == labels(i)
+                    - #auxiliary(r) == auxiliary(i)
     !*/
 
 // ----------------------------------------------------------------------------------------

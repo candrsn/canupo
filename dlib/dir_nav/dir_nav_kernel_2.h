@@ -17,6 +17,7 @@
 #include <sys/types.h>
 #include <dirent.h>
 #include <libgen.h>
+#include <limits.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <errno.h>
@@ -44,15 +45,14 @@ namespace dlib
     {
         /*!
             INITIAL VALUES
-                state->name        == name()
-                state->full_name   == full_name()
-                state->file_size   == size()
+                state.name        == name()
+                state.full_name   == full_name()
+                state.file_size   == size()
 
             CONVENTION
-                state->name        == name()
-                state->full_name   == full_name()
-                state->file_size   == size()
-                state->count       == the number of file objects that point to state
+                state.name        == name()
+                state.full_name   == full_name()
+                state.file_size   == size()
 
         !*/
 
@@ -63,7 +63,6 @@ namespace dlib
             uint64 file_size;
             std::string name;
             std::string full_name;
-            unsigned long count;
         };
 
         void init(const std::string& name);
@@ -78,11 +77,9 @@ namespace dlib
             private_constructor
         )
         {
-            state = new data;
-            state->count = 1;
-            state->file_size = file_size;
-            state->name = name;
-            state->full_name = full_name;
+            state.file_size = file_size;
+            state.name = name;
+            state.full_name = full_name;
         }
 
 
@@ -93,9 +90,7 @@ namespace dlib
         inline file (
         )
         {
-            state = new data;
-            state->count = 1;
-            state->file_size = 0;
+            state.file_size = 0;
         }
 
         file (
@@ -106,52 +101,25 @@ namespace dlib
             const char* name
         ) { init(name); }
 
-        inline file (
-            const file& item
-        )
-        {            
-            state = item.state;
-            state->count += 1;
-        }
-
-        inline ~file (
-        )
-        {
-            if (state->count == 1)            
-                delete state;
-            else
-                state->count -= 1;
-        }
-
         inline const std::string& name (
-        ) const { return state->name; }
+        ) const { return state.name; }
 
         inline  const std::string& full_name (
-        ) const { return state->full_name; }
+        ) const { return state.full_name; }
 
         inline uint64 size (
-        ) const { return state->file_size; }
+        ) const { return state.file_size; }
 
-        inline file& operator= (
-            const file& rhs
-        )
-        {    
-            if (&rhs == this)
-                return *this;
-        
-            if (state->count == 1)            
-                delete state;
-            else
-                state->count -= 1;
-
-            state = rhs.state;
-            state->count += 1;
-            return *this;
-        }
+        operator std::string (
+        ) const { return full_name(); }
 
         bool operator == (
             const file& rhs
         ) const;
+
+        bool operator != (
+            const file& rhs
+        ) const { return !(*this == rhs); }
 
         inline bool operator < (
             const file& item
@@ -167,7 +135,7 @@ namespace dlib
     private:
 
         // member data
-        data* state;
+        data state;
 
     };
 
@@ -181,14 +149,13 @@ namespace dlib
     {
         /*!
             INITIAL VALUES
-                state->name        == name()
-                state->full_name   == full_name()
+                state.name        == name()
+                state.full_name   == full_name()
 
             CONVENTION
-                state->name        == name()
-                state->full_name   == full_name()
-                state->count       == the number of directory objects that point to state
-                is_root()          == state->name.size() == 0
+                state.name        == name()
+                state.full_name   == full_name()
+                is_root()          == state.name.size() == 0
 
         !*/
 
@@ -202,17 +169,14 @@ namespace dlib
             private_constructor
         )
         {
-            state = new data;
-            state->count = 1;
-            state->name = name;
-            state->full_name = full_name;
+            state.name = name;
+            state.full_name = full_name;
         }
 
         struct data
         {
             std::string name;
             std::string full_name;
-            unsigned long count;
         };
 
         class dir_not_found : public error {
@@ -225,8 +189,6 @@ namespace dlib
         inline directory (
         )
         {
-            state = new data;
-            state->count = 1;
         }
 
         directory (
@@ -236,23 +198,6 @@ namespace dlib
         directory (
             const char* name
         ) { init(name); }
-
-        inline directory (
-            const directory& item
-        )
-        {            
-            state = item.state;
-            state->count += 1;
-        }
-
-        inline ~directory (
-        )
-        {            
-            if (state->count == 1)            
-                delete state;
-            else
-                state->count -= 1;
-        }
 
         static char get_separator (
         );
@@ -271,38 +216,44 @@ namespace dlib
             queue_of_dirs& dirs
         ) const;
 
+        std::vector<file> get_files (
+        ) const
+        {
+            std::vector<file> temp_vector;
+            get_files(temp_vector);
+            return temp_vector;
+        }
+
+        std::vector<directory> get_dirs (
+        ) const
+        {
+            std::vector<directory> temp_vector;
+            get_dirs(temp_vector);
+            return temp_vector;
+        }
+
         const directory get_parent (
         ) const;
        
         inline bool is_root (
-        ) const { return state->name.size() == 0; }
+        ) const { return state.name.size() == 0; }
 
         inline const std::string& name (
-        ) const { return state->name; }
+        ) const { return state.name; }
 
         inline const std::string& full_name (
-        ) const { return state->full_name; }
+        ) const { return state.full_name; }
 
-        directory& operator= (
-            const directory& rhs
-        )
-        {            
-            if (&rhs == this)
-                return *this;
-
-            if (state->count == 1)            
-                delete state;
-            else
-                state->count -= 1;
-
-            state = rhs.state;
-            state->count += 1;
-            return *this;
-        }
+        operator std::string (
+        ) const { return full_name(); }
 
         bool operator == (
             const directory& rhs
         ) const;
+
+        bool operator != (
+            const directory& rhs
+        ) const { return !(*this == rhs); }
 
         inline bool operator < (
             const directory& item
@@ -318,7 +269,7 @@ namespace dlib
     private:
 
         // member data
-        data* state;
+        data state;
 
         bool is_root_path (
             const std::string& path
@@ -331,6 +282,18 @@ namespace dlib
         !*/
 
     };
+
+// ----------------------------------------------------------------------------------------
+
+    inline std::ostream& operator<< (
+        std::ostream& out,
+        const directory& item
+    ) { out << (std::string)item; return out; }
+
+    inline std::ostream& operator<< (
+        std::ostream& out,
+        const file& item
+    ) { out << (std::string)item; return out; }
 
 // ----------------------------------------------------------------------------------------
 
@@ -357,14 +320,14 @@ namespace dlib
         >
     typename disable_if<is_std_vector<queue_of_files>,void>::type
     directory_helper_get_files (
-        const directory::data* state,
+        const directory::data& state,
         queue_of_files& files
     ) 
     {
         using namespace std;
 
         files.clear();
-        if (state->full_name.size() == 0)
+        if (state.full_name.size() == 0)
             throw directory::listing_error("This directory object currently doesn't represent any directory.");
 
         DIR* ffind = 0;
@@ -373,16 +336,16 @@ namespace dlib
 
         try
         {
-            string path = state->full_name;
+            string path = state.full_name;
             // ensure that the path ends with a separator
             if (path[path.size()-1] != directory::get_separator())
                 path += directory::get_separator();
 
             // get a handle to something we can search with
-            ffind = opendir(state->full_name.c_str());
+            ffind = opendir(state.full_name.c_str());
             if (ffind == 0)
             {
-                throw directory::listing_error("Unable to list the contents of " + state->full_name);
+                throw directory::listing_error("Unable to list the contents of " + state.full_name);
             }
 
             while(true)
@@ -399,7 +362,7 @@ namespace dlib
                     else
                     {
                         // there was an error
-                        throw directory::listing_error("Unable to list the contents of " + state->full_name);
+                        throw directory::listing_error("Unable to list the contents of " + state.full_name);
                     }                
                 }
 
@@ -412,7 +375,7 @@ namespace dlib
                     char buf[PATH_MAX];
                     ssize_t temp = readlink((path+data->d_name).c_str(),buf,sizeof(buf));
                     if (temp == -1)                    
-                        throw directory::listing_error("Unable to list the contents of " + state->full_name);
+                        throw directory::listing_error("Unable to list the contents of " + state.full_name);
                     else
                         file_size = static_cast<uint64>(temp);
                 }
@@ -468,7 +431,7 @@ namespace dlib
         >
     typename enable_if<is_std_vector<queue_of_files>,void>::type 
     directory_helper_get_files (
-        const directory::data* state,
+        const directory::data& state,
         queue_of_files& files
     ) 
     {
@@ -509,14 +472,14 @@ namespace dlib
         >
     typename disable_if<is_std_vector<queue_of_dirs>,void>::type 
     directory_helper_get_dirs (
-        const directory::data* state,
+        const directory::data& state,
         queue_of_dirs& dirs
     ) 
     {
         using namespace std;
 
         dirs.clear();
-        if (state->full_name.size() == 0)
+        if (state.full_name.size() == 0)
             throw directory::listing_error("This directory object currently doesn't represent any directory.");
 
         DIR* ffind = 0;
@@ -525,16 +488,16 @@ namespace dlib
 
         try
         {
-            string path = state->full_name;
+            string path = state.full_name;
             // ensure that the path ends with a separator
             if (path[path.size()-1] != directory::get_separator())
                 path += directory::get_separator();
 
             // get a handle to something we can search with
-            ffind = opendir(state->full_name.c_str());
+            ffind = opendir(state.full_name.c_str());
             if (ffind == 0)
             {
-                throw directory::listing_error("Unable to list the contents of " + state->full_name);
+                throw directory::listing_error("Unable to list the contents of " + state.full_name);
             }
 
             while(true)
@@ -551,7 +514,7 @@ namespace dlib
                     else
                     {
                         // there was an error
-                        throw directory::listing_error("Unable to list the contents of " + state->full_name);
+                        throw directory::listing_error("Unable to list the contents of " + state.full_name);
                     }                
                 }
 
@@ -608,7 +571,7 @@ namespace dlib
         >
     typename enable_if<is_std_vector<queue_of_dirs>,void>::type 
     directory_helper_get_dirs (
-        const directory::data* state,
+        const directory::data& state,
         queue_of_dirs& dirs
     ) 
     {

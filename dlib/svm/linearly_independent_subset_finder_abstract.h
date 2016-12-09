@@ -20,7 +20,7 @@ namespace dlib
                 is a kernel function object as defined in dlib/svm/kernel_abstract.h 
 
             INITIAL VALUE
-                - dictionary_size() == 0
+                - size() == 0
 
             WHAT THIS OBJECT REPRESENTS
                 This is an implementation of an online algorithm for recursively finding a
@@ -46,6 +46,7 @@ namespace dlib
     public:
         typedef typename kernel_type::scalar_type scalar_type;
         typedef typename kernel_type::sample_type sample_type;
+        typedef typename kernel_type::sample_type type;
         typedef typename kernel_type::mem_manager_type mem_manager_type;
 
         linearly_independent_subset_finder (
@@ -86,7 +87,7 @@ namespace dlib
         /*!
             ensures
                 - returns the maximum number of dictionary vectors this object
-                  will accumulate.  That is, dictionary_size() will never be
+                  will accumulate.  That is, size() will never be
                   greater than max_dictionary_size().
         !*/
 
@@ -112,7 +113,7 @@ namespace dlib
         );
         /*!
             ensures
-                - clears out all the data (e.g. #dictionary_size() == 0)
+                - clears out all the data (e.g. #size() == 0)
         !*/
 
         bool add (
@@ -120,17 +121,17 @@ namespace dlib
         );
         /*!
             ensures
-                - if (dictionary_size() < max_dictionary_size() then
+                - if (size() < max_dictionary_size() then
                     - if (projection_error(x) > minimum_tolerance()) then 
                         - adds x into the dictionary
-                        - (*this)[#dictionary_size()-1] == x
-                        - #dictionary_size() == dictionary_size() + 1
+                        - (*this)[#size()-1] == x
+                        - #size() == size() + 1
                         - returns true
                     - else
                         - the dictionary is not changed
                         - returns false
                 - else
-                    - #dictionary_size() == dictionary_size() 
+                    - #size() == size() 
                       (i.e. the number of vectors in this object doesn't change)
                     - since the dictionary is full adding a new element means we have to 
                       remove one of the current ones.  So let proj_error[i] be equal to the 
@@ -143,7 +144,7 @@ namespace dlib
                     - if (projection_error(x) > minimum_tolerance() && projection_error(x) > min_proj_error)
                         - the least linearly independent vector in this object is removed
                         - adds x into the dictionary
-                        - (*this)[#dictionary_size()-1] == x
+                        - (*this)[#size()-1] == x
                         - returns true
                     - else
                         - the dictionary is not changed
@@ -172,7 +173,7 @@ namespace dlib
                 - swaps *this with item
         !*/
 
-        unsigned long dictionary_size (
+        unsigned long size (
         ) const;
         /*!
             ensures
@@ -184,7 +185,7 @@ namespace dlib
         ) const;
         /*!
             requires
-                - index < dictionary_size()
+                - index < size()
             ensures
                 - returns the index'th element in the set of linearly independent 
                   vectors contained in this object.
@@ -203,7 +204,7 @@ namespace dlib
         /*!
             ensures
                 - returns a matrix K such that:
-                    - K.nr() == K.nc() == dictionary_size()
+                    - K.nr() == K.nc() == size()
                     - K == kernel_matrix(get_kernel(), get_dictionary())
                       i.e. K == the kernel matrix for the dictionary vectors
         !*/
@@ -212,7 +213,7 @@ namespace dlib
         ) const;
         /*!
             ensures
-                - if (dictionary_size() != 0)
+                - if (size() != 0)
                     - returns inv(get_kernel_matrix())
                 - else
                     - returns an empty matrix
@@ -254,6 +255,22 @@ namespace dlib
         provides serialization support for linearly_independent_subset_finder objects
     !*/
 
+    template <
+        typename T
+        >
+    const matrix_exp mat (
+        const linearly_independent_subset_finder<T>& m 
+    );
+    /*!
+        ensures
+            - converts m into a matrix
+            - returns a matrix R such that:
+                - is_col_vector(R) == true 
+                - R.size() == m.size()
+                - for all valid r:
+                  R(r) == m[r]
+    !*/
+
 // ----------------------------------------------------------------------------------------
 
     template <
@@ -270,8 +287,8 @@ namespace dlib
     /*!
         requires
             - vector_type == a dlib::matrix or something convertible to one via 
-              vector_to_matrix()
-            - is_vector(vector_to_matrix(samples)) == true
+              mat()
+            - is_vector(mat(samples)) == true
             - rand_type == an implementation of rand/rand_kernel_abstract.h or a type
               convertible to a string via cast_to_string()
             - sampling_size > 0
@@ -296,8 +313,8 @@ namespace dlib
     /*!
         requires
             - vector_type == a dlib::matrix or something convertible to one via 
-              vector_to_matrix()
-            - is_vector(vector_to_matrix(samples)) == true
+              mat()
+            - is_vector(mat(samples)) == true
         ensures
             - performs fill_lisf(lisf, samples, default_rand_generator, 2000)
     !*/

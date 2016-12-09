@@ -124,7 +124,7 @@ namespace dlib
         );
         /*!
             requires
-                - T must be a dlib::matrix type or something convertible to a matrix via vector_to_matrix()
+                - T must be a dlib::matrix type or something convertible to a matrix via mat()
                   (e.g. a std::vector)
                 - is_vector(basis_samples) == true
                 - basis_samples.size() > 0
@@ -152,8 +152,6 @@ namespace dlib
             const linearly_independent_subset_finder<kernel_type>& lisf
         );
         /*!
-            requires
-                - lisf.dictionary_size() > 0
             ensures
                 - #out_vector_size() == lisf.dictionary_size() 
                 - #basis_size() == lisf.dictionary_size()
@@ -169,7 +167,8 @@ namespace dlib
                     - for all valid i: (*this)[i] == lisf[i]
             throws
                 - empirical_kernel_map_error
-                    This exception is thrown if we are unable to create a kernel map.
+                    This exception is thrown if we are unable to create a kernel map.  
+                    E.g.  if the lisf.size() == 0.  
                     If this happens then this object will revert back to its initial value.
         !*/
 

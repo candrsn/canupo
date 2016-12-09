@@ -7,6 +7,7 @@
 #include "../algs.h"
 #include "../pixel.h"
 #include "../dir_nav.h"
+#include "../image_processing/generic_image.h"
 
 namespace dlib
 {
@@ -75,7 +76,17 @@ namespace dlib
         ) const;
         /*!
             ensures
-                - if (this object contains a grayscale image) then
+                - if (this object contains a grayscale image without an alpha channel) then
+                    - returns true
+                - else
+                    - returns false
+        !*/
+        
+        bool is_graya(
+        ) const;
+        /*!
+            ensures
+                - if (this object contains a grayscale image with an alpha channel) then
                     - returns true
                 - else
                     - returns false
@@ -101,6 +112,14 @@ namespace dlib
                     - returns false
         !*/
 
+        unsigned int bit_depth (
+        ) const;
+        /*!
+            ensures
+                - returns the number of bits per channel in the image contained by this
+                  object.  The possible values are 8 or 16.
+        !*/
+
         template<
             typename image_type 
             >
@@ -109,13 +128,33 @@ namespace dlib
         ) const;
         /*!
             requires
-                - image_type == is an implementation of array2d/array2d_kernel_abstract.h
-                - pixel_traits<typename image_type::type> is defined  
+                - image_type == an image object that implements the interface defined in
+                  dlib/image_processing/generic_image.h 
             ensures
                 - loads the PNG image stored in this object into img
         !*/
 
     };
+
+// ----------------------------------------------------------------------------------------
+
+    template <
+        typename image_type
+        >
+    void load_png (
+        image_type& image,
+        const std::string& file_name
+    );
+    /*!
+        requires
+            - image_type == an image object that implements the interface defined in
+              dlib/image_processing/generic_image.h 
+        ensures
+            - performs: png_loader(file_name).get_image(image);
+    !*/
+
+// ----------------------------------------------------------------------------------------
+
 }
 
 #endif // DLIB_PNG_IMPORT_ABSTRACT

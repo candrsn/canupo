@@ -7,16 +7,16 @@
 #include "../rand.h"
 #include <vector>
 #include "../algs.h"
-#include "../memory_manager.h"
 #include "../string.h"
 #include "../serialize.h"
+#include "../matrix/matrix_mat.h"
 #include <iostream>
 
 namespace dlib
 {
     template <
         typename T,
-        typename Rand_type = dlib::rand::kernel_1a
+        typename Rand_type = dlib::rand
         >
     class random_subset_selector
     {
@@ -36,7 +36,8 @@ namespace dlib
         !*/
     public:
         typedef T type;
-        typedef memory_manager<char>::kernel_1a mem_manager_type;
+        typedef T value_type;
+        typedef default_memory_manager mem_manager_type;
         typedef Rand_type rand_type;
 
         typedef typename std::vector<T>::iterator iterator;
@@ -62,6 +63,9 @@ namespace dlib
             count = 0;
             update_next_add_accepts();
         }
+
+        const std::vector<T>& to_std_vector(
+        ) const { return items; }
 
         unsigned long size (
         ) const 
@@ -344,6 +348,19 @@ namespace dlib
         for (unsigned long i = 0; i < samples.size(); ++i)
             subset.add(samples[i]);
         return subset;
+    }
+
+// ----------------------------------------------------------------------------------------
+
+    template <
+        typename T
+        >
+    const matrix_op<op_array_to_mat<random_subset_selector<T> > > mat (
+        const random_subset_selector<T>& m 
+    )
+    {
+        typedef op_array_to_mat<random_subset_selector<T> > op;
+        return matrix_op<op>(op(m));
     }
 
 // ----------------------------------------------------------------------------------------

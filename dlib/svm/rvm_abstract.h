@@ -50,6 +50,7 @@ namespace dlib
                 - This object is properly initialized and ready to be used
                   to train a relevance vector machine.
                 - #get_epsilon() == 0.001
+                - #get_max_iterations() == 2000
         !*/
 
         void set_epsilon (
@@ -86,6 +87,22 @@ namespace dlib
                 - returns a copy of the kernel function in use by this object
         !*/
 
+        unsigned long get_max_iterations (
+        ) const; 
+        /*!
+            ensures
+                - returns the maximum number of iterations the RVM optimizer is allowed to
+                  run before it is required to stop and return a result.
+        !*/
+
+        void set_max_iterations (
+            unsigned long max_iter
+        ); 
+        /*!
+            ensures
+                - #get_max_iterations() == max_iter
+        !*/
+
         template <
             typename in_sample_vector_type,
             typename in_scalar_vector_type
@@ -97,9 +114,9 @@ namespace dlib
         /*!
             requires
                 - is_binary_classification_problem(x,y) == true
-                - x == a matrix or something convertible to a matrix via vector_to_matrix().
+                - x == a matrix or something convertible to a matrix via mat().
                   Also, x should contain sample_type objects.
-                - y == a matrix or something convertible to a matrix via vector_to_matrix().
+                - y == a matrix or something convertible to a matrix via mat().
                   Also, y should contain scalar_type objects.
             ensures
                 - trains a relevance vector classifier given the training samples in x and 
@@ -219,13 +236,12 @@ namespace dlib
         ) const;
         /*!
             requires
-                - x == a matrix or something convertible to a matrix via vector_to_matrix().
+                - x == a matrix or something convertible to a matrix via mat().
                   Also, x should contain sample_type objects.
-                - y == a matrix or something convertible to a matrix via vector_to_matrix().
+                - y == a matrix or something convertible to a matrix via mat().
                   Also, y should contain scalar_type objects.
-                - x.nr() > 1
-                - x.nr() == y.nr() && x.nc() == 1 && y.nc() == 1 
-                  (i.e. x and y are both column vectors of the same length)
+                - is_learning_problem(x,y) == true
+                - x.size() > 0
             ensures
                 - trains a RVM given the training samples in x and 
                   labels in y and returns the resulting decision_function.  

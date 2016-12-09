@@ -1,7 +1,7 @@
 // Copyright (C) 2010  Davis E. King (davis@dlib.net)
 // License: Boost Software License   See LICENSE.txt for the full license.
-#ifndef DLIB_LAPACk_SDD_H__
-#define DLIB_LAPACk_SDD_H__
+#ifndef DLIB_LAPACk_SDD_Hh_
+#define DLIB_LAPACk_SDD_Hh_
 
 #include "fortran_id.h"
 #include "../matrix.h"
@@ -243,6 +243,18 @@ namespace dlib
             if (info != 0)
                 return info;
 
+            // There is a bug in an older version of LAPACK in Debian etch 
+            // that causes the gesdd to return the wrong value for work_size
+            // when jobz == 'N'.  So verify the value of work_size.
+            if (jobz == 'N')
+            {
+                using std::min; 
+                using std::max; 
+                const T min_work_size = 3*min(m,n) + max(max(m,n),7*min(m,n));
+                if (work_size < min_work_size)
+                    work_size = min_work_size;
+            }
+
             if (work.size() < work_size)
                 work.set_size(static_cast<long>(work_size), 1);
 
@@ -315,6 +327,19 @@ namespace dlib
             if (info != 0)
                 return info;
 
+            // There is a bug in an older version of LAPACK in Debian etch 
+            // that causes the gesdd to return the wrong value for work_size
+            // when jobz == 'N'.  So verify the value of work_size.
+            if (jobz == 'N')
+            {
+                using std::min; 
+                using std::max; 
+                const T min_work_size = 3*min(m,n) + max(max(m,n),7*min(m,n));
+                if (work_size < min_work_size)
+                    work_size = min_work_size;
+            }
+
+
             if (work.size() < work_size)
                 work.set_size(static_cast<long>(work_size), 1);
 
@@ -334,6 +359,6 @@ namespace dlib
 
 // ----------------------------------------------------------------------------------------
 
-#endif // DLIB_LAPACk_SDD_H__
+#endif // DLIB_LAPACk_SDD_Hh_
 
 

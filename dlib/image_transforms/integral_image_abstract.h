@@ -7,15 +7,24 @@
 #include "../array2d/array2d_kernel_abstract.h"
 #include "../pixel.h"
 #include "../noncopyable.h"
+#include "../image_processing/generic_image.h"
 
 namespace dlib
 {
 
 // ----------------------------------------------------------------------------------------
 
-    class integral_image : noncopyable
+    template <
+        typename T
+        >
+    class integral_image_generic : noncopyable
     {
         /*!
+            REQUIREMENTS ON T
+                T should be a built in scalar type.  Moreover, it should
+                be capable of storing sums of whatever kind of pixel
+                you will be dealing with.
+
             INITIAL VALUE
                 - nr() == 0
                 - nc() == 0
@@ -29,7 +38,7 @@ namespace dlib
                 constant time.
         !*/
     public:
-        typedef long value_type;
+        typedef T value_type;
 
         const long nr(
         ) const;
@@ -51,8 +60,10 @@ namespace dlib
         );
         /*!
             requires
-                - image_type == a type that implements the array2d/array2d_kernel_abstract.h interface
-                - pixel_traits<image_type::type> must be defined
+                - image_type == an image object that implements the interface defined in
+                  dlib/image_processing/generic_image.h 
+                - Let P denote the type of pixel in img, then we require:
+                    - pixel_traits<P>::has_alpha == false 
             ensures
                 - #nr() == img.nr()
                 - #nc() == img.nc()
@@ -65,16 +76,40 @@ namespace dlib
         ) const;
         /*!
             requires
+                - rect.is_empty() == false
                 - get_rect(*this).contains(rect) == true
                   (i.e. rect must not be outside the integral image)
             ensures
                 - Let O denote the image this integral image was generated from.
-                  Then this function returns sum(subm(array_to_matrix(O),rect)).
+                  Then this function returns sum(subm(mat(O),rect)).
                   That is, this function returns the sum of the pixels in O that
                   are contained within the given rectangle.
         !*/
 
+        void swap(
+            integral_image_generic& item
+        );
+        /*!
+            ensures
+                - swaps *this and item
+        !*/
+
     };
+
+// ----------------------------------------------------------------------------------------
+
+    template < typename T >
+    void swap (
+        integral_image_generic<T>& a,
+        integral_image_generic<T>& b
+    ) { a.swap(b); }
+    /*!
+        provides a global swap function
+    !*/ 
+
+// ----------------------------------------------------------------------------------------
+
+    typedef integral_image_generic<long> integral_image;
 
 // ----------------------------------------------------------------------------------------
 
@@ -87,8 +122,8 @@ namespace dlib
     /*!
         requires
             - get_rect(img).contains(centered_rect(p,width,width)) == true
-            - integral_image_type == a type that implements the integral_image interface 
-              defined above
+            - integral_image_type == a type that implements the integral_image_generic 
+              interface defined above
         ensures
             - returns the response of a Haar wavelet centered at the point p
               with the given width.  The wavelet is oriented along the X axis
@@ -112,8 +147,8 @@ namespace dlib
     /*!
         requires
             - get_rect(img).contains(centered_rect(p,width,width)) == true
-            - integral_image_type == a type that implements the integral_image interface 
-              defined above
+            - integral_image_type == a type that implements the integral_image_generic 
+              interface defined above
         ensures
             - returns the response of a Haar wavelet centered at the point p
               with the given width in the given image.  The wavelet is oriented 

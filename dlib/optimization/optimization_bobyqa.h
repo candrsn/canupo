@@ -1,7 +1,7 @@
 // Copyright (C) 2009 M.J.D. Powell, Davis E. King (davis@dlib.net)
 // License: Boost Software License   See LICENSE.txt for the full license.
-#ifndef DLIB_OPTIMIZATIOn_BOBYQA_H__
-#define DLIB_OPTIMIZATIOn_BOBYQA_H__
+#ifndef DLIB_OPTIMIZATIOn_BOBYQA_Hh_
+#define DLIB_OPTIMIZATIOn_BOBYQA_Hh_
 
 /*
     The code in this file is derived from Powell's BOBYQA Fortran code.
@@ -874,7 +874,7 @@ L360:
                 //goto L720;
             }
             ++nf;
-            f = calfun(pointer_to_column_vector(&x[1], n));
+            f = calfun(mat(&x[1], n));
             if (ntrits == -1) {
                 fsave = f;
                 goto L720;
@@ -1946,7 +1946,7 @@ L50:
                 }
                 /* L60: */
             }
-            f = calfun(pointer_to_column_vector(&x[1],n));
+            f = calfun(mat(&x[1],n));
             fval[nf] = f;
             if (nf == 1) {
                 fbeg = f;
@@ -2572,7 +2572,7 @@ L260:
                     /* L290: */
                 }
                 ++(nf);
-                f = calfun(pointer_to_column_vector(&w[1],n));
+                f = calfun(mat(&w[1],n));
                 fval[kpt] = f;
                 if (f < fval[kopt]) {
                     kopt = kpt;
@@ -2670,7 +2670,7 @@ L350:
             integer isav;
             doublereal temp = 0, zero = 0, xsav = 0, xsum = 0, angbd = 0, dredg = 0, sredg = 0;
             integer iterc;
-            doublereal resid = 0, delsq = 0, ggsav = 0, tempa = 0, tempb = 0, ratio = 0, sqstp = 0, 
+            doublereal resid = 0, delsq = 0, ggsav = 0, tempa = 0, tempb = 0,  
                        redmax = 0, dredsq = 0, redsav = 0, onemin = 0, gredsq = 0, rednew = 0;
             integer itcsav = 0;
             doublereal rdprev = 0, rdnext = 0, stplen = 0, stepsq = 0;
@@ -2750,7 +2750,6 @@ L350:
 
             iterc = 0;
             nact = 0;
-            sqstp = zero;
             i__1 = n;
             for (i__ = 1; i__ <= i__1; ++i__) {
                 xbdi[i__] = zero;
@@ -3003,7 +3002,6 @@ L120:
                         xbdi[i__] = one;
                         goto L100;
                     }
-                    ratio = one;
                     /* Computing 2nd power */
                     d__1 = d__[i__];
                     /* Computing 2nd power */
@@ -3221,7 +3219,7 @@ L210:
             doublereal d__1, d__2, d__3;
 
             /* Local variables */
-            integer i__, j, k, jl, jp;
+            integer i__, j, k, jp;
             doublereal one, tau, temp;
             integer nptm;
             doublereal zero, alpha, tempa, tempb, ztest;
@@ -3267,7 +3265,6 @@ L210:
 
             /*     Apply the rotations that put zeros in the KNEW-th row of ZMAT. */
 
-            jl = 1;
             i__2 = nptm;
             for (j = 2; j <= i__2; ++j) {
                 if ((d__1 = zmat[knew + j * zmat_dim1], std::abs(d__1)) > ztest) {
@@ -3356,19 +3353,14 @@ L210:
         const long max_f_evals
     ) 
     {
-        // You get an error on this line when you pass in a global function to this function.
-        // You have to either use a function object or pass a pointer to your global function
-        // by taking its address using the & operator.  (This check is here because gcc 4.0
-        // has a bug that causes it to silently corrupt return values from functions that
-        // invoked through a reference)
-        COMPILE_TIME_ASSERT(is_function<funct>::value == false);
-
+        // The starting point (i.e. x) must be a column vector.  
+        COMPILE_TIME_ASSERT(T::NC <= 1);
 
         // check the requirements.  Also split the assert up so that the error message isn't huge.
         DLIB_CASSERT(is_col_vector(x) && is_col_vector(x_lower) && is_col_vector(x_upper) &&
                     x.size() == x_lower.size() && x_lower.size() == x_upper.size() &&
                     x.size() > 1 && max_f_evals > 1,
-            "\tvoid find_min_bobyqa()"
+            "\tdouble find_min_bobyqa()"
             << "\n\t Invalid arguments have been given to this function"
             << "\n\t is_col_vector(x):       " << is_col_vector(x) 
             << "\n\t is_col_vector(x_lower): " << is_col_vector(x_lower) 
@@ -3383,7 +3375,7 @@ L210:
                     0 < rho_end && rho_end < rho_begin &&
                     min(x_upper - x_lower) > 2*rho_begin &&
                     min(x - x_lower) >= 0 && min(x_upper - x) >= 0,
-            "\tvoid find_min_bobyqa()"
+            "\tdouble find_min_bobyqa()"
             << "\n\t Invalid arguments have been given to this function"
             << "\n\t ntp in valid range: " << (x.size() + 2 <= npt && npt <= (x.size()+1)*(x.size()+2)/2)
             << "\n\t npt:                " << npt 
@@ -3416,6 +3408,9 @@ L210:
         const long max_f_evals
     ) 
     {
+        // The starting point (i.e. x) must be a column vector.  
+        COMPILE_TIME_ASSERT(T::NC <= 1);
+
         return -find_min_bobyqa(negate_function(f), x, npt, x_lower, x_upper, rho_begin, rho_end, max_f_evals);
     }
 
@@ -3423,5 +3418,5 @@ L210:
 
 }
 
-#endif // DLIB_OPTIMIZATIOn_BOBYQA_H__
+#endif // DLIB_OPTIMIZATIOn_BOBYQA_Hh_
 

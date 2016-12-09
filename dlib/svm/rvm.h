@@ -147,8 +147,21 @@ namespace dlib
         typedef decision_function<kernel_type> trained_function_type;
 
         rvm_trainer (
-        ) : eps(0.001)
+        ) : eps(0.001), max_iterations(2000)
         {
+        }
+
+        void set_max_iterations (
+            unsigned long max_iterations_
+        )
+        {
+            max_iterations = max_iterations_;
+        }
+
+        unsigned long get_max_iterations (
+        ) const
+        { 
+            return max_iterations;
         }
 
         void set_epsilon (
@@ -192,7 +205,7 @@ namespace dlib
             const in_scalar_vector_type& y
         ) const
         {
-            return do_train(vector_to_matrix(x), vector_to_matrix(y));
+            return do_train(mat(x), mat(y));
         }
 
         void swap (
@@ -288,9 +301,11 @@ namespace dlib
             bool search_all_alphas = false;
             unsigned long ticker = 0;
             const unsigned long rounds_of_narrow_search = 100;
+            unsigned long iterations = 0;
 
-            while (true)
+            while (iterations != max_iterations)
             {
+                iterations++;
                 if (recompute_beta)
                 {
                     // calculate the current t_estimate. (this is the predicted t value for each sample according to the
@@ -502,10 +517,10 @@ namespace dlib
                 }
             }
 
-            return decision_function<kernel_type> ( vector_to_matrix(final_weights),
-                                                    -sum(vector_to_matrix(final_weights))*tau, 
+            return decision_function<kernel_type> ( mat(final_weights),
+                                                    -sum(mat(final_weights))*tau, 
                                                     kernel,
-                                                    vector_to_matrix(dictionary));
+                                                    mat(dictionary));
 
         }
 
@@ -572,6 +587,7 @@ namespace dlib
     // private member variables
         kernel_type kernel;
         scalar_type eps;
+        unsigned long max_iterations;
 
         const static scalar_type tau;
 
@@ -664,7 +680,7 @@ namespace dlib
             const in_scalar_vector_type& t
         ) const
         {
-            return do_train(vector_to_matrix(x), vector_to_matrix(t));
+            return do_train(mat(x), mat(t));
         }
 
         void swap (
@@ -693,7 +709,7 @@ namespace dlib
         {
 
             // make sure requires clause is not broken
-            DLIB_ASSERT(x.nr() > 1 && x.nr() == t.nr() && x.nc() == 1 && t.nc() == 1,
+            DLIB_ASSERT(is_learning_problem(x,t) && x.size() > 0,
                 "\tdecision_function rvm_regression_trainer::train(x,t)"
                 << "\n\t invalid inputs were given to this function"
                 << "\n\t x.nr(): " << x.nr() 
@@ -906,10 +922,10 @@ namespace dlib
                 }
             }
 
-            return decision_function<kernel_type> ( vector_to_matrix(final_weights),
-                                                    -sum(vector_to_matrix(final_weights))*tau, 
+            return decision_function<kernel_type> ( mat(final_weights),
+                                                    -sum(mat(final_weights))*tau, 
                                                     kernel,
-                                                    vector_to_matrix(dictionary));
+                                                    mat(dictionary));
 
         }
 

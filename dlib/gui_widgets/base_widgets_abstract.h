@@ -499,6 +499,20 @@ namespace dlib
                 - std::bad_alloc
         !*/
 
+        void set_click_handler (
+            const any_function<void()>& event_handler
+        );
+        /*!
+            ensures
+                - the event_handler function is called when the button is clicked by 
+                  the user.
+                - any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+            throws
+                - std::bad_alloc
+        !*/
+
         template <
             typename T
             >
@@ -513,6 +527,21 @@ namespace dlib
                 - &self == this
                 - the event_handler function is called on object when the button is 
                   clicked by the user.
+                - any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+            throws
+                - std::bad_alloc
+        !*/
+
+        void set_sourced_click_handler (
+            const any_function<void(button& self)>& event_handler
+        );
+        /*!
+            ensures
+                - &self == this
+                - the event_handler function is called when the button is clicked by 
+                  the user.
                 - any previous calls to this function are overridden by this new call.  
                   (i.e. you can only have one event handler associated with this 
                   event at a time)
@@ -540,6 +569,20 @@ namespace dlib
                 - std::bad_alloc
         !*/
 
+        void set_button_down_handler (
+            const any_function<void()>& event_handler
+        );
+        /*!
+            ensures
+                - the event_handler function is called when the user causes the button 
+                  to go into its depressed state.
+                - any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+            throws
+                - std::bad_alloc
+        !*/
+
         template <
             typename T
             >
@@ -553,6 +596,24 @@ namespace dlib
             ensures
                 - the event_handler function is called on object when the user causes 
                   the button to go into its non-depressed state.
+                - if (the mouse is over this button when this event occurs) then
+                    - mouse_over == true
+                - else
+                    - mouse_over == false
+                - any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+            throws
+                - std::bad_alloc
+        !*/
+
+        void set_button_up_handler (
+            const any_function<void(bool mouse_over)>& event_handler
+        );
+        /*!
+            ensures
+                - the event_handler function is called when the user causes the 
+                  button to go into its non-depressed state.
                 - if (the mouse is over this button when this event occurs) then
                     - mouse_over == true
                 - else
@@ -585,6 +646,21 @@ namespace dlib
                 - std::bad_alloc
         !*/
 
+        void set_sourced_button_down_handler (
+            const any_function<void(button& self)>& event_handler
+        );
+        /*!
+            ensures
+                - &self == this
+                - the event_handler function is called when the user causes the button 
+                  to go into its depressed state.
+                - any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+            throws
+                - std::bad_alloc
+        !*/
+
         template <
             typename T
             >
@@ -599,6 +675,25 @@ namespace dlib
                 - &self == this
                 - the event_handler function is called on object when the user causes 
                   the button to go into its non-depressed state.
+                - if (the mouse is over this button when this event occurs) then
+                    - mouse_over == true
+                - else
+                    - mouse_over == false
+                - any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+            throws
+                - std::bad_alloc
+        !*/
+
+        void set_sourced_button_up_handler (
+            const any_function<void(bool mouse_over, button& self)>& event_handler
+        );
+        /*!
+            ensures
+                - &self == this
+                - the event_handler function is called when the user causes the 
+                  button to go into its non-depressed state.
                 - if (the mouse is over this button when this event occurs) then
                     - mouse_over == true
                 - else
@@ -775,6 +870,21 @@ namespace dlib
         /*!
             requires
                 - event_handler is a valid pointer to a member function in T
+            ensures
+                - The event_handler function is called whenever the user causes the slider box
+                  to move.  
+                - This event is NOT triggered by calling set_slider_pos()
+                - any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+            throws
+                - std::bad_alloc
+        !*/
+
+        void set_scroll_handler (
+            const any_function<void()>& event_handler
+        );
+        /*!
             ensures
                 - The event_handler function is called whenever the user causes the slider box
                   to move.  
@@ -1263,6 +1373,19 @@ namespace dlib
                 - #get_hot_key() == hotkey
         !*/
         
+        menu_item_text (
+            const std::string& str,
+            const any_function<void()>& on_click_handler,
+            unichar hotkey = 0
+        ); 
+        /*!
+            ensures
+                - The text of this menu item will be str
+                - the on_click_handler function is called when this menu_item 
+                  clicked by the user.
+                - #get_hot_key() == hotkey
+        !*/
+        
         // overloads for wide character strings
         template <
             typename T
@@ -1274,6 +1397,12 @@ namespace dlib
             unichar hotkey = 0
         ); 
 
+        menu_item_text (
+            const std::wstring& str,
+            const any_function<void()>& on_click_handler,
+            unichar hotkey = 0
+        ); 
+
         template <
             typename T
             >
@@ -1281,6 +1410,15 @@ namespace dlib
             const dlib::ustring& str,
             T& object,
             void (T::*on_click_handler)(),
+            unichar hotkey = 0
+        ); 
+
+        template <
+            typename T
+            >
+        menu_item_text (
+            const dlib::ustring& str,
+            const any_function<void()>& on_click_handler,
             unichar hotkey = 0
         ); 
     };
@@ -1705,7 +1843,7 @@ namespace dlib
                   (i.e. this is the number that determines how far in the user is allowed to zoom)
         !*/
 
-        void set_size (
+        virtual void set_size (
             unsigned long width,
             unsigned long height
         );
@@ -1808,6 +1946,18 @@ namespace dlib
                 - invalidates the display_rect() so that it will be redrawn
         !*/
 
+        virtual void on_view_changed (
+        ) {}
+        /*!
+            requires
+                - events_are_enabled() == true
+                - mutex drawable::m is locked
+            ensures
+                - on_view_changed() is called whenever the user causes the view of the
+                  zoomable_region to change.  That is, this function is called when the
+                  user scrolls or zooms around in the region.
+        !*/
+
     // ---------------------------- event handlers ----------------------------
     // The following event handlers are used in this object.  So if you
     // use any of them in your derived object you should pass the events 
@@ -1901,7 +2051,7 @@ namespace dlib
                   style
         !*/
 
-        void set_size (
+        virtual void set_size (
             unsigned long width,
             unsigned long height
         );
@@ -1911,8 +2061,8 @@ namespace dlib
                 - #height() == height_
                 - #top() == top()
                 - #left() == left()
-                - i.e. The location of the upper left corner of this button stays the
-                  same but its width and height are modified
+                - i.e. The location of the upper left corner of this widget stays the
+                  same but its width and height are modified.
         !*/
 
         long horizontal_scroll_pos (
@@ -2095,6 +2245,18 @@ namespace dlib
                 - Adjusts the scroll bars of this object so that the part of 
                   the total_rect() rectangle that overlaps with r is displayed in 
                   the display_rect() rectangle on the screen.
+        !*/
+
+        virtual void on_view_changed (
+        ) {}
+        /*!
+            requires
+                - events_are_enabled() == true
+                - mutex drawable::m is locked
+            ensures
+                - on_view_changed() is called whenever the user causes the view of the
+                  scrollable_region to change.  That is, this function is called when the
+                  user scrolls around in the region.
         !*/
 
     // ---------------------------- event handlers ----------------------------

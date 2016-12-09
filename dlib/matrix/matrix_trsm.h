@@ -1,7 +1,7 @@
 // Copyright (C) 2010  Davis E. King (davis@dlib.net)
 // License: Boost Software License   See LICENSE.txt for the full license.
-#ifndef DLIB_MATRiX_TRSM_H__
-#define DLIB_MATRiX_TRSM_H__
+#ifndef DLIB_MATRiX_TRSM_Hh_
+#define DLIB_MATRiX_TRSM_Hh_
 #include "lapack/fortran_id.h"
 #include "cblas_constants.h"
 
@@ -9,7 +9,7 @@ namespace dlib
 {
     namespace blas_bindings
     {
-
+#ifndef CBLAS_H
         extern "C"
         {
             void cblas_strsm(const enum CBLAS_ORDER Order, const enum CBLAS_SIDE Side,
@@ -24,6 +24,7 @@ namespace dlib
                              const double alpha, const double *A, const int lda,
                              double *B, const int ldb);
         }
+#endif // if not CBLAS_H
 
     // ------------------------------------------------------------------------------------
 
@@ -519,10 +520,13 @@ namespace dlib
                                float *B, const int ldb)
         {
 #ifdef DLIB_USE_BLAS
-            cblas_strsm(Order, Side, Uplo, TransA, Diag, M, N, alpha, A, lda, B, ldb);
-#else
-            local_trsm(Order, Side, Uplo, TransA, Diag, M, N, alpha, A, lda, B, ldb);
+            if (M > 4)
+            {
+                cblas_strsm(Order, Side, Uplo, TransA, Diag, M, N, alpha, A, lda, B, ldb);
+                return;
+            }
 #endif
+            local_trsm(Order, Side, Uplo, TransA, Diag, M, N, alpha, A, lda, B, ldb);
         }
 
         inline void cblas_trsm(const enum CBLAS_ORDER Order, const enum CBLAS_SIDE Side,
@@ -532,10 +536,13 @@ namespace dlib
                                double *B, const int ldb)
         {
 #ifdef DLIB_USE_BLAS
-            cblas_dtrsm(Order, Side, Uplo, TransA, Diag, M, N, alpha, A, lda, B, ldb);
-#else
-            local_trsm(Order, Side, Uplo, TransA, Diag, M, N, alpha, A, lda, B, ldb);
+            if (M > 4)
+            {
+                cblas_dtrsm(Order, Side, Uplo, TransA, Diag, M, N, alpha, A, lda, B, ldb);
+                return;
+            }
 #endif
+            local_trsm(Order, Side, Uplo, TransA, Diag, M, N, alpha, A, lda, B, ldb);
         }
 
         inline void cblas_trsm(const enum CBLAS_ORDER Order, const enum CBLAS_SIDE Side,
@@ -641,5 +648,5 @@ namespace dlib
     }
 }
 
-#endif // DLIB_MATRiX_TRSM_H__
+#endif // DLIB_MATRiX_TRSM_Hh_
 

@@ -18,7 +18,7 @@ using namespace dlib;
 using namespace std;
 
 
-typedef dlib::array2d<hsi_pixel>::kernel_1a_c image;
+typedef dlib::array2d<hsi_pixel> image;
 
 
 
@@ -77,6 +77,12 @@ private:
         if (hidden == false )
         {
             fill_rect(c,rect,rgb_pixel(red,green,blue));
+            std::vector<point> poly;
+            poly.push_back((rect.tl_corner()+rect.tr_corner())/2);
+            poly.push_back((rect.tr_corner()+rect.br_corner())/2);
+            poly.push_back((rect.br_corner()+rect.bl_corner())/2);
+            poly.push_back((rect.bl_corner()+rect.tl_corner())/2);
+            draw_solid_convex_polygon(c,poly,rgb_alpha_pixel(0,0,0,70));
         }
     }
 
@@ -124,7 +130,7 @@ private:
     {
         draggable::on_window_resized();
     }
-    timer<color_box>::kernel_1a t;
+    timer<color_box> t;
 };
 
 
@@ -796,6 +802,27 @@ int main()
 
     try
     {
+
+        image_window win;
+
+        array2d<unsigned char> img;
+        img.set_size(100,100);
+        assign_all_pixels(img,0);
+
+        fill_rect(img, rectangle(1,1,1,1), 255);
+        fill_rect(img, rectangle(1,3,2,5), 255);
+        fill_rect(img, rectangle(4,3,5,4), 255);
+        fill_rect(img, rectangle(9,9,13,10), 255);
+
+        win.set_image(img);
+
+        win.add_overlay(image_display::overlay_rect(rectangle(1,1,1,1), rgb_pixel(255,0,0)));
+        win.add_overlay(image_display::overlay_rect(rectangle(1,3,2,5), rgb_pixel(255,0,0)));
+        win.add_overlay(image_display::overlay_rect(rectangle(4,3,5,4), rgb_pixel(255,0,0)));
+        win.add_overlay(image_display::overlay_rect(rectangle(9,9,13,10), rgb_pixel(255,0,0)));
+
+
+
         w.set_pos (100,200);
         w.set_title("test window");
         w.show();

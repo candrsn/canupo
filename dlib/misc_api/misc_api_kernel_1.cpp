@@ -4,13 +4,20 @@
 #define DLIB_MISC_API_KERNEL_1_CPp_
 
 #include "../platform.h"
+#include "../threads.h"
 
 #ifdef WIN32
 
 #include "misc_api_kernel_1.h"
 
 #include "../windows_magic.h"
+#include <mmsystem.h>
 #include <windows.h>
+
+// tell visual studio to link to the library needed to call timeGetTime() 
+#ifdef _MSC_VER
+#pragma comment (lib, "winmm.lib")
+#endif
 
 #ifdef __BORLANDC__
 // Apparently the borland compiler doesn't define this.
@@ -30,9 +37,32 @@ namespace dlib
 
 // ----------------------------------------------------------------------------------------
 
+    namespace
+    {
+        mutex& cwd_mutex()
+        {
+            static mutex m;
+            return m;
+        }
+        // Make sure the above mutex gets constructed before main() 
+        // starts.  This way we can be pretty sure it will be constructed
+        // before any threads could possibly call set_current_dir() or
+        // get_current_dir() simultaneously.
+        struct construct_cwd_mutex
+        {
+            construct_cwd_mutex()
+            {
+                cwd_mutex();
+            }
+        } oaimvweoinvwe;
+    }
+
     std::string get_current_dir (
     )
     {
+        // need to lock a mutex here because getting and setting the
+        // current working directory is not thread safe on windows.
+        auto_mutex lock(cwd_mutex());
         char buf[1024];
         if (GetCurrentDirectoryA(sizeof(buf),buf) == 0)
         {
@@ -46,11 +76,26 @@ namespace dlib
 
 // ----------------------------------------------------------------------------------------
 
+    void set_current_dir (
+        const std::string& new_dir
+    )
+    {
+        // need to lock a mutex here because getting and setting the
+        // current working directory is not thread safe on windows.
+        auto_mutex lock(cwd_mutex());
+        if (SetCurrentDirectoryA(new_dir.c_str()) == 0)
+        {
+            throw set_current_dir_error("Error changing current dir to '" + new_dir + "'");
+        }
+    }
+
+// ----------------------------------------------------------------------------------------
+
     uint64 timestamper::
     get_timestamp (
     ) const
     {
-        unsigned long temp = GetTickCount();
+        unsigned long temp = timeGetTime();
         if (temp >= last_time)
         {            
             last_time = temp;

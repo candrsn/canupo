@@ -10,8 +10,10 @@
 
 #include "../gui_core.h"
 #include <string>
+#include <map>
 #include "../interfaces/enumerable.h"
 #include "style_abstract.h"
+#include "../image_processing/full_object_detection_abstract.h"
 
 namespace dlib
 {
@@ -64,6 +66,20 @@ namespace dlib
               then nothing occurs.
     !*/
 
+    void open_file_box (
+        const any_function<void(const std::string&)>& event_handler
+    );
+    /*!
+        ensures
+            - Displays a window titled "Open File" that will allow the user to select a 
+              file.  
+            - The displayed window will start out showing the directory get_current_dir()
+              (i.e. it starts in the current working directory)
+            - The event_handler function is called if the user selects
+              a file.  If the user closes the window without selecting a file
+              then nothing occurs.
+    !*/
+
 // ----------------------------------------------------------------------------------------
 
     template <
@@ -86,6 +102,20 @@ namespace dlib
               then nothing occurs.
     !*/
 
+    void open_existing_file_box (
+        const any_function<void(const std::string&)>& event_handler
+    );
+    /*!
+        ensures
+            - Displays a window titled "Open File" that will allow the user to select 
+              a file.  But only a file that already exists.
+            - The displayed window will start out showing the directory get_current_dir()
+              (i.e. it starts in the current working directory)
+            - The event_handler function is called if the user selects
+              a file.  If the user closes the window without selecting a file
+              then nothing occurs.
+    !*/
+
 // ----------------------------------------------------------------------------------------
 
     template <
@@ -104,6 +134,20 @@ namespace dlib
             - The displayed window will start out showing the directory get_current_dir()
               (i.e. it starts in the current working directory)
             - The event_handler function is called on object if the user selects
+              a file.  If the user closes the window without selecting a file
+              then nothing occurs.
+    !*/
+
+    void save_file_box (
+        const any_function<void(const std::string&)>& event_handler
+    );
+    /*!
+        ensures
+            - Displays a window titled "Save File" that will allow the user to select 
+              a file.  
+            - The displayed window will start out showing the directory get_current_dir()
+              (i.e. it starts in the current working directory)
+            - The event_handler function is called if the user selects
               a file.  If the user closes the window without selecting a file
               then nothing occurs.
     !*/
@@ -153,6 +197,20 @@ namespace dlib
             - Displays a message box with the given title and message.  It will have a 
               single button and when the user clicks it the message box will go away.
             - The event_handler function is called on object when the user clicks
+              ok or otherwise closes the message box window. 
+            - this function does not block but instead returns immediately.
+    !*/
+
+    void message_box (
+        const std::string& title,
+        const std::string& message,
+        const any_function<void()>& event_handler
+    );
+    /*!
+        ensures
+            - Displays a message box with the given title and message.  It will have a 
+              single button and when the user clicks it the message box will go away.
+            - The event_handler function is called when the user clicks
               ok or otherwise closes the message box window. 
             - this function does not block but instead returns immediately.
     !*/
@@ -405,6 +463,21 @@ namespace dlib
                 - std::bad_alloc
         !*/
 
+        void set_click_handler (
+            const any_function<void()>& event_handler
+        );
+        /*!
+            ensures
+                - the event_handler function is called when the toggle_button is 
+                  toggled by the user. 
+                - this event is NOT triggered by calling set_checked() or set_unchecked().
+                - any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+            throws
+                - std::bad_alloc
+        !*/
+
         template <
             typename T
             >
@@ -417,6 +490,22 @@ namespace dlib
                 - event_handler is a valid pointer to a member function in T.
             ensures
                 - the event_handler function is called on object when the toggle_button is 
+                  toggled by the user. self will be a reference to the toggle_button object
+                  that the user clicked.
+                - this event is NOT triggered by calling set_checked() or set_unchecked().
+                - any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+            throws
+                - std::bad_alloc
+        !*/
+
+        void set_sourced_click_handler (
+            const any_function<void(toggle_button& self)>& event_handler
+        );
+        /*!
+            ensures
+                - the event_handler function is called when the toggle_button is 
                   toggled by the user. self will be a reference to the toggle_button object
                   that the user clicked.
                 - this event is NOT triggered by calling set_checked() or set_unchecked().
@@ -444,10 +533,11 @@ namespace dlib
     {
         /*!
             INITIAL VALUE
-                text() == ""
-                width() == 10
-                height() == a height appropriate for the font used.
-                The text color will be black.
+                - text() == ""
+                - width() == 10
+                - height() == a height appropriate for the font used.  The text color will
+                  be black.
+                - has_input_focus() == false
 
             WHAT THIS OBJECT REPRESENTS
                 This object represents a simple one line text input field.  
@@ -533,7 +623,16 @@ namespace dlib
         );
         /*!
             ensures
-                - gives this text field input keyboard focus
+                - #has_input_focus() == true
+        !*/
+
+        bool has_input_focus (
+        );
+        /*!
+            ensures
+                - Returns true if this txt field has input keyboard focus.  If this
+                  is the case then it means that when the user types on the keyboard
+                  the output will appear inside the text field.
         !*/
 
         void select_all_text (
@@ -594,6 +693,20 @@ namespace dlib
                 - std::bad_alloc
         !*/
 
+        void set_text_modified_handler (
+            const any_function<void()>& event_handler
+        );
+        /*!
+            ensures
+                - the event_handler function is called when the text in this text_field 
+                  is modified by the user.
+                - any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+            throws
+                - std::bad_alloc
+        !*/
+
         template <
             typename T
             >
@@ -614,6 +727,20 @@ namespace dlib
                 - std::bad_alloc
         !*/
 
+        void set_enter_key_handler (
+            const any_function<void()>& event_handler
+        );
+        /*!
+            ensures
+                - the event_handler function is called when this text field has input 
+                  focus and the user hits the enter key on their keyboard.
+                - any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+            throws
+                - std::bad_alloc
+        !*/
+
         template <
             typename T
             >
@@ -627,6 +754,20 @@ namespace dlib
             ensures
                 - the event_handler function is called on object when this object
                   loses input focus due to the user clicking outside the text field
+                - any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+            throws
+                - std::bad_alloc
+        !*/
+
+        void set_focus_lost_handler (
+            const any_function<void()>& event_handler
+        );
+        /*!
+            ensures
+                - the event_handler function is called when this object loses input 
+                  focus due to the user clicking outside the text field
                 - any previous calls to this function are overridden by this new call.  
                   (i.e. you can only have one event handler associated with this 
                   event at a time)
@@ -783,6 +924,20 @@ namespace dlib
                 - std::bad_alloc
         !*/
 
+        void set_text_modified_handler (
+            const any_function<void()>& event_handler
+        );
+        /*!
+            ensures
+                - the event_handler function is called when the text in this text_box 
+                  is modified by the user.
+                - any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+            throws
+                - std::bad_alloc
+        !*/
+
         template <
             typename T
             >
@@ -803,6 +958,20 @@ namespace dlib
                 - std::bad_alloc
         !*/
 
+        void set_enter_key_handler (
+            const any_function<void()>& event_handler
+        );
+        /*!
+            ensures
+                - the event_handler function is called when this text box has input 
+                  focus and the user hits the enter key on their keyboard.
+                - any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+            throws
+                - std::bad_alloc
+        !*/
+
         template <
             typename T
             >
@@ -816,6 +985,20 @@ namespace dlib
             ensures
                 - the event_handler function is called on object when this object
                   loses input focus due to the user clicking outside the text box
+                - any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+            throws
+                - std::bad_alloc
+        !*/
+
+        void set_focus_lost_handler (
+            const any_function<void()>& event_handler
+        );
+        /*!
+            ensures
+                - the event_handler function is called when this object loses input 
+                  focus due to the user clicking outside the text box
                 - any previous calls to this function are overridden by this new call.  
                   (i.e. you can only have one event handler associated with this 
                   event at a time)
@@ -1016,6 +1199,22 @@ namespace dlib
                   on a tab that isn't already selected.  new_idx will give the index of 
                   the newly selected tab and old_idx will give the index of the tab 
                   that was previously selected. 
+                - any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+            throws
+                - std::bad_alloc
+        !*/
+
+        void set_click_handler (
+            const any_function<void(unsigned long new_idx, unsigned long old_idx)>& eh
+        );
+        /*!
+            ensures
+                - The event_handler function is called when the user clicks on a tab 
+                  that isn't already selected.  new_idx will give the index of the 
+                  newly selected tab and old_idx will give the index of the tab that 
+                  was previously selected. 
                 - any previous calls to this function are overridden by this new call.  
                   (i.e. you can only have one event handler associated with this 
                   event at a time)
@@ -1369,6 +1568,21 @@ namespace dlib
                 - std::bad_alloc
         !*/
 
+        void set_double_click_handler (
+            const any_function<void(unsigned long index)>& event_handler
+        ); 
+        /*!
+            ensures
+                - The event_handler function is called when the user double clicks on 
+                  one of the rows in this list box.  index gives the row number for 
+                  the item the user clicked.
+                - any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+            throws
+                - std::bad_alloc
+        !*/
+
         template <
             typename T
             >
@@ -1385,6 +1599,22 @@ namespace dlib
                   number for the item the user clicked.  (Note that the second click
                   in a double click triggers the double click handler above instead
                   of this event)
+                - any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+            throws
+                - std::bad_alloc
+        !*/
+
+        void set_click_handler (
+            const any_function<void(unsigned long index)>& event_handler
+        );
+        /*!
+            ensures
+                - The event_handler function is called when the user clicks on one 
+                  of the rows in this list box.  index gives the row number for the 
+                  item the user clicked.  (Note that the second click in a double 
+                  click triggers the double click handler above instead of this event)
                 - any previous calls to this function are overridden by this new call.  
                   (i.e. you can only have one event handler associated with this 
                   event at a time)
@@ -1689,7 +1919,7 @@ namespace dlib
             >
         void set_node_selected_handler (
             T& object,
-            void (T::*event_handler_)(unsigned long node_index)
+            void (T::*event_handler)(unsigned long node_index)
         );
         /*!
             requires
@@ -1705,12 +1935,27 @@ namespace dlib
                 - std::bad_alloc
         !*/
 
+        void set_node_selected_handler (
+            const any_function<void(unsigned long node_index)>& event_handler
+        );
+        /*!
+            ensures
+                - the event_handler function is called when the user selects
+                  a node.  
+                - node_index == the index of the node that was selected
+                - any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+            throws
+                - std::bad_alloc
+        !*/
+
         template <
             typename T
             >
         void set_node_deselected_handler (
             T& object,
-            void (T::*event_handler_)(unsigned long node_index)
+            void (T::*event_handler)(unsigned long node_index)
         );
         /*!
             requires
@@ -1726,12 +1971,26 @@ namespace dlib
                 - std::bad_alloc
         !*/
 
+        void set_node_deselected_handler (
+            const any_function<void(unsigned long node_index)>& event_handler
+        );
+        /*!
+            ensures
+                - the event_handler function is called when the user deselects a node.  
+                - node_index == the index of the node that was deselected
+                - any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+            throws
+                - std::bad_alloc
+        !*/
+
         template <
             typename T
             >
         void set_node_deleted_handler (
             T& object,
-            void (T::*event_handler_)()
+            void (T::*event_handler)()
         );
         /*!
             requires
@@ -1746,12 +2005,25 @@ namespace dlib
                 - std::bad_alloc
         !*/
 
+        void set_node_deleted_handler (
+            const any_function<void()>& event_handler
+        );
+        /*!
+            ensures
+                - the event_handler function is called when the user deletes a node.  
+                - any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+            throws
+                - std::bad_alloc
+        !*/
+
         template <
             typename T
             >
         void set_graph_modified_handler (
             T& object,
-            void (T::*event_handler_)()
+            void (T::*event_handler)()
         );
         /*!
             requires
@@ -1759,6 +2031,24 @@ namespace dlib
             ensures
                 - the event_handler function is called on object when the user 
                   modifies the graph (i.e. adds or removes a node or edge)
+                - the event_handler function is not called when the user just
+                  moves nodes around on the screen.
+                - This event is always dispatched before any more specific event
+                  that results from the user modifying the graph.
+                - any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+            throws
+                - std::bad_alloc
+        !*/
+
+        void set_graph_modified_handler (
+            const any_function<void()>& event_handler
+        );
+        /*!
+            ensures
+                - the event_handler function is called when the user modifies 
+                  the graph (i.e. adds or removes a node or edge)
                 - the event_handler function is not called when the user just
                   moves nodes around on the screen.
                 - This event is always dispatched before any more specific event
@@ -2011,6 +2301,21 @@ namespace dlib
                 - std::bad_alloc
         !*/
 
+        void set_text_modified_handler (
+            const any_function<void(unsigned long row, unsigned long col)>& event_handler
+        ); 
+        /*!
+            ensures
+                - the event_handler function is called when the user selects a node.  
+                - row == row will give the row of the grid item that was modified
+                - col == col will give the column of the grid item that was modified
+                - any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+            throws
+                - std::bad_alloc
+        !*/
+
     private:
 
         // restricted functions
@@ -2024,13 +2329,31 @@ namespace dlib
     {
         /*!
             INITIAL VALUE
-                This object isn't displaying anything. 
+                - This object isn't displaying anything. 
+                - get_overlay_rects().size() == 0
+                - get_default_overlay_rect_label() == ""
+                - get_default_overlay_rect_color() == rgb_alpha_pixel(255,0,0,255) (i.e. RED)
+                - This object does not have any user labelable parts defined.
+                - overlay_editing_is_enabled() == true
 
             WHAT THIS OBJECT REPRESENTS
                 This object represents an image inside a scrollable region.  
                 You give it an image to display by calling set_image().
                 This widget also allows you to add rectangle and line overlays that
-                will be drawn on top of the image.
+                will be drawn on top of the image.  
+                
+                If you hold the Ctrl key you can zoom in and out using the mouse wheel.
+                You can also add new overlay rectangles by holding shift, left clicking,
+                and dragging the mouse.  Additionally, you can delete an overlay rectangle
+                by double clicking on it and hitting delete or backspace.  Finally, you
+                can also add part labels (if they have been defined by calling add_labelable_part_name())
+                by selecting an overlay rectangle with the mouse and then right clicking
+                on the part.  If you want to move any rectangle or an object part then
+                shift+right click and drag it.
+                
+                Finally, if you hold Ctrl and left click an overlay rectangle it will
+                change its label to get_default_overlay_rect_label() and color to
+                get_default_overlay_rect_color().
 
                 The image is drawn such that:
                     - the pixel img[0][0] is the upper left corner of the image.
@@ -2066,7 +2389,8 @@ namespace dlib
         );
         /*!
             requires
-                - image_type == an implementation of array2d/array2d_kernel_abstract.h
+                - image_type == an implementation of array2d/array2d_kernel_abstract.h or
+                  a dlib::matrix or something convertible to a matrix via mat()
                 - pixel_traits<typename image_type::type> must be defined 
             ensures
                 - #*this widget is now displaying the given image new_img.
@@ -2080,11 +2404,20 @@ namespace dlib
                     image shown by this object.  Each rectangle is represented by 
                     a rectangle object as well as a color and text label.  The label
                     is drawn below the lower right corner of the rectangle.
+
+                    Moreover, the rectangle can have sub-parts. Each part is listed
+                    in the parts member variable.  This variable maps the name of the
+                    part to its position.
+
+                    Rectangles with crossed_out == true will be drawn with an X through
+                    them.
             !*/
 
             rectangle rect;
             rgb_alpha_pixel color;
             std::string label;
+            std::map<std::string,point> parts;
+            bool crossed_out;
 
             overlay_rect(
             ); 
@@ -2093,6 +2426,7 @@ namespace dlib
                     - #color == rgb_alpha_pixel(0,0,0,0) 
                     - #rect == rectangle()
                     - #label.size() == 0
+                    - #crossed_out == false
             !*/
 
             template <typename pixel_type>
@@ -2105,6 +2439,7 @@ namespace dlib
                     - #rect == r
                     - performs assign_pixel(color, p) 
                     - #label.size() == 0
+                    - #crossed_out == false
             !*/
 
             template <typename pixel_type>
@@ -2117,7 +2452,24 @@ namespace dlib
                 ensures
                     - #rect == r
                     - performs assign_pixel(color, p)
-                    - #label = l
+                    - #label == l
+                    - #crossed_out == false
+            !*/
+
+            template <typename pixel_type>
+            overlay_rect(
+                const rectangle& r, 
+                pixel_type p, 
+                const std::string& l, 
+                const std::map<std::string,point>& parts_
+            ); 
+            /*!
+                ensures
+                    - #rect == r
+                    - performs assign_pixel(color, p)
+                    - #label == l
+                    - #parts == parts_
+                    - #crossed_out == false
             !*/
 
         };
@@ -2159,6 +2511,61 @@ namespace dlib
 
         };
 
+        struct overlay_circle
+        {
+            /*!
+                WHAT THIS OBJECT REPRESENTS
+                    This object represents a circle that is drawn on top of the
+                    image shown by this object.  Each circle is represented by 
+                    its center, radius, and color.  It can also have an optional
+                    text label which will appear below the circle.
+            !*/
+
+            point center;
+            int radius;
+            rgb_alpha_pixel color;
+            std::string label;
+
+            overlay_circle(
+            );
+            /*!
+                ensures
+                    - #center == point(0,0)
+                    - #radius == 0
+                    - #color == rgb_alpha_pixel(0,0,0,0)
+                    - #label.size() == 0
+            !*/
+
+            template <typename pixel_type>
+            overlay_circle(
+                const point& center_, 
+                const int radius_,
+                pixel_type p
+            ); 
+            /*!
+                ensures
+                    - performs assign_pixel(color, p)
+                    - #center == center_
+                    - #radius == radius_
+            !*/
+
+            template <typename pixel_type>
+            overlay_circle(
+                const point& center_, 
+                const int radius_,
+                pixel_type p,
+                const std::string& label_
+            ); 
+            /*!
+                ensures
+                    - performs assign_pixel(color, p)
+                    - #center == center_
+                    - #radius == radius_
+                    - #label == label_
+            !*/
+
+        };
+
         void add_overlay (
             const overlay_rect& overlay
         );
@@ -2174,6 +2581,15 @@ namespace dlib
         /*!
             ensures
                 - adds the given overlay line into this object such
+                  that it will be displayed. 
+        !*/
+
+        void add_overlay (
+            const overlay_circle& overlay
+        );
+        /*!
+            ensures
+                - adds the given overlay circle into this object such
                   that it will be displayed. 
         !*/
 
@@ -2195,12 +2611,228 @@ namespace dlib
                   that they will be displayed. 
         !*/
 
+        void add_overlay (
+            const std::vector<overlay_circle>& overlay
+        );
+        /*!
+            ensures
+                - adds the given set of overlay circles into this object such
+                  that they will be displayed. 
+        !*/
+
         void clear_overlay (
         );
         /*!
             ensures
                 - removes all overlays from this object.  
+                - #get_overlay_rects().size() == 0
         !*/
+
+        std::vector<overlay_rect> get_overlay_rects (
+        ) const;
+        /*!
+            ensures
+                - returns a copy of all the overlay_rect objects currently displayed.
+        !*/
+
+        void set_default_overlay_rect_label (
+            const std::string& label
+        );
+        /*!
+            ensures
+                - #get_default_overlay_rect_label() == label
+        !*/
+
+        std::string get_default_overlay_rect_label (
+        ) const;
+        /*!
+            ensures
+                - returns the label given to new overlay rectangles created by the user
+                  (i.e. when the user holds shift and adds them with the mouse)
+        !*/
+
+        void set_default_overlay_rect_color (
+            const rgb_alpha_pixel& color
+        );
+        /*!
+            ensures
+                - #get_default_overlay_rect_color() == color
+        !*/
+
+        rgb_alpha_pixel get_default_overlay_rect_color (
+        ) const;
+        /*!
+            ensures
+                - returns the color given to new overlay rectangles created by the user
+                  (i.e. when the user holds shift and adds them with the mouse)
+        !*/
+
+        void add_labelable_part_name (
+            const std::string& name
+        );
+        /*!
+            ensures
+                - adds a user labelable part with the given name.  If the name has
+                  already been added then this function has no effect.  
+                - These parts can be added by the user by selecting an overlay box
+                  and then right clicking anywhere in it.  A popup menu will appear
+                  listing the parts.  The user can then click a part name and it will
+                  add it into the overlay_rect::parts variable and also show it on the
+                  screen.
+        !*/
+
+        void clear_labelable_part_names (
+        );
+        /*!
+            ensures
+                - removes all use labelable parts.  Calling this function undoes 
+                  all previous calls to add_labelable_part_name().  Therefore, the 
+                  user won't be able to label any parts after clear_labelable_part_names()
+                  is called.
+        !*/
+
+        rectangle get_image_display_rect (
+        ) const;
+        /*!
+            ensures
+                - returns a rectangle R that tells you how big the image inside the
+                  display is when it appears on the screen.  Note that it takes the
+                  current zoom level into account.
+                    - R.width()  == the width of the displayed image
+                    - R.height() == the height of the displayed image
+                    - R.tl_corner() == (0,0)
+        !*/
+
+        void enable_overlay_editing (
+        ); 
+        /*!
+            ensures
+                - #overlay_editing_is_enabled() == true
+        !*/
+
+        void disable_overlay_editing (
+        );
+        /*!
+            ensures
+                - #overlay_editing_is_enabled() == false 
+        !*/
+        
+        bool overlay_editing_is_enabled (
+        ) const; 
+        /*!
+            ensures
+                - if this function returns true then it is possible for the user to add or
+                  remove overlay objects (e.g. rectangles) using the mouse and keyboard.
+                  If it returns false then the overlay is not user editable.
+        !*/
+
+        template <
+            typename T
+            >
+        void set_overlay_rects_changed_handler (
+            T& object,
+            void (T::*event_handler)()
+        );
+        /*
+            requires
+                - event_handler is a valid pointer to a member function in T 
+            ensures
+                - the event_handler function is called on object when the user adds,
+                  removes, or modifies an overlay rectangle.
+                - any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+            throws
+                - std::bad_alloc
+        */
+
+        void set_overlay_rects_changed_handler (
+            const any_function<void()>& event_handler
+        );
+        /*
+            ensures
+                - the event_handler function is called when the user adds or removes 
+                  an overlay rectangle.
+                - any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+            throws
+                - std::bad_alloc
+        */
+
+        template <
+            typename T
+            >
+        void set_overlay_rect_selected_handler (
+            T& object,
+            void (T::*event_handler)(const overlay_rect& orect)
+        );
+        /*
+            requires
+                - event_handler is a valid pointer to a member function in T 
+            ensures
+                - The event_handler function is called on object when the user selects
+                  an overlay rectangle by double clicking on it.  The selected rectangle 
+                  will be passed to event_handler().
+                - any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+            throws
+                - std::bad_alloc
+        */
+
+        void set_overlay_rect_selected_handler (
+            const any_function<void(const overlay_rect& orect)>& event_handler
+        );
+        /*
+            ensures
+                - The event_handler function is called when the user selects an overlay 
+                  rectangle by double clicking on it.  The selected rectangle will be 
+                  passed to event_handler().
+                - any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+            throws
+                - std::bad_alloc
+        */
+
+        template <
+            typename T
+            >
+        void set_image_clicked_handler (
+            T& object,
+            void (T::*event_handler)(const point& p, bool is_double_click)
+        );
+        /*
+            requires
+                - event_handler is a valid pointer to a member function in T 
+            ensures
+                - The event_handler function is called on object when the user left clicks
+                  anywhere on the image.  When they do so this callback is called with the
+                  location of the image pixel which was clicked.  The is_double_click bool
+                  will also tell you if it was a double click or single click.
+                - any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+            throws
+                - std::bad_alloc
+        */
+
+        void set_image_clicked_handler (
+            const any_function<void(const point& p, bool is_double_click)>& event_handler
+        );
+        /*
+            ensures
+                - The event_handler function is called when the user left clicks anywhere
+                  on the image.  When they do so this callback is called with the location
+                  of the image pixel which was clicked.  The is_double_click bool will also
+                  tell you if it was a double click or single click.
+                - Any previous calls to this function are overridden by this new call.
+                  (i.e. you can only have one event handler associated with this event at a
+                  time)
+            throws
+                - std::bad_alloc
+        */
 
     private:
 
@@ -2216,6 +2848,7 @@ namespace dlib
         /*!
             INITIAL VALUE
                 - initially, this object is visible on the screen
+                - events_tied() == false
 
             WHAT THIS OBJECT REPRESENTS
                 This is a simple window that is just a container for an image_display.  
@@ -2226,6 +2859,7 @@ namespace dlib
 
         typedef image_display::overlay_rect overlay_rect;
         typedef image_display::overlay_line overlay_line;
+        typedef image_display::overlay_circle overlay_circle;
 
         image_window(
         ); 
@@ -2240,11 +2874,28 @@ namespace dlib
         ); 
         /*!
             requires
-                - image_type == an implementation of array2d/array2d_kernel_abstract.h
+                - image_type == an implementation of array2d/array2d_kernel_abstract.h or
+                  a dlib::matrix or something convertible to a matrix via mat()
                 - pixel_traits<typename image_type::type> must be defined 
             ensures
                 - this object is properly initialized 
                 - #*this window is now displaying the given image img.
+        !*/
+
+        template < typename image_type>
+        image_window(
+            const image_type& img,
+            const std::string& title
+        );
+        /*!
+            requires
+                - image_type == an implementation of array2d/array2d_kernel_abstract.h or
+                  a dlib::matrix or something convertible to a matrix via mat()
+                - pixel_traits<typename image_type::type> must be defined 
+            ensures
+                - this object is properly initialized 
+                - #*this window is now displaying the given image img.
+                - The title of the window will be set to the given title string.
         !*/
 
         ~image_window(
@@ -2275,6 +2926,83 @@ namespace dlib
                   that it will be displayed. 
         !*/
 
+        template <typename pixel_type>
+        void add_overlay(
+            const rectangle& r, 
+            pixel_type p = rgb_pixel(255,0,0)
+        );
+        /*!
+            ensures
+                - performs: add_overlay(overlay_rect(r,p));
+        !*/
+
+        template <typename pixel_type>
+        void add_overlay(
+            const rectangle& r, 
+            pixel_type p, 
+            const std::string& l
+        );
+        /*!
+            ensures
+                - performs: add_overlay(overlay_rect(r,p,l));
+        !*/
+
+        template <typename pixel_type>
+        void add_overlay(
+            const std::vector<rectangle>& r,
+            pixel_type p = rgb_pixel(255,0,0)
+        );
+        /*!
+            ensures
+                - adds the given set of rectangles into this object such
+                  that they will be displayed with the color specific by p. 
+        !*/
+
+        void add_overlay(
+            const full_object_detection& object,
+            const std::vector<std::string>& part_names
+        );
+        /*!
+            ensures
+                - adds the given full_object_detection to the overlays
+                  and shows it on the screen.  This includes any of its
+                  parts that are not set equal to OBJECT_PART_NOT_PRESENT.
+                - for all valid i < part_names.size():
+                    - the part object.part(i) will be labeled with the string
+                      part_names[i].
+        !*/
+
+        void add_overlay(
+            const full_object_detection& object
+        );
+        /*!
+            ensures
+                - adds the given full_object_detection to the overlays
+                  and shows it on the screen.  This includes any of its
+                  parts that are not set equal to OBJECT_PART_NOT_PRESENT.
+        !*/
+
+        void add_overlay(
+            const std::vector<full_object_detection>& objects,
+            const std::vector<std::string>& part_names
+        ); 
+        /*!
+            ensures
+                - calling this function is equivalent to calling the following
+                  sequence of functions, for all valid i:
+                    - add_overlay(objects[i], part_names);
+        !*/
+
+        void add_overlay(
+            const std::vector<full_object_detection>& objects
+        );
+        /*!
+            ensures
+                - calling this function is equivalent to calling the following
+                  sequence of functions, for all valid i:
+                    - add_overlay(objects[i]);
+        !*/
+
         void add_overlay (
             const overlay_line& overlay
         );
@@ -2282,6 +3010,26 @@ namespace dlib
             ensures
                 - adds the given overlay line into this object such
                   that it will be displayed. 
+        !*/
+
+        void add_overlay (
+            const overlay_circle& overlay
+        );
+        /*!
+            ensures
+                - adds the given overlay circle into this object such
+                  that it will be displayed. 
+        !*/
+
+        template <typename pixel_type>
+        void add_overlay(
+            const point& p1,
+            const point& p2,
+            pixel_type p
+        );
+        /*!
+            ensures
+                - performs: add_overlay(overlay_line(p1,p2,p));
         !*/
 
         void add_overlay (
@@ -2302,6 +3050,15 @@ namespace dlib
                   that they will be displayed. 
         !*/
 
+        void add_overlay (
+            const std::vector<overlay_circle>& overlay
+        );
+        /*!
+            ensures
+                - adds the given set of overlay circles into this object such
+                  that they will be displayed. 
+        !*/
+
         void clear_overlay (
         );
         /*!
@@ -2309,11 +3066,389 @@ namespace dlib
                 - removes all overlays from this object.  
         !*/
 
+        void tie_events (
+        );
+        /*!
+            ensures
+                - #events_tied() == true
+        !*/
+
+        void untie_events (
+        );
+        /*!
+            ensures
+                - #events_tied() == false 
+        !*/
+
+        bool events_tied (
+        ) const;
+        /*!
+            ensures
+                - returns true if and only if the get_next_double_click() and
+                  get_next_keypress() events are tied together.  If they are tied it means
+                  that you can use a loop of the following form to listen for both events
+                  simultaneously:
+                    while (mywindow.get_next_double_click(p) || mywindow.get_next_keypress(key,printable))
+                    {
+                        if (p.x() < 0)
+                            // Do something with the keyboard event
+                        else
+                            // Do something with the mouse event
+                    }
+        !*/
+
+        bool get_next_double_click (
+            point& p
+        ); 
+        /*!
+            ensures
+                - This function blocks until the user double clicks on the image or the
+                  window is closed by the user.  It will also unblock for a keyboard key
+                  press if events_tied() == true.
+                - if (this function returns true) then
+                    - This means the user double clicked the mouse.
+                    - #p == the next image pixel the user clicked.  
+                - else
+                    - #p == point(-1,1)
+        !*/
+
+        bool get_next_double_click (
+            point& p,
+            unsigned long& mouse_button
+        ); 
+        /*!
+            ensures
+                - This function blocks until the user double clicks on the image or the
+                  window is closed by the user.  It will also unblock for a keyboard key
+                  press if events_tied() == true.
+                - if (this function returns true) then
+                    - This means the user double clicked the mouse.
+                    - #p == the next image pixel the user clicked.  
+                    - #mouse_button == the mouse button which was used to double click.
+                      This will be either dlib::base_window::LEFT,
+                      dlib::base_window::MIDDLE, or dlib::base_window::RIGHT
+                - else
+                    - #p == point(-1,1)
+                      (Note that this point is outside any possible image)
+        !*/
+
+        bool get_next_keypress (
+            unsigned long& key,
+            bool& is_printable,
+            unsigned long& state
+        );
+        /*!
+            ensures
+                - This function blocks until the user presses a keyboard key or the
+                  window is closed by the user.  It will also unblock for a mouse double
+                  click if events_tied() == true.
+                - if (this function returns true) then
+                    - This means the user pressed a keyboard key.
+                    - The keyboard button press is recorded into #key, #is_printable, and
+                      #state.  In particular, these variables are populated with the three
+                      identically named arguments to the base_window::on_keydown(key,is_printable,state) 
+                      event.
+        !*/
+
+        bool get_next_keypress (
+            unsigned long& key,
+            bool& is_printable
+        );
+        /*!
+            ensures
+                - This function blocks until the user presses a keyboard key or the
+                  window is closed by the user.  It will also unblock for a mouse double
+                  click if events_tied() == true.
+                - This function is the equivalent to calling get_next_keypress(key,is_printable,temp) 
+                  and then discarding temp.
+        !*/
+
     private:
 
         // restricted functions
         image_window(image_window&);
         image_window& operator= (image_window&);
+    };
+
+// ----------------------------------------------------------------------------------------
+
+    class perspective_display : public drawable, noncopyable
+    {
+        /*!
+            WHAT THIS OBJECT REPRESENTS
+                This object is a tool for displaying 3D point clouds on a screen.  You can
+                navigate the display with the mouse.  Left click and drag rotates the
+                camera around the displayed data.  Scrolling the mouse wheel zooms and
+                shift+left click (or just right click) and drag pans the view around.
+        !*/
+
+    public:
+
+        perspective_display(  
+            drawable_window& w
+        );
+        /*!
+            ensures 
+                - #*this is properly initialized 
+                - #*this has been added to window w
+                - #parent_window() == w
+        !*/
+
+        ~perspective_display(
+        );
+        /*!
+            ensures
+                - all resources associated with *this have been released
+        !*/
+
+        void set_size (
+            unsigned long width,
+            unsigned long height 
+        );
+        /*! 
+            ensures
+                - #width() == width
+                - #height() == height
+                - #top() == top()
+                - #left() == left()
+                - i.e. The location of the upper left corner of this widget stays the
+                  same but its width and height are modified.
+        !*/
+
+        struct overlay_line
+        {
+            /*!
+                WHAT THIS OBJECT REPRESENTS
+                    This object represents a line that is drawn on the screen.  Each line
+                    is represented by its two end points (p1 and p2) as well as a color.
+            !*/
+
+            overlay_line() { assign_pixel(color, 0);}
+
+            overlay_line(const vector<double>& p1_, const vector<double>& p2_) 
+                : p1(p1_), p2(p2_) { assign_pixel(color, 255); }
+
+            template <typename pixel_type>
+            overlay_line(const vector<double>& p1_, const vector<double>& p2_, pixel_type p) 
+                : p1(p1_), p2(p2_) { assign_pixel(color, p); }
+
+            vector<double> p1;
+            vector<double> p2;
+            rgb_pixel color;
+        };
+
+        struct overlay_dot
+        {
+            /*!
+                WHAT THIS OBJECT REPRESENTS
+                    This object represents a dot that is drawn on the screen.  Each dot is
+                    represented by one point and a color.
+            !*/
+
+            overlay_dot() { assign_pixel(color, 0);}
+
+            overlay_dot(const vector<double>& p_) 
+                : p(p_) { assign_pixel(color, 255); }
+
+            template <typename pixel_type>
+            overlay_dot(const vector<double>& p_, pixel_type color_) 
+                : p(p_) { assign_pixel(color, color_); }
+
+            vector<double> p; // The location of the dot
+            rgb_pixel color;
+        };
+
+        void add_overlay (
+            const std::vector<overlay_line>& overlay
+        );
+        /*!
+            ensures
+                - Adds the given overlay lines into this object such that it will be
+                  displayed. 
+        !*/
+
+        void add_overlay (
+            const std::vector<overlay_dot>& overlay
+        );
+        /*!
+            ensures
+                - Adds the given overlay dots into this object such that it will be
+                  displayed. 
+        !*/
+
+        void clear_overlay (
+        );
+        /*!
+            ensures
+                - Removes all overlays from this object.  The display will be empty.
+        !*/
+
+        template <typename T>
+        void set_dot_double_clicked_handler (
+            T& object,
+            void (T::*event_handler)(const vector<double>&)
+        );
+        /*
+            requires
+                - event_handler is a valid pointer to a member function in T 
+            ensures
+                - The event_handler function is called on object when the user double
+                  clicks on one of the overlay dots.  The selected dot will be passed to
+                  event_handler().
+                - Any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+        */
+
+        void set_dot_double_clicked_handler (
+            const any_function<void(const vector<double>&)>& event_handler
+        );
+        /*
+            ensures
+                - The event_handler function is called when the user double clicks on one
+                  of the overlay dots.  The selected dot will be passed to event_handler().
+                - Any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+        */
+    };
+
+// ----------------------------------------------------------------------------------------
+
+    class perspective_window : public drawable_window, noncopyable
+    {
+        /*!
+            WHAT THIS OBJECT REPRESENTS
+                This is a simple window that is just a container for a perspective_display.
+                It exists to make it easy to throw perspective_displays onto the screen
+                without having to put together your own drawable_window objects.
+        !*/
+    public:
+
+        typedef perspective_display::overlay_line overlay_line;
+        typedef perspective_display::overlay_dot overlay_dot;
+
+        perspective_window(
+        );
+        /*!
+            ensures
+                - The window is displayed on the screen and is 100x100 pixels in size.
+        !*/
+
+        perspective_window(
+            const std::vector<dlib::vector<double> >& point_cloud
+        );
+        /*!
+            ensures
+                - The window is displayed on the screen and is 100x100 pixels in size.
+                - This window will have point_cloud added to it via add_overlay() and the
+                  points will all be white.
+        !*/
+        
+        perspective_window(
+            const std::vector<dlib::vector<double> >& point_cloud,
+            const std::string& title
+        );
+        /*!
+            ensures
+                - The window is displayed on the screen and is 100x100 pixels in size.
+                - This window will have point_cloud added to it via add_overlay() and the
+                  points will all be white.
+                - The title of the window will be set to the given title string.
+        !*/
+        
+        ~perspective_window(
+        );
+        /*!
+            ensures
+                - any resources associated with this object have been released
+        !*/
+
+        void add_overlay (
+            const std::vector<overlay_line>& overlay
+        );
+        /*!
+            ensures
+                - Adds the given overlay lines into this object such that it will be
+                  displayed. 
+        !*/
+
+        void add_overlay (
+            const std::vector<overlay_dot>& overlay
+        );
+        /*!
+            ensures
+                - Adds the given overlay dots into this object such that it will be
+                  displayed. 
+        !*/
+
+        void clear_overlay (
+        );
+        /*!
+            ensures
+                - Removes all overlays from this object.  The display will be empty.
+        !*/
+
+        void add_overlay(
+            const std::vector<dlib::vector<double> >& d
+        ); 
+        /*!
+            ensures
+                - Adds the given dots into this object such that it will be
+                  displayed.  They will be colored white.
+        !*/
+
+        template <typename pixel_type>
+        void add_overlay(
+            const std::vector<dlib::vector<double> >& d, 
+            pixel_type p
+        );
+        /*!
+            ensures
+                - Adds the given dots into this object such that it will be
+                  displayed.  They will be colored by pixel color p.
+        !*/
+
+        template <typename pixel_type>
+        void add_overlay(
+            const vector<double>& p1,
+            const vector<double>& p2, 
+            pixel_type color
+        );
+        /*!
+            ensures
+                - Adds an overlay line going from p1 to p2 with the given color.
+        !*/
+
+        template < typename T >
+        void set_dot_double_clicked_handler (
+            T& object,
+            void (T::*event_handler)(const vector<double>&)
+        );
+        /*
+            requires
+                - event_handler is a valid pointer to a member function in T 
+            ensures
+                - The event_handler function is called on object when the user double
+                  clicks on one of the overlay dots.  The selected dot will be passed to
+                  event_handler().
+                - Any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+        */
+
+        void set_dot_double_clicked_handler (
+            const any_function<void(const vector<double>&)>& event_handler
+        );
+        /*
+            ensures
+                - The event_handler function is called when the user double clicks on one
+                  of the overlay dots.  The selected dot will be passed to event_handler().
+                - Any previous calls to this function are overridden by this new call.  
+                  (i.e. you can only have one event handler associated with this 
+                  event at a time)
+        */
+
     };
 
 // ----------------------------------------------------------------------------------------

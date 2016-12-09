@@ -10,6 +10,8 @@
 #include <dlib/string.h>
 #include <dlib/matrix.h>
 #include <dlib/rand.h>
+#include <dlib/array2d.h>
+#include <dlib/image_transforms.h>
 
 #include "tester.h"
 
@@ -105,7 +107,7 @@ namespace
         DLIB_TEST(rect2 == rect1);
         DLIB_TEST(p2 == p1);
         DLIB_TEST(v2 == v1);
-        DLIB_TEST(sin);
+        DLIB_TEST(sin.good());
         DLIB_TEST(sin.get() == EOF);
 
 
@@ -271,7 +273,6 @@ namespace
         }
 
         {
-            const double pi = 3.1415926535898;
             point p1, center;
 
             center = point(3,4);
@@ -293,6 +294,8 @@ namespace
             point_rotator rot(pi/2);
             DLIB_TEST(rot(point(1,0)) == point(0,1));
             DLIB_TEST(rot(point(0,1)) == point(-1,0));
+            DLIB_TEST(point(rot.get_m()*(dlib::vector<double,2>(1,0))) == point(0,1));
+            DLIB_TEST(point(rot.get_m()*(dlib::vector<double,2>(0,1))) == point(-1,0));
         }
 
         {
@@ -329,7 +332,7 @@ namespace
             std::vector< dlib::vector<double> > a;
 
             dlib::vector<double> v;
-            dlib::rand::float_1a rnd;
+            dlib::rand rnd;
 
             for (int i = 0; i < 10; ++i)
             {
@@ -342,16 +345,510 @@ namespace
 
             // This test is just to make sure the covariance function can compile when used
             // on a dlib::vector.  The actual test doesn't matter.
-            DLIB_TEST(sum(covariance(vector_to_matrix(a))) < 10); 
+            DLIB_TEST(sum(covariance(mat(a))) < 10); 
+
+        }
+
+
+        DLIB_TEST(rectangle() + point(5,4) + point(10,10) == rectangle(5,4,10,10));
+
+        // make sure the center of a centered rectangle is always right
+        for (long x = -10; x <= 10; ++x)
+        {
+            for (long y = -10; y <= 10; ++y)
+            {
+                for (long w = 0; w < 10; ++w)
+                {
+                    for (long h = 0; h < 10; ++h)
+                    {
+                        DLIB_TEST(center(centered_rect(x,y,w,h)) == point(x,y));
+                    }
+                }
+            }
+        }
+
+    }
+
+// ----------------------------------------------------------------------------------------
+
+    void test_border_enumerator()
+    {
+
+
+
+        border_enumerator be;
+        DLIB_TEST(be.at_start() == true);
+        DLIB_TEST(be.size() == 0);
+        DLIB_TEST(be.current_element_valid() == false);
+        DLIB_TEST(be.move_next() == false);
+        DLIB_TEST(be.at_start() == false);
+        DLIB_TEST(be.current_element_valid() == false);
+        DLIB_TEST(be.move_next() == false);
+        DLIB_TEST(be.at_start() == false);
+        DLIB_TEST(be.current_element_valid() == false);
+        DLIB_TEST(be.size() == 0);
+
+        be = border_enumerator(rectangle(4,4,4,4),1);
+        DLIB_TEST(be.at_start() == true);
+        DLIB_TEST(be.size() == 1);
+        be = border_enumerator(rectangle(4,4,4,4),3);
+        DLIB_TEST(be.at_start() == true);
+        DLIB_TEST(be.size() == 1);
+        be = border_enumerator(rectangle(4,4,4,4),0);
+        DLIB_TEST(be.at_start() == true);
+        DLIB_TEST(be.size() == 0);
+        be = border_enumerator(rectangle(4,4,5,5),0);
+        DLIB_TEST(be.at_start() == true);
+        DLIB_TEST(be.size() == 0);
+        be = border_enumerator(rectangle(4,4,5,5),1);
+        DLIB_TEST(be.at_start() == true);
+        DLIB_TEST(be.size() == 4);
+        be = border_enumerator(rectangle(4,4,5,5),2);
+        DLIB_TEST(be.size() == 4);
+        be = border_enumerator(rectangle(4,4,6,6),1);
+        DLIB_TEST(be.size() == 8);
+        be = border_enumerator(rectangle(4,4,6,6),2);
+        DLIB_TEST(be.size() == 9);
+        be = border_enumerator(rectangle(4,4,6,6),3);
+        DLIB_TEST(be.size() == 9);
+        DLIB_TEST(be.at_start() == true);
+
+        array2d<unsigned char> img, img2;
+        for (int size = 1; size < 10; ++size)
+        {
+            for (int bs = 0; bs < 4; ++bs)
+            {
+                img.set_size(size,size);
+                img2.set_size(size,size);
+
+                assign_all_pixels(img, 1);
+                assign_all_pixels(img2, 1);
+
+                zero_border_pixels(img2, bs,bs);
+
+                be = border_enumerator(get_rect(img),bs);
+                DLIB_TEST(be.at_start() == true);
+                DLIB_TEST(be.current_element_valid() == false);
+                while (be.move_next())
+                {
+                    DLIB_TEST(be.at_start() == false);
+                    DLIB_TEST(be.current_element_valid() == true);
+                    DLIB_TEST_MSG(get_rect(img).contains(be.element()) == true,
+                                 get_rect(img) << "   " << be.element()
+                    );
+                    const point p = be.element();
+                    img[p.y()][p.x()] = 0;
+                }
+                DLIB_TEST(be.at_start() == false);
+                DLIB_TEST(be.current_element_valid() == false);
+                DLIB_TEST(be.move_next() == false);
+                DLIB_TEST(be.current_element_valid() == false);
+                DLIB_TEST(be.move_next() == false);
+                DLIB_TEST(be.current_element_valid() == false);
+                DLIB_TEST(be.at_start() == false);
+
+                DLIB_TEST(mat(img) == mat(img2));
+
+            }
+        }
+
+        for (int size = 1; size < 10; ++size)
+        {
+            for (int bs = 0; bs < 4; ++bs)
+            {
+                img.set_size(size,size+5);
+                img2.set_size(size,size+5);
+
+                assign_all_pixels(img, 1);
+                assign_all_pixels(img2, 1);
+
+                zero_border_pixels(img2, bs,bs);
+
+                const point shift(4,5);
+
+                be = border_enumerator(translate_rect(get_rect(img),shift),bs);
+                DLIB_TEST(be.at_start() == true);
+                DLIB_TEST(be.current_element_valid() == false);
+                while (be.move_next())
+                {
+                    DLIB_TEST(be.current_element_valid() == true);
+                    DLIB_TEST(be.at_start() == false);
+                    DLIB_TEST_MSG(get_rect(img).contains(be.element()-shift) == true,
+                                 get_rect(img) << "   " << be.element()
+                    );
+                    const point p = be.element()-shift;
+                    img[p.y()][p.x()] = 0;
+                }
+                DLIB_TEST(be.current_element_valid() == false);
+                DLIB_TEST(be.move_next() == false);
+                DLIB_TEST(be.current_element_valid() == false);
+                DLIB_TEST(be.move_next() == false);
+                DLIB_TEST(be.current_element_valid() == false);
+                DLIB_TEST(be.at_start() == false);
+
+                DLIB_TEST(mat(img) == mat(img2));
+
+            }
+        }
+
+        for (int size = 1; size < 10; ++size)
+        {
+            for (int bs = 0; bs < 4; ++bs)
+            {
+                img.set_size(size+2,size);
+                img2.set_size(size+2,size);
+
+                assign_all_pixels(img, 1);
+                assign_all_pixels(img2, 1);
+
+                zero_border_pixels(img2, bs,bs);
+
+                const point shift(-4,5);
+
+                be = border_enumerator(translate_rect(get_rect(img),shift),bs);
+                DLIB_TEST(be.current_element_valid() == false);
+                while (be.move_next())
+                {
+                    DLIB_TEST(be.current_element_valid() == true);
+                    DLIB_TEST_MSG(get_rect(img).contains(be.element()-shift) == true,
+                                 get_rect(img) << "   " << be.element()
+                    );
+                    const point p = be.element()-shift;
+                    img[p.y()][p.x()] = 0;
+                }
+                DLIB_TEST(be.current_element_valid() == false);
+                DLIB_TEST(be.move_next() == false);
+                DLIB_TEST(be.current_element_valid() == false);
+                DLIB_TEST(be.move_next() == false);
+                DLIB_TEST(be.current_element_valid() == false);
+
+                DLIB_TEST(mat(img) == mat(img2));
+
+            }
+        }
+
+        {
+            matrix<bool,4,5> hits, truth;
+            const rectangle rect = rectangle(1,1,4,3); 
+
+            border_enumerator be(rect, rectangle(2,2, 3, 3));
+            DLIB_TEST(be.size() == 8);
+            hits = false;
+            while (be.move_next())
+            {
+                DLIB_TEST(rect.contains(be.element()));
+                hits(be.element().y(), be.element().x()) = true;
+            }
+            DLIB_TEST(be.current_element_valid() == false);
+            DLIB_TEST(be.size() == 8);
+            truth = false;
+            truth(1,1) = truth(1,2) = truth(1,3) = truth(1,4) = truth(2,1) =
+                truth(3,1) = truth(2,4) = truth(3,4) = true;
+            DLIB_TEST_MSG(truth == hits, truth << endl << hits);
+
+
+            
+
+            be = border_enumerator(rect, rectangle(0,0, 9, 9));
+            DLIB_TEST(be.size() == 0);
+            hits = false;
+            while (be.move_next())
+            {
+                DLIB_TEST(rect.contains(be.element()));
+                hits(be.element().y(), be.element().x()) = true;
+            }
+            DLIB_TEST(be.current_element_valid() == false);
+            DLIB_TEST(be.size() == 0);
+            truth = false;
+            DLIB_TEST(truth == hits);
+
+
+
+            be = border_enumerator(rect, rectangle(0,0, 3, 9));
+            DLIB_TEST(be.size() == 3);
+            hits = false;
+            while (be.move_next())
+            {
+                DLIB_TEST(rect.contains(be.element()));
+                hits(be.element().y(), be.element().x()) = true;
+            }
+            DLIB_TEST(be.current_element_valid() == false);
+            DLIB_TEST(be.size() == 3);
+            truth = false;
+            truth(1,4) = truth(2,4) = truth(3,4) = true;
+            DLIB_TEST(truth == hits);
+
+
+
+
+            be = border_enumerator(rect, rectangle(2,1, 4, 3));
+            DLIB_TEST(be.size() == 3);
+            hits = false;
+            while (be.move_next())
+            {
+                DLIB_TEST(rect.contains(be.element()));
+                hits(be.element().y(), be.element().x()) = true;
+            }
+            DLIB_TEST(be.current_element_valid() == false);
+            DLIB_TEST(be.size() == 3);
+            truth = false;
+            truth(1,1) = truth(2,1) = truth(3,1) = true;
+            DLIB_TEST(truth == hits);
+
+
+
+            be = border_enumerator(rect, rectangle(1,1, 5, 2));
+            DLIB_TEST(be.size() == 4);
+            hits = false;
+            while (be.move_next())
+            {
+                DLIB_TEST(rect.contains(be.element()));
+                hits(be.element().y(), be.element().x()) = true;
+            }
+            DLIB_TEST(be.current_element_valid() == false);
+            DLIB_TEST(be.size() == 4);
+            truth = false;
+            truth(3,1) = truth(3,2) = truth(3,3) = truth(3,4) = true;
+            DLIB_TEST(truth == hits);
+
+
 
         }
 
     }
 
+// ----------------------------------------------------------------------------------------
+
+    void test_find_affine_transform()
+    {
+        //typedef dlib::vector<double,2> vect;
+        typedef point vect;
+        std::vector<vect> from, to;
+
+        from.push_back(vect(0,0));
+        to.push_back(vect(0,1));
+
+        from.push_back(vect(0,1));
+        to.push_back(vect(1,1));
+
+        from.push_back(vect(1,1));
+        to.push_back(vect(1,0));
+
+        from.push_back(vect(1,0));
+        to.push_back(vect(0,0));
+
+        point_transform_affine t = find_affine_transform(from,to);
+        point_transform_affine tinv = inv(t);
+
+        for (unsigned long i = 0; i < from.size(); ++i)
+        {
+            dlog << LINFO << "affine transformation error: "<< length(t(from[i])-to[i]);
+            DLIB_TEST(length(t(from[i])-to[i]) < 1e-14);
+            DLIB_TEST(length(tinv(t(from[i]))-from[i]) < 1e-14);
+            DLIB_TEST(length(t(tinv(from[i]))-from[i]) < 1e-14);
+
+            point_transform_affine temp = t*inv(t);
+            DLIB_TEST(length(temp.get_b()) < 1e-14);
+            DLIB_TEST(max(abs(temp.get_m() - identity_matrix<double>(2))) < 1e-14);
+        }
+
+        ostringstream sout;
+        serialize(t, sout);
+        istringstream sin(sout.str());
+        point_transform_affine t2;
+        DLIB_TEST(length(t2(point(2,3)) - point(2,3)) < 1e-14);
+        deserialize(t2, sin);
+        DLIB_TEST(max(abs(t2.get_m()-t.get_m())) < 1e-14);
+        DLIB_TEST(max(abs(t2.get_b()-t.get_b())) < 1e-14);
+    }
+
+// ----------------------------------------------------------------------------------------
+
+    double projective_transform_pass_rate(const double error_rate)
+    {
+        print_spinner();
+        dlog << LINFO << "projective_transform_pass_rate, error_rate: "<< error_rate;
+        dlib::rand rnd;
+        running_stats<double> pass_rate;
+        for (int rounds = 0; rounds < 1000; ++rounds)
+        {
+            running_stats<double> rs, rs_true;
+            matrix<double> H = 2*(randm(3,3,rnd)-0.5);
+
+            H(0,2) = rnd.get_random_gaussian()*10;
+            H(1,2) = rnd.get_random_gaussian()*10;
 
 
+            H(2,0) = rnd.get_random_double()*2.1;
+            H(2,1) = rnd.get_random_double()*2.1;
+            H(2,2) = 1 + rnd.get_random_gaussian()*3.1; 
+
+            point_transform_projective tran(H);
+            point_transform_projective traninv = inv(tran);
+
+            const int num = rnd.get_random_32bit_number()%8 + 4;
+
+            std::vector<dlib::vector<double,2> > from_points, to_points;
+            for (int i = 0; i < num; ++i)
+            {
+                dlib::vector<double,2> p = randm(2,1,rnd)*1000;
+                from_points.push_back(p);
+                to_points.push_back(tran(p) + (randm(2,1,rnd)-0.5)*error_rate);
+                DLIB_TEST(length(traninv(tran(p))-p) <= 1e-5);
+                DLIB_TEST(length(tran(traninv(p))-p) <= 1e-5);
+
+                point_transform_projective temp = tran*traninv;
+                DLIB_TEST_MSG(max(abs(temp.get_m() - identity_matrix<double>(3))) < 1e-10, temp.get_m());
+                temp = traninv*tran;
+                DLIB_TEST_MSG(max(abs(temp.get_m() - identity_matrix<double>(3))) < 1e-10, temp.get_m());
+            }
 
 
+            point_transform_projective tran2 = find_projective_transform(from_points, to_points);
+
+            for (unsigned long i = 0; i < from_points.size(); ++i)
+            {
+                const double err = length_squared(tran2(from_points[i]) - to_points[i]);
+                rs.add(err);
+                const double err_true = length_squared(tran(from_points[i]) - to_points[i]);
+                rs_true.add(err_true);
+            }
+
+            if ( rs.mean() < 0.01)
+            {
+                pass_rate.add(1);
+            }
+            else
+            {
+                dlog << LINFO << " errors: mean/max: " << rs.mean() << "  " << rs.max();
+                pass_rate.add(0);
+            }
+
+            ostringstream sout;
+            serialize(tran, sout);
+            istringstream sin(sout.str());
+            point_transform_projective tran3;
+            DLIB_TEST(length(tran3(point(2,3)) - point(2,3)) < 1e-14);
+            deserialize(tran3, sin);
+            DLIB_TEST(max(abs(tran3.get_m()-tran.get_m())) < 1e-14);
+        }
+
+        dlog << LINFO << " pass_rate.mean(): "<< pass_rate.mean();
+        return pass_rate.mean();
+    }
+
+// ----------------------------------------------------------------------------------------
+
+    template <typename T>
+    void test_find_similarity_transform()
+    {
+        print_spinner();
+        std::vector<dlib::vector<T,2> > from_points, to_points;
+
+        from_points.push_back(dlib::vector<T,2>(0,0));
+        from_points.push_back(dlib::vector<T,2>(0,1));
+        from_points.push_back(dlib::vector<T,2>(1,0));
+
+        to_points.push_back(dlib::vector<T,2>(8,0));
+        to_points.push_back(dlib::vector<T,2>(6,0));
+        to_points.push_back(dlib::vector<T,2>(8,2));
+
+        point_transform_affine tform = find_similarity_transform(from_points, to_points);
+
+        for (unsigned long i = 0; i < from_points.size(); ++i)
+        {
+            DLIB_TEST(length(tform(from_points[i]) - to_points[i]) < 1e-14);
+        }
+    }
+
+    template <typename T>
+    void test_find_similarity_transform2()
+    {
+        print_spinner();
+        std::vector<dlib::vector<T,2> > from_points, to_points;
+
+        from_points.push_back(dlib::vector<T,2>(0,0));
+        from_points.push_back(dlib::vector<T,2>(0,1));
+
+        to_points.push_back(dlib::vector<T,2>(8,0));
+        to_points.push_back(dlib::vector<T,2>(6,0));
+
+        point_transform_affine tform = find_similarity_transform(from_points, to_points);
+
+        for (unsigned long i = 0; i < from_points.size(); ++i)
+        {
+            DLIB_TEST(length(tform(from_points[i]) - to_points[i]) < 1e-14);
+        }
+    }
+
+
+// ----------------------------------------------------------------------------------------
+
+    void test_rect_to_drect()
+    {
+        print_spinner();
+        dlib::rand rnd;
+        for (int i = 0; i < 5000; ++i)
+        {
+            rectangle rect = centered_rect(rnd.get_random_32bit_number()%100,
+                rnd.get_random_32bit_number()%100,
+                rnd.get_random_32bit_number()%100,
+                rnd.get_random_32bit_number()%100);
+
+            drectangle drect = rect;
+            rectangle rect2 = drect;
+            DLIB_TEST(rect2 == rect);
+            DLIB_TEST(rect.width() == drect.width());
+            DLIB_TEST(rect.height() == drect.height());
+            DLIB_TEST(dcenter(rect) == dcenter(drect));
+            DLIB_TEST(rect.is_empty() == drect.is_empty());
+        }
+    }
+
+// ----------------------------------------------------------------------------------------
+
+    void test_affine3d()
+    {
+        const dlib::vector<double> x(1,0,0);
+        const dlib::vector<double> y(0,1,0);
+        const dlib::vector<double> z(0,0,1);
+        const dlib::vector<double> e(1,1,1);
+        const dlib::vector<double> ex(-1,1,1);
+        const dlib::vector<double> ey(1,-1,1);
+        const dlib::vector<double> ez(1,1,-1);
+
+        dlib::vector<double> w;
+
+        w = rotate_around_z(pi/2)(x);
+        DLIB_TEST(length(w-y) < 1e-12);
+        w = rotate_around_z(pi/2)(e);
+        DLIB_TEST(length(w-ex) < 1e-12);
+
+        w = rotate_around_y(-pi/2)(x);
+        DLIB_TEST(length(w-z) < 1e-12);
+        w = rotate_around_y(pi/2)(e);
+        DLIB_TEST(length(w-ez) < 1e-12);
+
+        w = rotate_around_x(pi/2)(y);
+        DLIB_TEST(length(w-z) < 1e-12);
+        w = rotate_around_x(pi/2)(e);
+        DLIB_TEST(length(w-ey) < 1e-12);
+
+        w = translate_point(x)(y);
+        DLIB_TEST(length(w-x-y) < 1e-12);
+
+        point_transform_affine3d tform;
+        tform = rotate_around_x(pi/2)*rotate_around_z(pi/2)*translate_point(x);
+        DLIB_TEST(length(tform(dlib::vector<double>())-z) < 1e-12);
+        DLIB_TEST(length(inv(tform)(z)) < 1e-12);
+
+        point_transform_affine tform2; 
+        tform = tform*tform2;// the default tform is the identity mapping so this shouldn't do anything different 
+        DLIB_TEST(length(tform(dlib::vector<double>())-z) < 1e-12);
+        DLIB_TEST(length(inv(tform)(z)) < 1e-12);
+    }
+
+// ----------------------------------------------------------------------------------------
 
     class geometry_tester : public tester
     {
@@ -365,7 +862,18 @@ namespace
         void perform_test (
         )
         {
+            test_affine3d();
+            test_rect_to_drect();
             geometry_test();
+            test_border_enumerator();
+            test_find_affine_transform();
+            DLIB_TEST(projective_transform_pass_rate(0.1) > 0.99);
+            DLIB_TEST(projective_transform_pass_rate(0.0) == 1);
+
+            test_find_similarity_transform<double>(); 
+            test_find_similarity_transform2<double>(); 
+            test_find_similarity_transform<float>(); 
+            test_find_similarity_transform2<float>(); 
         }
     } a;
 

@@ -23,7 +23,7 @@ namespace
     class timer_test_helper
     {
     public:
-        mutex m;
+        dlib::mutex m;
         int count;
         dlib::uint64 timestamp;
         dlib::timestamper ts;
@@ -39,6 +39,7 @@ namespace
         void delayed_add()
         {
             dlib::sleep(1000);
+            print_spinner();
             add();
         }
 
@@ -46,6 +47,9 @@ namespace
         {
             m.lock();
             timestamp = ts.get_timestamp();
+            dlog << LTRACE << "in set_timestamp(), time is " << timestamp;
+            dlib::sleep(1);
+            print_spinner();
             m.unlock();
         }
     };
@@ -57,7 +61,7 @@ namespace
     )
     /*!
         requires
-            - timer_t is an implementation of timer/timer_kernel_aseqract.h is instantiated 
+            - timer_t is an implementation of dlib/timer/timer_abstract.h is instantiated 
               timer_test_helper
         ensures
             - runs tests on timer_t for compliance with the specs 
@@ -70,12 +74,15 @@ namespace
 
             timer_t t1(h,&timer_test_helper::set_timestamp);
             t1.set_delay_time(0);
+            dlog << LTRACE << "t1.start()";
             t1.start();
 
-            dlib::sleep(3000);
-            t1.stop();
+            dlib::sleep(60);
+            print_spinner();
+            t1.stop_and_wait();
 
             dlib::uint64 cur_time = h.ts.get_timestamp();
+            dlog << LTRACE << "get current time: " << cur_time;
 
             // make sure the action function has been called recently
             DLIB_TEST_MSG((cur_time-h.timestamp)/1000 < 30, (cur_time-h.timestamp)/1000);
@@ -90,7 +97,7 @@ namespace
     )
     /*!
         requires
-            - timer_t is an implementation of timer/timer_kernel_aseqract.h is instantiated 
+            - timer_t is an implementation of dlib/timer/timer_abstract.h is instantiated 
               timer_test_helper
         ensures
             - runs tests on timer_t for compliance with the specs 
@@ -209,6 +216,7 @@ namespace
                 DLIB_TEST(t3.is_running() == true);
 
                 dlib::sleep(1100);
+                print_spinner();
                 // this should allow the timers to trigger 8 times
                 t1.stop();
                 t2.stop();
@@ -220,20 +228,27 @@ namespace
             }
 
 
+            t1.stop_and_wait();
+
             h.count = 0;
             t1.start();
             dlib::sleep(300);
+            print_spinner();
             DLIB_TEST_MSG(h.count == 0,h.count);
             t1.set_delay_time(400);
             dlib::sleep(200);
+            print_spinner();
             DLIB_TEST_MSG(h.count == 1,h.count);
             dlib::sleep(250);
+            print_spinner();
             DLIB_TEST_MSG(h.count == 1,h.count);
             dlib::sleep(100);
+            print_spinner();
             DLIB_TEST_MSG(h.count == 2,h.count);
             t1.set_delay_time(2000);
             DLIB_TEST_MSG(h.count == 2,h.count);
             dlib::sleep(1000);
+            print_spinner();
             DLIB_TEST_MSG(h.count == 2,h.count);
             t1.clear();
 
@@ -247,6 +262,7 @@ namespace
             DLIB_TEST(t3.delay_time() == 1000);
             DLIB_TEST_MSG(h.count == 0,h.count);
             dlib::sleep(200);
+            print_spinner();
             DLIB_TEST(t3.is_running() == false);
             DLIB_TEST(t3.delay_time() == 1000);
             DLIB_TEST_MSG(h.count == 0,h.count);
@@ -259,6 +275,7 @@ namespace
                 t4.start();
                 DLIB_TEST_MSG(h.count == 0,h.count);
                 dlib::sleep(400);
+                print_spinner();
                 DLIB_TEST_MSG(h.count == 0,h.count);
                 t4.stop_and_wait();
                 DLIB_TEST_MSG(h.count == 1,h.count);
@@ -272,6 +289,7 @@ namespace
                 t4.start();
                 DLIB_TEST_MSG(h.count == 0,h.count);
                 dlib::sleep(400);
+                print_spinner();
                 DLIB_TEST_MSG(h.count == 0,h.count);
                 t4.clear();
                 DLIB_TEST(t4.is_running() == false);
@@ -288,6 +306,7 @@ namespace
                 t5.start();
                 DLIB_TEST_MSG(h.count == 0,h.count);
                 dlib::sleep(400);
+                print_spinner();
                 DLIB_TEST_MSG(h.count == 0,h.count);
             }
             DLIB_TEST_MSG(h.count == 1,h.count);
@@ -311,12 +330,15 @@ namespace
         void perform_test (
         )
         {
-            dlog << LINFO << "testing kernel_1a";
-            timer_test<timer<timer_test_helper>::kernel_1a>  ();
-            timer_test2<timer<timer_test_helper>::kernel_1a>  ();
-            dlog << LINFO << "testing kernel_2a";
-            timer_test<timer<timer_test_helper>::kernel_2a>  ();
-            timer_test2<timer<timer_test_helper>::kernel_2a>  ();
+            dlog << LINFO << "testing timer_heavy with test_timer";
+            timer_test<timer_heavy<timer_test_helper> >  ();
+            dlog << LINFO << "testing timer_heavy with test_timer2";
+            timer_test2<timer_heavy<timer_test_helper> >  ();
+
+            dlog << LINFO << "testing timer with test_timer";
+            timer_test<timer<timer_test_helper> >  ();
+            dlog << LINFO << "testing timer with test_timer2";
+            timer_test2<timer<timer_test_helper> >  ();
         }
     } a;
 

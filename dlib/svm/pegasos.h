@@ -248,7 +248,7 @@ namespace dlib
         ) const
         {
             distance_function<offset_kernel<kernel_type> > df = w.get_distance_function();
-            return decision_function<kernel_type>(df.alpha, -tau*sum(df.alpha), kernel, df.basis_vectors);
+            return decision_function<kernel_type>(df.get_alpha(), -tau*sum(df.get_alpha()), kernel, df.get_basis_vectors());
         }
 
         void swap (
@@ -525,9 +525,9 @@ namespace dlib
         ) const
         {
             if (use_cache)
-                return do_train_cached(vector_to_matrix(x), vector_to_matrix(y));
+                return do_train_cached(mat(x), mat(y));
             else
-                return do_train(vector_to_matrix(x), vector_to_matrix(y));
+                return do_train(mat(x), mat(y));
         }
 
     private:
@@ -541,10 +541,8 @@ namespace dlib
             const in_scalar_vector_type& y
         ) const
         {
-            typedef typename decision_function<kernel_type>::sample_vector_type sample_vector_type;
-            typedef typename decision_function<kernel_type>::scalar_vector_type scalar_vector_type;
 
-            dlib::rand::kernel_1a rnd;
+            dlib::rand rnd;
 
             trainer_type my_trainer(trainer);
 
@@ -591,10 +589,8 @@ namespace dlib
             const in_scalar_vector_type& y
         ) const
         {
-            typedef typename decision_function<kernel_type>::sample_vector_type sample_vector_type;
-            typedef typename decision_function<kernel_type>::scalar_vector_type scalar_vector_type;
 
-            dlib::rand::kernel_1a rnd;
+            dlib::rand rnd;
 
             // make a caching kernel
             typedef caching_kernel<kernel_type, in_sample_vector_type> ckernel_type;

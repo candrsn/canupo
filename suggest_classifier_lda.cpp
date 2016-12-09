@@ -46,7 +46,7 @@
 
 using namespace std;
 
-typedef dlib::matrix<FloatType, 0, 1> sample_type;
+typedef dlib::matrix<double, 0, 1> sample_type;
 static const int svgSize = 800;
 static const int halfSvgSize = svgSize / 2;
 
@@ -141,7 +141,7 @@ void read_msc_data(ifstream& mscfile, int nscales, int npts, sample_type* data, 
     }
 }
 
-void GramSchmidt(dlib::matrix<dlib::matrix<FloatType,0,1>,0,1>& basis, dlib::matrix<FloatType,0,1>& newX) {
+void GramSchmidt(dlib::matrix<dlib::matrix<double,0,1>,0,1>& basis, dlib::matrix<double,0,1>& newX) {
     using namespace dlib;
     // goal: find a basis so that the given vector is the new X
     // principle: at least one basis vector is not orthogonal with newX (except if newX is null but we suppose this is not the case)
@@ -186,19 +186,21 @@ int dichosearch(const vector<double>& series, double x) {
 
 struct LDA_trainer {
     typedef ::sample_type sample_type;
-    typedef FloatType  scalar_type;
+    typedef double  scalar_type;
     typedef dlib::linear_kernel<sample_type> kernel_type;
     typedef dlib::decision_function<kernel_type> trained_function_type;
     typedef trained_function_type::mem_manager_type mem_manager_type;
     
-    trained_function_type train(const trained_function_type::sample_vector_type& samplesvec, const trained_function_type::scalar_vector_type& labels) const {
+    trained_function_type train(const std::vector<dlib::matrix<double, 0l, 1l> >& samplesvec, const std::vector<double>& labels) const {
+    
+    //trained_function_type train(const trained_function_type::sample_vector_type& samplesvec, const trained_function_type::scalar_vector_type& labels) const {
         using namespace dlib;
-        int fdim = samplesvec(0).size();
+        int fdim = samplesvec[0].size();
         int nsamples = samplesvec.size();
         
         int ndata_class1 = 0, ndata_class2 = 0;
         for (int i=0; i<nsamples; ++i) {
-            if (labels(i)>0) ++ndata_class1;
+            if (labels[i]>0) ++ndata_class1;
             else ++ndata_class2;
         }
         
@@ -211,24 +213,24 @@ struct LDA_trainer {
         
         ndata_class1 = 0; ndata_class2 = 0;
         for (int i=0; i<nsamples; ++i) {
-            if (labels(i)>0) {
-                samples1(ndata_class1) = samplesvec(i);
+            if (labels[i]>0) {
+                samples1(ndata_class1) = samplesvec[i];
                 ++ndata_class1;
-                mu1 += samplesvec(i);
+                mu1 += samplesvec[i];
             }
             else {
-                samples2(ndata_class2) = samplesvec(i);
+                samples2(ndata_class2) = samplesvec[i];
                 ++ndata_class2;
-                mu2 += samplesvec(i);
+                mu2 += samplesvec[i];
             }
         }
         mu1 /= ndata_class1;
         mu2 /= ndata_class2;
     
-        matrix<FloatType> sigma1 = covariance(samples1);
-        matrix<FloatType> sigma2 = covariance(samples2);
+        matrix<double> sigma1 = covariance(samples1);
+        matrix<double> sigma2 = covariance(samples2);
 
-        matrix<FloatType,0,1> w_vect = pinv(sigma1+sigma2) * (mu2 - mu1);
+        matrix<double,0,1> w_vect = pinv(sigma1+sigma2) * (mu2 - mu1);
     
         trained_function_type ret;
         //ret.alpha.set_size(fdim);
@@ -250,7 +252,7 @@ struct LDA_trainer {
         return classifier;*/
     }
     
-    void train(int nfolds, const std::vector<sample_type>& samples, const std::vector<FloatType>& labels) {
+    void train(int nfolds, const std::vector<sample_type>& samples, const std::vector<double>& labels) {
         using namespace dlib;
         probabilistic_decision_function<kernel_type> pdecfun = train_probabilistic_decision_function(*this, samples, labels, nfolds);
         decision_function<kernel_type>& decfun = pdecfun.decision_funct;
@@ -258,7 +260,7 @@ struct LDA_trainer {
         // see comments in linearSVM.hpp
         weights.clear();
         weights.resize(dim+1, 0);
-        matrix<FloatType> w(dim,1);
+        matrix<double> w(dim,1);
         w = 0;
         for (int i=0; i<decfun.alpha.nr(); ++i) {
             w += decfun.alpha(i) * decfun.basis_vectors(i);
@@ -272,10 +274,10 @@ struct LDA_trainer {
         for (int i=0; i<=dim; ++i) weights[i] = -weights[i];
     }
     
-    std::vector<FloatType> weights;
-    FloatType predict(const sample_type& data) {
+    std::vector<double> weights;
+    double predict(const sample_type& data) {
         int dim = weights.size()-1;
-        FloatType ret = weights[dim];
+        double ret = weights[dim];
         for (int d=0; d<dim; ++d) ret += weights[d] * data(d);
         return ret;
     }
@@ -360,7 +362,7 @@ int main(int argc, char** argv) {
     undefsample.set_size(fdim,1);
     int nsamples = ndata_class1+ndata_class2;
     vector<sample_type> samples(nsamples, undefsample);
-    vector<FloatType> labels(nsamples, 0);
+    vector<double> labels(nsamples, 0);
     for (int i=0; i<ndata_class1; ++i) labels[i] = -1;
     for (int i=ndata_class1; i<nsamples; ++i) labels[i] = 1;
     
@@ -391,14 +393,14 @@ int main(int argc, char** argv) {
     vector<FloatType> proj1(nsamples);
     for (int i=0; i<nsamples; ++i) proj1[i] = classifier.predict(samples[i]);
     
-    dlib::matrix<dlib::matrix<FloatType,0,1>,0,1> basis;
+    dlib::matrix<dlib::matrix<double,0,1>,0,1> basis;
     basis.set_size(fdim);
     for (int i=0; i<fdim; ++i) {
         basis(i).set_size(fdim);
         for (int j=0; j<fdim; ++j) basis(i)(j) = 0;
         basis(i)(i) = 1;
     }
-    dlib::matrix<FloatType,0,1> w_vect;
+    dlib::matrix<double,0,1> w_vect;
     w_vect.set_size(fdim);
     for (int i=0; i<fdim; ++i) w_vect(i) = classifier.weights[i];
     GramSchmidt(basis,w_vect);
@@ -475,20 +477,20 @@ int main(int argc, char** argv) {
         axis_scale_ratio = sqrt(d1*d2);
 
         using namespace dlib;
-        matrix<FloatType,2,2> bd;
+        matrix<double,2,2> bd;
         bd = e1.x, e1.y, e2.x/axis_scale_ratio, e2.y/axis_scale_ratio;
-        matrix<FloatType,2,2> bi;
+        matrix<double,2,2> bi;
         bi = e1.x, e2.x, e1.y, e2.y;
         //matrix<FloatType,2,2> c = bi * bd;
-        matrix<FloatType,2,2> c = inv(trans(bd));
+        matrix<double,2,2> c = inv(trans(bd));
         
-        std::vector<FloatType>& w1 = classifier.weights;
-        std::vector<FloatType>& w2 = ortho_classifier.weights;
+        std::vector<double>& w1 = classifier.weights;
+        std::vector<double>& w2 = ortho_classifier.weights;
         // first shift so the center of the figure is at the midpoint
         w1[fdim] -= ori.x;
         w2[fdim] -= ori.y;
         // now transform / scale along e2
-        std::vector<FloatType> wn1(fdim+1), wn2(fdim+1);
+        std::vector<double> wn1(fdim+1), wn2(fdim+1);
         for (int i=0; i<=fdim; ++i) {
             wn1[i] = c(0,0) * w1[i] + c(0,1) * w2[i];
             wn2[i] = c(1,0) * w1[i] + c(1,1) * w2[i];

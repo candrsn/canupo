@@ -240,7 +240,48 @@ namespace dlib
                     that prevents this algorithm from working properly.
         !*/
 
-        const discriminant_pca operator+ (
+        const general_matrix dpca_matrix_of_size (
+            const long num_rows 
+        );
+        /*!
+            requires
+                - 0 < num_rows <= in_vector_size()
+            ensures
+                - computes and returns the matrix MAT given by dpca_matrix_of_size(MAT,eigen,num_rows).  
+                  That is, this function returns the dpca_matrix computed by the function
+                  defined below.  
+                - Note that MAT is the desired linear transformation matrix.  That is,
+                  multiplying a vector by MAT performs the desired linear dimensionality
+                  reduction to num_rows dimensions.
+        !*/
+
+        void dpca_matrix_of_size (
+            general_matrix& dpca_mat,
+            general_matrix& eigenvalues,
+            const long num_rows 
+        );
+        /*!
+            requires
+                - 0 < num_rows <= in_vector_size()
+            ensures
+                - is_col_vector(#eigenvalues) == true
+                - #dpca_mat.nr() == eigenvalues.size() 
+                - #dpca_mat.nr() == num_rows 
+                - #dpca_mat.nc() == in_vector_size()
+                - rowm(#dpca_mat,i) represents the ith eigenvector of the S matrix described
+                  in the class description and its eigenvalue is given by eigenvalues(i).
+                - The values in #eigenvalues might be positive or negative.  Additionally, the
+                  eigenvalues are in sorted order with the largest eigenvalue stored at
+                  eigenvalues(0).
+                - (#dpca_mat)*trans(#dpca_mat) == identity_matrix.  
+                  (i.e. the rows of the dpca_matrix are all unit length vectors and are mutually
+                  orthogonal)
+                - Note that #dpca_mat is the desired linear transformation matrix.  That is, 
+                  multiplying a vector by #dpca_mat performs the desired linear dimensionality 
+                  reduction to num_rows dimensions.
+        !*/
+
+        discriminant_pca operator+ (
             const discriminant_pca& item
         ) const;
         /*!
@@ -255,6 +296,20 @@ namespace dlib
                   discriminant_pca object, R, that is equivalent to what you would obtain if all
                   modifying calls (e.g. the add_to_*() functions) to *this and item had instead 
                   been done to R.
+        !*/
+
+        discriminant_pca& operator+= (
+            const discriminant_pca& rhs
+        );
+        /*!
+            requires
+                - in_vector_size() == 0 || rhs.in_vector_size() == 0 || in_vector_size() == rhs.in_vector_size()
+                  (i.e. the in_vector_size() of *this and rhs must match or one must be zero)
+                - between_class_weight() == rhs.between_class_weight()
+                - within_class_weight() == rhs.within_class_weight()
+            ensures
+                - #*this == *item + rhs
+                - returns #*this
         !*/
 
         void swap (

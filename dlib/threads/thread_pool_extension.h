@@ -1,17 +1,19 @@
 // Copyright (C) 2008  Davis E. King (davis@dlib.net)
 // License: Boost Software License   See LICENSE.txt for the full license.
-#ifndef DLIB_THREAD_POOl_H__
-#define DLIB_THREAD_POOl_H__ 
+#ifndef DLIB_THREAD_POOl_Hh_
+#define DLIB_THREAD_POOl_Hh_ 
 
 #include "thread_pool_extension_abstract.h"
+#include "multithreaded_object_extension.h"
 #include "../member_function_pointer.h"
 #include "../bound_function_pointer.h"
 #include "threads_kernel.h"
 #include "auto_mutex_extension.h"
-#include "multithreaded_object_extension.h"
 #include "../uintn.h"
 #include "../array.h"
 #include "../smart_pointers_thread_safe.h"
+#include "../smart_pointers.h"
+#include <exception>
 
 namespace dlib
 {
@@ -181,7 +183,7 @@ namespace dlib
                 // aren't any other worker threads free so just perform the task right
                 // here
 
-                m.unlock();
+                M.unlock();
                 (obj.*funct)();
 
                 // return a task id that is both non-zero and also one
@@ -224,7 +226,7 @@ namespace dlib
                 // aren't any other worker threads free so just perform the task right
                 // here
 
-                m.unlock();
+                M.unlock();
                 (obj.*funct)(arg1);
 
                 // return a task id that is both non-zero and also one
@@ -269,7 +271,7 @@ namespace dlib
                 // aren't any other worker threads free so just perform the task right
                 // here
 
-                m.unlock();
+                M.unlock();
                 (obj.*funct)(arg1, arg2);
 
                 // return a task id that is both non-zero and also one
@@ -296,9 +298,34 @@ namespace dlib
             return tasks[idx].task_id;
         }
 
+        struct function_object_copy 
+        {
+            virtual ~function_object_copy(){}
+        };
+
+        template <typename T>
+        struct function_object_copy_instance : function_object_copy
+        {
+            function_object_copy_instance(const T& item_) : item(item_) {}
+            T item;
+            virtual ~function_object_copy_instance(){}
+        };
+
+        uint64 add_task_internal (
+            const bfp_type& bfp,
+            shared_ptr<function_object_copy>& item
+        );
+        /*!
+            ensures
+                - adds a task to call the given bfp object.
+                - swaps item into the internal task object which will have a lifetime
+                  at least as long as the running task.
+                - returns the task id for this new task
+        !*/
+
         uint64 add_task_internal (
             const bfp_type& bfp
-        );
+        ) { shared_ptr<function_object_copy> temp; return add_task_internal(bfp, temp); }
         /*!
             ensures
                 - adds a task to call the given bfp object.
@@ -419,15 +446,28 @@ namespace dlib
             long arg1;
             long arg2;
 
-            member_function_pointer<>::kernel_1a_c mfp0;
-            member_function_pointer<long>::kernel_1a_c mfp1;
-            member_function_pointer<long,long>::kernel_1a_c mfp2;
+            member_function_pointer<> mfp0;
+            member_function_pointer<long> mfp1;
+            member_function_pointer<long,long> mfp2;
             bfp_type bfp;
+
+            shared_ptr<function_object_copy> function_copy;
+            mutable std::exception_ptr eptr; // non-null if the task threw an exception
+
+            void propagate_exception() const
+            {
+                if (eptr)
+                {
+                    auto tmp = eptr;
+                    eptr = nullptr;
+                    std::rethrow_exception(tmp);
+                }
+            }
 
         };
 
-        array<task_state_type>::expand_1d_c tasks;
-        array<thread_id_type>::expand_1d_c worker_thread_ids;
+        array<task_state_type> tasks;
+        array<thread_id_type> worker_thread_ids;
 
         mutex m;
         signaler task_done_signaler;
@@ -465,7 +505,25 @@ namespace dlib
         ~thread_pool (
         )
         {
-            impl->shutdown_pool();
+            try
+            {
+                impl->shutdown_pool();
+            }
+            catch (std::exception& e)
+            {
+                std::cerr << "An unhandled exception was inside a dlib::thread_pool when it was destructed." << std::endl;
+                std::cerr << "It's what string is: \n" << e.what() << std::endl;
+                using namespace std;
+                assert(false);
+                abort();
+            }
+            catch (...)
+            {
+                std::cerr << "An unhandled exception was inside a dlib::thread_pool when it was destructed." << std::endl;
+                using namespace std;
+                assert(false);
+                abort();
+            }
         }
 
         void wait_for_task (
@@ -528,6 +586,23 @@ namespace dlib
             return id;
         }
         
+        template <typename F>
+        uint64 add_task_by_value (
+            const F& function_object
+        ) 
+        { 
+            thread_pool_implementation::function_object_copy_instance<F>* ptr = 0;
+            ptr = new thread_pool_implementation::function_object_copy_instance<F>(function_object);
+            shared_ptr<thread_pool_implementation::function_object_copy> function_copy(ptr);
+
+
+            bfp_type temp;
+            temp.set(ptr->item);
+            uint64 id = impl->add_task_internal(temp, function_copy);
+
+            return id;
+        }
+        
         template <typename T>
         uint64 add_task (
             const T& obj,
@@ -541,6 +616,40 @@ namespace dlib
             return id;
         }
         
+        template <typename T>
+        uint64 add_task_by_value (
+            const T& obj,
+            void (T::*funct)() const
+        ) 
+        { 
+            thread_pool_implementation::function_object_copy_instance<const T>* ptr = 0;
+            ptr = new thread_pool_implementation::function_object_copy_instance<const T>(obj);
+            shared_ptr<thread_pool_implementation::function_object_copy> function_copy(ptr);
+
+            bfp_type temp;
+            temp.set(ptr->item,funct);
+            uint64 id = impl->add_task_internal(temp, function_copy);
+
+            return id;
+        }
+        
+        template <typename T>
+        uint64 add_task_by_value (
+            const T& obj,
+            void (T::*funct)() 
+        ) 
+        { 
+            thread_pool_implementation::function_object_copy_instance<T>* ptr = 0;
+            ptr = new thread_pool_implementation::function_object_copy_instance<T>(obj);
+            shared_ptr<thread_pool_implementation::function_object_copy> function_copy(ptr);
+
+            bfp_type temp;
+            temp.set(ptr->item,funct);
+            uint64 id = impl->add_task_internal(temp, function_copy);
+
+            return id;
+        }
+
         uint64 add_task (
             void (*funct)()
         ) 
@@ -573,6 +682,26 @@ namespace dlib
             return id;
         }
         
+        template <typename F, typename A1>
+        uint64 add_task_by_value (
+            const F& function_object,
+            future<A1>& arg1
+        ) 
+        { 
+            thread_pool_implementation::function_object_copy_instance<F>* ptr = 0;
+            ptr = new thread_pool_implementation::function_object_copy_instance<F>(function_object);
+            shared_ptr<thread_pool_implementation::function_object_copy> function_copy(ptr);
+
+            bfp_type temp;
+            temp.set(ptr->item, arg1.get());
+            uint64 id = impl->add_task_internal(temp, function_copy);
+
+            // tie the future to this task
+            arg1.task_id = id;
+            arg1.tp = impl;
+            return id;
+        }
+        
         template <typename T, typename T1, typename A1>
         uint64 add_task (
             T& obj,
@@ -589,6 +718,28 @@ namespace dlib
             arg1.tp = impl;
             return id;
         }
+
+        template <typename T, typename T1, typename A1>
+        uint64 add_task_by_value (
+            const T& obj,
+            void (T::*funct)(T1),
+            future<A1>& arg1
+        ) 
+        { 
+            thread_pool_implementation::function_object_copy_instance<T>* ptr = 0;
+            ptr = new thread_pool_implementation::function_object_copy_instance<T>(obj);
+            shared_ptr<thread_pool_implementation::function_object_copy> function_copy(ptr);
+
+            bfp_type temp;
+            temp.set(ptr->item,funct,arg1.get());
+            uint64 id = impl->add_task_internal(temp, function_copy);
+
+            // tie the future to this task
+            arg1.task_id = id;
+            arg1.tp = impl;
+            return id;
+        }
+        
         
         template <typename T, typename T1, typename A1>
         uint64 add_task (
@@ -600,6 +751,27 @@ namespace dlib
             bfp_type temp;
             temp.set(obj,funct,arg1.get());
             uint64 id = impl->add_task_internal(temp);
+
+            // tie the future to this task
+            arg1.task_id = id;
+            arg1.tp = impl;
+            return id;
+        }
+        
+        template <typename T, typename T1, typename A1>
+        uint64 add_task_by_value (
+            const T& obj,
+            void (T::*funct)(T1) const,
+            future<A1>& arg1
+        ) 
+        { 
+            thread_pool_implementation::function_object_copy_instance<const T>* ptr = 0;
+            ptr = new thread_pool_implementation::function_object_copy_instance<const T>(obj);
+            shared_ptr<thread_pool_implementation::function_object_copy> function_copy(ptr);
+
+            bfp_type temp;
+            temp.set(ptr->item,funct,arg1.get());
+            uint64 id = impl->add_task_internal(temp, function_copy);
 
             // tie the future to this task
             arg1.task_id = id;
@@ -647,6 +819,29 @@ namespace dlib
             return id;
         }
         
+        template <typename F, typename A1, typename A2>
+        uint64 add_task_by_value (
+            const F& function_object,
+            future<A1>& arg1,
+            future<A2>& arg2
+        ) 
+        { 
+            thread_pool_implementation::function_object_copy_instance<F>* ptr = 0;
+            ptr = new thread_pool_implementation::function_object_copy_instance<F>(function_object);
+            shared_ptr<thread_pool_implementation::function_object_copy> function_copy(ptr);
+
+            bfp_type temp;
+            temp.set(ptr->item, arg1.get(), arg2.get());
+            uint64 id = impl->add_task_internal(temp, function_copy);
+
+            // tie the future to this task
+            arg1.task_id = id;
+            arg1.tp = impl;
+            arg2.task_id = id;
+            arg2.tp = impl;
+            return id;
+        }
+        
         template <typename T, typename T1, typename A1,
                               typename T2, typename A2>
         uint64 add_task (
@@ -670,6 +865,31 @@ namespace dlib
         
         template <typename T, typename T1, typename A1,
                               typename T2, typename A2>
+        uint64 add_task_by_value (
+            const T& obj,
+            void (T::*funct)(T1,T2),
+            future<A1>& arg1,
+            future<A2>& arg2
+        ) 
+        { 
+            thread_pool_implementation::function_object_copy_instance<T>* ptr = 0;
+            ptr = new thread_pool_implementation::function_object_copy_instance<T>(obj);
+            shared_ptr<thread_pool_implementation::function_object_copy> function_copy(ptr);
+
+            bfp_type temp;
+            temp.set(ptr->item, funct, arg1.get(), arg2.get());
+            uint64 id = impl->add_task_internal(temp, function_copy);
+
+            // tie the futures to this task
+            arg1.task_id = id;
+            arg1.tp = impl;
+            arg2.task_id = id;
+            arg2.tp = impl;
+            return id;
+        }
+        
+        template <typename T, typename T1, typename A1,
+                              typename T2, typename A2>
         uint64 add_task (
             const T& obj,
             void (T::*funct)(T1,T2) const,
@@ -680,6 +900,31 @@ namespace dlib
             bfp_type temp;
             temp.set(obj, funct, arg1.get(), arg2.get());
             uint64 id = impl->add_task_internal(temp);
+
+            // tie the futures to this task
+            arg1.task_id = id;
+            arg1.tp = impl;
+            arg2.task_id = id;
+            arg2.tp = impl;
+            return id;
+        }
+        
+        template <typename T, typename T1, typename A1,
+                              typename T2, typename A2>
+        uint64 add_task_by_value (
+            const T& obj,
+            void (T::*funct)(T1,T2) const,
+            future<A1>& arg1,
+            future<A2>& arg2
+        ) 
+        { 
+            thread_pool_implementation::function_object_copy_instance<const T>* ptr = 0;
+            ptr = new thread_pool_implementation::function_object_copy_instance<const T>(obj);
+            shared_ptr<thread_pool_implementation::function_object_copy> function_copy(ptr);
+
+            bfp_type temp;
+            temp.set(ptr->item, funct, arg1.get(), arg2.get());
+            uint64 id = impl->add_task_internal(temp, function_copy);
 
             // tie the futures to this task
             arg1.task_id = id;
@@ -736,6 +981,32 @@ namespace dlib
             return id;
         }
         
+        template <typename F, typename A1, typename A2, typename A3>
+        uint64 add_task_by_value (
+            const F& function_object,
+            future<A1>& arg1,
+            future<A2>& arg2,
+            future<A3>& arg3
+        ) 
+        { 
+            thread_pool_implementation::function_object_copy_instance<F>* ptr = 0;
+            ptr = new thread_pool_implementation::function_object_copy_instance<F>(function_object);
+            shared_ptr<thread_pool_implementation::function_object_copy> function_copy(ptr);
+
+            bfp_type temp;
+            temp.set(ptr->item, arg1.get(), arg2.get(), arg3.get());
+            uint64 id = impl->add_task_internal(temp, function_copy);
+
+            // tie the future to this task
+            arg1.task_id = id;
+            arg1.tp = impl;
+            arg2.task_id = id;
+            arg2.tp = impl;
+            arg3.task_id = id;
+            arg3.tp = impl;
+            return id;
+        }
+        
         template <typename T, typename T1, typename A1,
                               typename T2, typename A2,
                               typename T3, typename A3>
@@ -764,6 +1035,35 @@ namespace dlib
         template <typename T, typename T1, typename A1,
                               typename T2, typename A2,
                               typename T3, typename A3>
+        uint64 add_task_by_value (
+            const T& obj,
+            void (T::*funct)(T1,T2,T3),
+            future<A1>& arg1,
+            future<A2>& arg2,
+            future<A3>& arg3
+        ) 
+        { 
+            thread_pool_implementation::function_object_copy_instance<T>* ptr = 0;
+            ptr = new thread_pool_implementation::function_object_copy_instance<T>(obj);
+            shared_ptr<thread_pool_implementation::function_object_copy> function_copy(ptr);
+
+            bfp_type temp;
+            temp.set(ptr->item, funct, arg1.get(), arg2.get(), arg3.get());
+            uint64 id = impl->add_task_internal(temp, function_copy);
+
+            // tie the futures to this task
+            arg1.task_id = id;
+            arg1.tp = impl;
+            arg2.task_id = id;
+            arg2.tp = impl;
+            arg3.task_id = id;
+            arg3.tp = impl;
+            return id;
+        }
+        
+        template <typename T, typename T1, typename A1,
+                              typename T2, typename A2,
+                              typename T3, typename A3>
         uint64 add_task (
             const T& obj,
             void (T::*funct)(T1,T2,T3) const,
@@ -775,6 +1075,35 @@ namespace dlib
             bfp_type temp;
             temp.set(obj, funct, arg1.get(), arg2.get(), arg3.get());
             uint64 id = impl->add_task_internal(temp);
+
+            // tie the futures to this task
+            arg1.task_id = id;
+            arg1.tp = impl;
+            arg2.task_id = id;
+            arg2.tp = impl;
+            arg3.task_id = id;
+            arg3.tp = impl;
+            return id;
+        }
+        
+        template <typename T, typename T1, typename A1,
+                              typename T2, typename A2,
+                              typename T3, typename A3>
+        uint64 add_task_by_value (
+            const T& obj,
+            void (T::*funct)(T1,T2,T3) const,
+            future<A1>& arg1,
+            future<A2>& arg2,
+            future<A3>& arg3
+        ) 
+        { 
+            thread_pool_implementation::function_object_copy_instance<const T>* ptr = 0;
+            ptr = new thread_pool_implementation::function_object_copy_instance<const T>(obj);
+            shared_ptr<thread_pool_implementation::function_object_copy> function_copy(ptr);
+
+            bfp_type temp;
+            temp.set(ptr->item, funct, arg1.get(), arg2.get(), arg3.get());
+            uint64 id = impl->add_task_internal(temp, function_copy);
 
             // tie the futures to this task
             arg1.task_id = id;
@@ -840,6 +1169,35 @@ namespace dlib
             return id;
         }
         
+        template <typename F, typename A1, typename A2, typename A3, typename A4>
+        uint64 add_task_by_value (
+            const F& function_object,
+            future<A1>& arg1,
+            future<A2>& arg2,
+            future<A3>& arg3,
+            future<A4>& arg4
+        ) 
+        { 
+            thread_pool_implementation::function_object_copy_instance<F>* ptr = 0;
+            ptr = new thread_pool_implementation::function_object_copy_instance<F>(function_object);
+            shared_ptr<thread_pool_implementation::function_object_copy> function_copy(ptr);
+
+            bfp_type temp;
+            temp.set(ptr->item, arg1.get(), arg2.get(), arg3.get(), arg4.get());
+            uint64 id = impl->add_task_internal(temp, function_copy);
+
+            // tie the future to this task
+            arg1.task_id = id;
+            arg1.tp = impl;
+            arg2.task_id = id;
+            arg2.tp = impl;
+            arg3.task_id = id;
+            arg3.tp = impl;
+            arg4.task_id = id;
+            arg4.tp = impl;
+            return id;
+        }
+        
         template <typename T, typename T1, typename A1,
                               typename T2, typename A2,
                               typename T3, typename A3,
@@ -873,6 +1231,39 @@ namespace dlib
                               typename T2, typename A2,
                               typename T3, typename A3,
                               typename T4, typename A4>
+        uint64 add_task_by_value (
+            const T& obj,
+            void (T::*funct)(T1,T2,T3,T4),
+            future<A1>& arg1,
+            future<A2>& arg2,
+            future<A3>& arg3,
+            future<A4>& arg4
+        ) 
+        { 
+            thread_pool_implementation::function_object_copy_instance<T>* ptr = 0;
+            ptr = new thread_pool_implementation::function_object_copy_instance<T>(obj);
+            shared_ptr<thread_pool_implementation::function_object_copy> function_copy(ptr);
+
+            bfp_type temp;
+            temp.set(ptr->item, funct, arg1.get(), arg2.get(), arg3.get(), arg4.get());
+            uint64 id = impl->add_task_internal(temp, function_copy);
+
+            // tie the futures to this task
+            arg1.task_id = id;
+            arg1.tp = impl;
+            arg2.task_id = id;
+            arg2.tp = impl;
+            arg3.task_id = id;
+            arg3.tp = impl;
+            arg4.task_id = id;
+            arg4.tp = impl;
+            return id;
+        }
+        
+        template <typename T, typename T1, typename A1,
+                              typename T2, typename A2,
+                              typename T3, typename A3,
+                              typename T4, typename A4>
         uint64 add_task (
             const T& obj,
             void (T::*funct)(T1,T2,T3,T4) const,
@@ -885,6 +1276,39 @@ namespace dlib
             bfp_type temp;
             temp.set(obj, funct, arg1.get(), arg2.get(), arg3.get(), arg4.get());
             uint64 id = impl->add_task_internal(temp);
+
+            // tie the futures to this task
+            arg1.task_id = id;
+            arg1.tp = impl;
+            arg2.task_id = id;
+            arg2.tp = impl;
+            arg3.task_id = id;
+            arg3.tp = impl;
+            arg4.task_id = id;
+            arg4.tp = impl;
+            return id;
+        }
+        
+        template <typename T, typename T1, typename A1,
+                              typename T2, typename A2,
+                              typename T3, typename A3,
+                              typename T4, typename A4>
+        uint64 add_task_by_value (
+            const T& obj,
+            void (T::*funct)(T1,T2,T3,T4) const,
+            future<A1>& arg1,
+            future<A2>& arg2,
+            future<A3>& arg3,
+            future<A4>& arg4
+        ) 
+        { 
+            thread_pool_implementation::function_object_copy_instance<const T>* ptr = 0;
+            ptr = new thread_pool_implementation::function_object_copy_instance<const T>(obj);
+            shared_ptr<thread_pool_implementation::function_object_copy> function_copy(ptr);
+
+            bfp_type temp;
+            temp.set(ptr->item, funct, arg1.get(), arg2.get(), arg3.get(), arg4.get());
+            uint64 id = impl->add_task_internal(temp, function_copy);
 
             // tie the futures to this task
             arg1.task_id = id;
@@ -960,6 +1384,6 @@ namespace dlib
 #include "thread_pool_extension.cpp"
 #endif
 
-#endif // DLIB_THREAD_POOl_H__
+#endif // DLIB_THREAD_POOl_Hh_
 
 

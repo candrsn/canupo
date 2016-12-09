@@ -4,7 +4,10 @@
 #define DLIB_GEOMETRy_HEADER
 
 #include "geometry/rectangle.h"
+#include "geometry/drectangle.h"
 #include "geometry/vector.h"
+#include "geometry/border_enumerator.h"
+#include "geometry/point_transforms.h"
 
 #endif // DLIB_GEOMETRy_HEADER
 

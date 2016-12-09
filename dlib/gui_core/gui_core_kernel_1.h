@@ -96,18 +96,18 @@ namespace dlib
         friend LRESULT CALLBACK gui_core_kernel_1_globals::WndProc (HWND, UINT, WPARAM, LPARAM);
 
         canvas (
-            unsigned char* bits__,
-            unsigned long padding__,
-            unsigned long left__,
-            unsigned long top__,            
-            unsigned long right__,            
-            unsigned long bottom__           
+            unsigned char* bits_,
+            unsigned long padding_,
+            unsigned long left_,
+            unsigned long top_,            
+            unsigned long right_,            
+            unsigned long bottom_
         ) : 
-            rectangle(left__,top__,right__,bottom__),
-            bits(bits__),
+            rectangle(left_,top_,right_,bottom_),
+            bits(bits_),
             width_(width()),
             height_(height()),
-            row_width(width_*3+padding__)
+            row_width(width_*3+padding_)
         {}
 
         // restricted functions
@@ -129,7 +129,10 @@ namespace dlib
         const static bool grayscale = false;
         const static bool hsi = false;
         const static long num = 3;
-        static unsigned long max() { return 255;}
+        typedef unsigned char basic_pixel_type;
+        static basic_pixel_type min() { return 0;}
+        static basic_pixel_type max() { return 255;}
+        const static bool is_unsigned = true;
         const static bool has_alpha = false;
     };
 

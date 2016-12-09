@@ -5,8 +5,20 @@
 
 #include "threads_kernel_shared.h"
 #include "../assert.h"
+#include "../platform.h"
 #include <iostream>
 
+// The point of this block of code is to cause a link time error that will prevent a user
+// from compiling part of their application with DLIB_ASSERT enabled and part with them
+// disabled since doing that would be a violation of C++'s one definition rule. 
+extern "C"
+{
+#ifdef ENABLE_ASSERTS
+    int USER_ERROR__missing_dlib_all_source_cpp_file__OR__inconsistent_use_of_DEBUG_or_ENABLE_ASSERTS_preprocessor_directives;
+#else
+    int USER_ERROR__missing_dlib_all_source_cpp_file__OR__inconsistent_use_of_DEBUG_or_ENABLE_ASSERTS_preprocessor_directives_;
+#endif
+}
 
 #ifndef DLIB_THREAD_POOL_TIMEOUT
 // default to 30000 milliseconds
@@ -71,8 +83,27 @@ namespace dlib
             data_ready(data_mutex),
             data_empty(data_mutex),
             destruct(false),
-            destructed(data_mutex)
-        {}
+            destructed(data_mutex),
+            do_not_ever_destruct(false)
+        {
+#ifdef WIN32
+            // Trying to destroy the global thread pool when we are part of a DLL and the
+            // DLL is being unloaded can sometimes lead to weird behavior.  For example, in
+            // the python interpreter you will get the interpreter to hang.  Or if we are
+            // part of a MATLAB mex file and the file is being unloaded there can also be
+            // similar weird issues.  So when we are using dlib on windows we just disable
+            // the destruction of the global thread pool since it doesn't matter anyway.
+            // It's resources will just get freed by the OS.  This is even the recommended
+            // thing to do by Microsoft (http://blogs.msdn.com/b/oldnewthing/archive/2012/01/05/10253268.aspx).
+            // 
+            // As an aside, it's worth pointing out that the reason we try and free
+            // resources on program shutdown on other operating systems is so we can have
+            // clean reports from tools like valgrind which check for memory leaks.  But
+            // trying to do this on windows is a lost cause so we give up in this case and
+            // follow the Microsoft recommendation.
+            do_not_ever_destruct = true;
+#endif // WIN32
+        }
 
 // ----------------------------------------------------------------------------------------
 
@@ -98,6 +129,9 @@ namespace dlib
         destruct_if_ready (
         )
         {
+            if (do_not_ever_destruct)
+                return;
+
             data_mutex.lock();
 
             // if there aren't any active threads, just maybe some sitting around
@@ -127,7 +161,7 @@ namespace dlib
             reg.m.lock();
             const thread_id_type id = get_thread_id();
             thread_id_type id_copy;
-            member_function_pointer<>::kernel_1a mfp;
+            member_function_pointer<> mfp;
 
             // Remove all the member function pointers for this thread from the tree 
             // and call them.
@@ -153,7 +187,7 @@ namespace dlib
             // get a lock on the data mutex
             auto_mutex M(data_mutex);
 
-            // loop to ensure that the new function poitner is in the data
+            // loop to ensure that the new function pointer is in the data
             while (true)
             {
                 // if the data is empty then add new data and quit loop
@@ -172,7 +206,7 @@ namespace dlib
 
 
             // get a thread for this new data
-            // if a new thread must be crated
+            // if a new thread must be created
             if (pool_count == 0)
             {
                 // make thread and add it to the pool
@@ -201,7 +235,7 @@ namespace dlib
         )
         {
             // get a reference to the calling threader object
-            threader& self = *reinterpret_cast<threader*>(object);
+            threader& self = *static_cast<threader*>(object);
 
 
             {

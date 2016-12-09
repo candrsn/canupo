@@ -56,10 +56,6 @@ namespace dlib
                 object is constructed.  Thus if a file changes sizes after its
                 file object has been created its file object's size() method
                 will not reflect the new file size.    
-
-            THREAD SAFETY
-                This object is reference counted so use with caution in a threaded
-                environment.
         !*/
 
     public:
@@ -101,7 +97,7 @@ namespace dlib
         );
         /*!
             ensures
-                - this function is idential to file(const std::string& name)
+                - this function is identical to file(const std::string& name)
         !*/
 
         file (
@@ -143,6 +139,14 @@ namespace dlib
                 - returns the size of this file in bytes.
         !*/
 
+        operator std::string (
+        ) const; 
+        /*!
+            ensures
+                - returns full_name()
+                  (i.e. provides an implicit conversion to string from dlib::file)
+        !*/
+
         file& operator= (
             const file& rhs
         );
@@ -160,6 +164,17 @@ namespace dlib
                     - returns true
                 - else
                     - returns false
+        !*/
+
+        bool operator != (
+            const file& rhs
+        ) const;
+        /*!
+            ensures
+                - if (*this and rhs represent the same file) then
+                    - returns false 
+                - else
+                    - returns true 
         !*/
 
         bool operator < (
@@ -197,10 +212,6 @@ namespace dlib
                 the ability to traverse a directory tree.  
 
                 Note that the directories . and .. are not returned by get_dirs() 
-
-            THREAD SAFETY
-                This object is reference counted so use with caution in a threaded
-                environment.
         !*/
 
     public:
@@ -243,7 +254,7 @@ namespace dlib
         );
         /*!
             ensures
-                - this function is idential to directory(const std::string& name)
+                - this function is identical to directory(const std::string& name)
         !*/
 
         directory (
@@ -299,6 +310,13 @@ namespace dlib
                     no effect on *this and #files.size()==0.         
         !*/
 
+        std::vector<file> get_files (
+        ) const;
+        /*!
+            ensures
+                - This function simply calls get_files(temp_vector) and then returns temp_vector.
+        !*/
+
         template <
             typename queue_of_dirs
             >
@@ -325,6 +343,13 @@ namespace dlib
                     getting the contents of this directory.
                     If this exception is thrown then the call to get_dirs() has
                     no effect on *this and #dirs.size()==0.
+        !*/
+
+        std::vector<directory> get_dirs (
+        ) const;
+        /*!
+            ensures
+                - This function simply calls get_dirs(temp_vector) and then returns temp_vector.
         !*/
 
         bool is_root (
@@ -373,6 +398,14 @@ namespace dlib
                     - the last character of #full_name() is NOT get_separator()
         !*/
 
+        operator std::string (
+        ) const; 
+        /*!
+            ensures
+                - returns full_name()
+                  (i.e. provides an implicit conversion to string from dlib::directory)
+        !*/
+
         directory& operator= (
             const directory& rhs
         );
@@ -390,6 +423,17 @@ namespace dlib
                     - returns true
                 - else
                     - returns false
+        !*/
+
+        bool operator != (
+            const directory& rhs
+        ) const;
+        /*!
+            ensures
+                - if (*this and rhs represent the same directory) then
+                    - returns false 
+                - else
+                    - returns true 
         !*/
 
         bool operator < (
@@ -412,6 +456,28 @@ namespace dlib
         !*/ 
 
     };
+
+// ----------------------------------------------------------------------------------------
+
+    inline std::ostream& operator<< (
+        std::ostream& out,
+        const directory& item
+    );
+    /*!
+        ensures
+            - performs: out << item.full_name()
+            - returns out
+    !*/
+
+    inline std::ostream& operator<< (
+        std::ostream& out,
+        const file& item
+    );
+    /*!
+        ensures
+            - performs: out << item.full_name()
+            - returns out
+    !*/
 
 // ----------------------------------------------------------------------------------------
 

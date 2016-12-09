@@ -140,7 +140,7 @@ void read_msc_data(ifstream& mscfile, int nscales, int npts, sample_type* data, 
     }
 }
 
-void GramSchmidt(dlib::matrix<dlib::matrix<FloatType,0,1>,0,1>& basis, dlib::matrix<FloatType,0,1>& newX) {
+void GramSchmidt(dlib::matrix<dlib::matrix<double,0,1>,0,1>& basis, dlib::matrix<double,0,1>& newX) {
     using namespace dlib;
     // goal: find a basis so that the given vector is the new X
     // principle: at least one basis vector is not orthogonal with newX (except if newX is null but we suppose this is not the case)
@@ -267,7 +267,7 @@ int main(int argc, char** argv) {
     undefsample.set_size(fdim,1);
     int nsamples = ndata_class1+ndata_class2;
     vector<sample_type> samples(nsamples, undefsample);
-    vector<FloatType> labels(nsamples, 0);
+    vector<double> labels(nsamples, 0);
     for (int i=0; i<ndata_class1; ++i) labels[i] = -1;
     for (int i=ndata_class1; i<nsamples; ++i) labels[i] = 1;
     
@@ -307,14 +307,14 @@ int main(int argc, char** argv) {
     // separability instead of maximal variance
     
     // perform a real projection with reduced dimension to help the SVM a bit
-    dlib::matrix<dlib::matrix<FloatType,0,1>,0,1> basis;
+    dlib::matrix<dlib::matrix<double,0,1>,0,1> basis;
     basis.set_size(fdim);
     for (int i=0; i<fdim; ++i) {
         basis(i).set_size(fdim);
         for (int j=0; j<fdim; ++j) basis(i)(j) = 0;
         basis(i)(i) = 1;
     }
-    dlib::matrix<FloatType,0,1> w_vect;
+    dlib::matrix<double,0,1> w_vect;
     w_vect.set_size(fdim);
     for (int i=0; i<fdim; ++i) w_vect(i) = classifier.weights[i];
     GramSchmidt(basis,w_vect);
@@ -389,25 +389,25 @@ int main(int argc, char** argv) {
         m22 /= ndata_class2;
         v22 = (v22 - m22*m22*ndata_class2) / (ndata_class2-1);
 
-        FloatType d1 = sqrt(v11/v12);
-        FloatType d2 = sqrt(v21/v22);
+        double d1 = sqrt(v11/v12);
+        double d2 = sqrt(v21/v22);
         axis_scale_ratio = sqrt(d1*d2);
 
         using namespace dlib;
-        matrix<FloatType,2,2> bd;
+        matrix<double,2,2> bd;
         bd = e1.x, e1.y, e2.x/axis_scale_ratio, e2.y/axis_scale_ratio;
-        matrix<FloatType,2,2> bi;
+        matrix<double,2,2> bi;
         bi = e1.x, e2.x, e1.y, e2.y;
-        //matrix<FloatType,2,2> c = bi * bd;
-        matrix<FloatType,2,2> c = inv(trans(bd));
+        //matrix<double,2,2> c = bi * bd;
+        matrix<double,2,2> c = inv(trans(bd));
         
-        std::vector<FloatType>& w1 = classifier.weights;
-        std::vector<FloatType>& w2 = ortho_classifier.weights;
+        std::vector<double>& w1 = classifier.weights;
+        std::vector<double>& w2 = ortho_classifier.weights;
         // first shift so the center of the figure is at the midpoint
         w1[fdim] -= ori.x;
         w2[fdim] -= ori.y;
         // now transform / scale along e2
-        std::vector<FloatType> wn1(fdim+1), wn2(fdim+1);
+        std::vector<double> wn1(fdim+1), wn2(fdim+1);
         for (int i=0; i<=fdim; ++i) {
             wn1[i] = c(0,0) * w1[i] + c(0,1) * w2[i];
             wn2[i] = c(1,0) * w1[i] + c(1,1) * w2[i];

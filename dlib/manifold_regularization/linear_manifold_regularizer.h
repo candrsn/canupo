@@ -1,7 +1,7 @@
 // Copyright (C) 2010  Davis E. King (davis@dlib.net)
 // License: Boost Software License   See LICENSE.txt for the full license.
-#ifndef DLIB_LINEAR_MANIFOLD_ReGULARIZER_H__
-#define DLIB_LINEAR_MANIFOLD_ReGULARIZER_H__
+#ifndef DLIB_LINEAR_MANIFOLD_ReGULARIZER_Hh_
+#define DLIB_LINEAR_MANIFOLD_ReGULARIZER_Hh_
 
 #include "linear_manifold_regularizer_abstract.h"
 #include <limits>
@@ -31,11 +31,11 @@ namespace dlib
 
             struct neighbor 
             {
-                neighbor(unsigned long idx, float w):index(idx), weight(w) {}
+                neighbor(unsigned long idx, double w):index(idx), weight(w) {}
                 neighbor():index(0), weight(0) {}
 
                 unsigned long index;
-                float weight;
+                double weight;
             };
 
             typedef std::vector<neighbor>::const_iterator const_iterator;
@@ -137,7 +137,7 @@ namespace dlib
                 // finally, put the edges into data
                 for (unsigned long i = 0; i < edges.size(); ++i)
                 {
-                    const float weight = weight_funct(edges[i]);
+                    const double weight = weight_funct(edges[i]);
                     sum_edge_weights += weight;
 
                     // make sure requires clause is not broken
@@ -216,13 +216,13 @@ namespace dlib
             // make sure requires clause is not broken
             DLIB_ASSERT(edges.size() > 0 &&
                         contains_duplicate_pairs(edges) == false &&
-                        max_index_value_plus_one(edges) <= samples.size(),
+                        max_index_plus_one(edges) <= samples.size(),
                 "\t void linear_manifold_regularizer::build()"
                 << "\n\t Invalid inputs were given to this function."
                 << "\n\t edges.size():                    " << edges.size()
                 << "\n\t samples.size():                  " << samples.size()
                 << "\n\t contains_duplicate_pairs(edges): " << contains_duplicate_pairs(edges) 
-                << "\n\t max_index_value_plus_one(edges): " << max_index_value_plus_one(edges) 
+                << "\n\t max_index_plus_one(edges):       " << max_index_plus_one(edges) 
                 );
 
 
@@ -324,5 +324,5 @@ namespace dlib
 
 // ----------------------------------------------------------------------------------------
 
-#endif // DLIB_LINEAR_MANIFOLD_ReGULARIZER_H__
+#endif // DLIB_LINEAR_MANIFOLD_ReGULARIZER_Hh_
 

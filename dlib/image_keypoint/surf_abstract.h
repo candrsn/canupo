@@ -6,6 +6,7 @@
 #include "hessian_pyramid_abstract.h"
 #include "../geometry/vector_abstract.h"
 #include "../matrix/matrix_abstract.h"
+#include "../image_processing/generic_image.h"
 
 namespace dlib
 {
@@ -76,8 +77,8 @@ namespace dlib
             - integral_image_type == an object such as dlib::integral_image or another
               type that implements the interface defined in image_transforms/integral_image_abstract.h
             - scale > 0
-            - get_rect(img).contains(centered_rect(center, 31*scale, 31*scale)) == true
-              (i.e. center can't be within 31*scale pixels of the edge of the image)
+            - get_rect(img).contains(centered_rect(center, 32*scale, 32*scale)) == true
+              (i.e. center can't be within 32*scale pixels of the edge of the image)
         ensures
             - computes the 64 dimensional SURF descriptor vector of a box centered
               at the given center point, tilted at an angle determined by the given 
@@ -126,13 +127,17 @@ namespace dlib
     template <typename image_type>
     const std::vector<surf_point> get_surf_points (
         const image_type& img,
-        long max_points
+        long max_points = 10000,
+        double detection_threshold = 30.0
     );
     /*!
         requires
             - max_points > 0
-            - image_type == a type that implements the array2d/array2d_kernel_abstract.h interface
-            - pixel_traits<image_type::type> must be defined
+            - detection_threshold >= 0
+            - image_type == an image object that implements the interface defined in
+              dlib/image_processing/generic_image.h 
+            - Let P denote the type of pixel in img, then we require:
+                - pixel_traits<P>::has_alpha == false 
         ensures
             - This function runs the complete SURF algorithm on the given input image and 
               returns the points it found. 
@@ -146,6 +151,7 @@ namespace dlib
                       compute_surf_descriptor())
                     - V[i].angle == the angle of the SURF box at this point (calculated using 
                       compute_dominant_angle())
+                    - V[i].p.score >= detection_threshold
     !*/
 
 // ----------------------------------------------------------------------------------------

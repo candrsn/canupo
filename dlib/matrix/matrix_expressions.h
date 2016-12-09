@@ -33,7 +33,7 @@ namespace dlib
     {
         typedef T type;
         typedef const T const_ret_type;
-        typedef memory_manager<char>::kernel_1a mem_manager_type;
+        typedef default_memory_manager mem_manager_type;
         typedef row_major_layout layout_type;
         const static long NR = 1;
         const static long NC = 0;
@@ -140,7 +140,7 @@ namespace dlib
     {
         typedef T type;
         typedef const T const_ret_type;
-        typedef memory_manager<char>::kernel_1a mem_manager_type;
+        typedef default_memory_manager mem_manager_type;
         typedef row_major_layout layout_type;
         const static long NR = 1;
         const static long NC = 0;
@@ -220,15 +220,15 @@ namespace dlib
     {
         typedef long type;
         typedef const long const_ret_type;
-        typedef memory_manager<char>::kernel_1a mem_manager_type;
+        typedef default_memory_manager mem_manager_type;
         const static long NR = 1;
         const static long NC = tabs<(end - start)>::value/inc_ + 1;
         const static long cost = 1;
         typedef row_major_layout layout_type;
     };
 
-    template <long start, long inc_, long end>
-    class matrix_range_static_exp : public matrix_exp<matrix_range_static_exp<start,inc_,end> > 
+    template <long start, long inc_, long end_>
+    class matrix_range_static_exp : public matrix_exp<matrix_range_static_exp<start,inc_,end_> > 
     {
     public:
         typedef typename matrix_traits<matrix_range_static_exp>::type type;
@@ -239,7 +239,7 @@ namespace dlib
         const static long cost = matrix_traits<matrix_range_static_exp>::cost;
         typedef typename matrix_traits<matrix_range_static_exp>::layout_type layout_type;
 
-        const static long inc = (start <= end)?inc_:-inc_;
+        const static long inc = (start <= end_)?inc_:-inc_;
 
 
         matrix_range_static_exp (
@@ -256,12 +256,12 @@ namespace dlib
 
         template <typename U>
         bool aliases (
-            const matrix_exp<U>& item
+            const matrix_exp<U>& 
         ) const { return false; }
 
         template <typename U>
         bool destructively_aliases (
-            const matrix_exp<U>& item
+            const matrix_exp<U>& 
         ) const { return false; }
 
         long nr (

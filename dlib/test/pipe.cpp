@@ -22,7 +22,7 @@ namespace
     namespace pipe_kernel_test_helpers
     {
         const unsigned long proc1_count = 10000;
-        mutex m;
+        dlib::mutex m;
         signaler s(m);
         unsigned long threads_running = 0;
         bool found_error;
@@ -58,14 +58,14 @@ namespace
         )
         {
             add_running_thread();
-            pipe& p = *reinterpret_cast<pipe*>(param);
+            pipe& p = *static_cast<pipe*>(param);
             try
             {
 
                 int last = -1;
                 for (unsigned long i = 0; i < proc1_count; ++i)
                 {
-                    int cur;
+                    int cur=0;
                     DLIB_TEST(p.dequeue(cur) == true);
                     DLIB_TEST(last + 1 == cur);
                     last = cur;
@@ -95,7 +95,7 @@ namespace
         )
         {
             add_running_thread();
-            pipe& p = *reinterpret_cast<pipe*>(param);
+            pipe& p = *static_cast<pipe*>(param);
             try
             {
 
@@ -131,7 +131,7 @@ namespace
         )
         {
             add_running_thread();
-            pipe& p = *reinterpret_cast<pipe*>(param);
+            pipe& p = *static_cast<pipe*>(param);
             try
             {
 
@@ -160,7 +160,87 @@ namespace
 
     }
 
+// ----------------------------------------------------------------------------------------
+// ----------------------------------------------------------------------------------------
 
+    template<typename in_type, typename out_type>
+    class PipelineProcessor : private dlib::threaded_object
+    {
+    public:
+        PipelineProcessor(
+            dlib::pipe<in_type> & in,
+            dlib::pipe<out_type> & out) :
+            InPipe(in),
+            OutPipe(out),
+            InMsg(),
+            OutMsg() {
+                start();
+            }
+
+        ~PipelineProcessor() {
+            // signal the thread to stop
+            stop();
+            wait();
+        }
+
+    private:
+        dlib::pipe<in_type> & InPipe;
+        dlib::pipe<out_type> & OutPipe;
+
+        in_type InMsg;
+        out_type OutMsg;
+
+        void thread() 
+        {
+            while (!should_stop()) {
+                if(InPipe.dequeue_or_timeout(InMsg, 100)) 
+                {
+                    // if function signals ready to send OutMsg
+                    while (!OutPipe.enqueue_or_timeout(OutMsg, 100)) 
+                    {
+                        // try to send until should stop
+                        if (should_stop()) 
+                        {
+                            return;
+                        }
+                    }
+                }
+            }
+        };
+    };
+
+
+    void do_zero_size_test_with_timeouts()
+    {
+        dlog << LINFO << "in do_zero_size_test_with_timeouts()";
+        // make sure we can get though this without deadlocking
+        for (int k = 0; k < 10; ++k)
+        {
+            dlib::pipe<int> in_pipe(10);
+            dlib::pipe<float> out_pipe(0);
+            {
+                PipelineProcessor<int, float> pp(in_pipe, out_pipe);
+
+                int in = 1;
+                in_pipe.enqueue(in);
+                in = 2;
+                in_pipe.enqueue(in);
+                in = 3;
+                in_pipe.enqueue(in);
+                // sleep to make sure thread enqueued
+                dlib::sleep(100);
+
+                float out = 1.0f;
+                out_pipe.dequeue(out);
+                dlib::sleep(100);
+            }
+            print_spinner();
+        }
+
+    }
+
+// ----------------------------------------------------------------------------------------
+// ----------------------------------------------------------------------------------------
 
     template <
         typename pipe
@@ -190,6 +270,10 @@ namespace
         DLIB_TEST(test2_0.size() == 0);
         DLIB_TEST(test_1.size() == 0);
         DLIB_TEST(test2_1.size() == 0);
+
+        DLIB_TEST(test.is_enqueue_enabled() == true);
+        DLIB_TEST(test.is_dequeue_enabled() == true);
+        DLIB_TEST(test.is_enabled() == true);
 
         test.empty();
         test2.empty();
@@ -515,6 +599,67 @@ namespace
         DLIB_TEST(test_1.size() == 0);
 
         DLIB_TEST(found_error == false);
+
+
+
+
+        {
+            test.enable();
+            test.enable_enqueue();
+            test.empty();
+            DLIB_TEST(test.size() == 0);
+            DLIB_TEST(test.is_enabled() == true);
+            DLIB_TEST(test.is_enqueue_enabled() == true);
+            DLIB_TEST(test.is_dequeue_enabled() == true);
+            test.disable_dequeue();
+            dlog << LINFO << "Make sure disable_dequeue() works right...";
+            DLIB_TEST(test.is_dequeue_enabled() == false);
+            DLIB_TEST(test.dequeue(a) == false);
+            test.wait_until_empty();
+            a = 4;
+            test.enqueue(a);
+            test.wait_until_empty();
+            test.wait_for_num_blocked_dequeues(4);
+            DLIB_TEST(test.size() == 1);
+            DLIB_TEST(test.dequeue(a) == false);
+            DLIB_TEST(test.dequeue_or_timeout(a,10000) == false);
+            DLIB_TEST(test.size() == 1);
+            a = 0;
+            test.enable_dequeue();
+            DLIB_TEST(test.is_dequeue_enabled() == true);
+            DLIB_TEST(test.dequeue(a) == true);
+            DLIB_TEST(a == 4);
+            test_1.wait_until_empty();
+        }
+        {
+            test_1.enable();
+            test_1.enable_enqueue();
+            test_1.empty();
+            DLIB_TEST(test_1.size() == 0);
+            DLIB_TEST(test_1.is_enabled() == true);
+            DLIB_TEST(test_1.is_enqueue_enabled() == true);
+            DLIB_TEST(test_1.is_dequeue_enabled() == true);
+            test_1.disable_dequeue();
+            dlog << LINFO << "Make sure disable_dequeue() works right...";
+            DLIB_TEST(test_1.is_dequeue_enabled() == false);
+            DLIB_TEST(test_1.dequeue(a) == false);
+            a = 4;
+            test_1.wait_for_num_blocked_dequeues(4);
+            test_1.wait_for_num_blocked_dequeues(0);
+            test_1.enqueue(a);
+            test_1.wait_until_empty();
+            DLIB_TEST(test_1.size() == 1);
+            DLIB_TEST(test_1.dequeue(a) == false);
+            DLIB_TEST(test_1.dequeue_or_timeout(a,10000) == false);
+            DLIB_TEST(test_1.size() == 1);
+            a = 0;
+            test_1.enable_dequeue();
+            DLIB_TEST(test_1.is_dequeue_enabled() == true);
+            DLIB_TEST(test_1.dequeue(a) == true);
+            DLIB_TEST(a == 4);
+            test_1.wait_until_empty();
+        }
+
     }
 
 
@@ -532,7 +677,9 @@ namespace
         void perform_test (
         )
         {
-            pipe_kernel_test<dlib::pipe<int>::kernel_1a>();
+            pipe_kernel_test<dlib::pipe<int> >();
+
+            do_zero_size_test_with_timeouts();
         }
     } a;
 

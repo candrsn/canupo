@@ -3,6 +3,7 @@
 #ifndef DLIB_CMD_LINE_PARSER_KERNEl_1_
 #define DLIB_CMD_LINE_PARSER_KERNEl_1_
 
+#include "cmd_line_parser_kernel_abstract.h"
 #include "../algs.h"
 #include <string>
 #include <sstream>
@@ -137,7 +138,7 @@ namespace dlib
                     name_                == name()
                     description_         == description()
                     number_of_arguments_ == number_of_arguments()
-                    options[index]       == operator[](index)
+                    options[N][arg]      == argument(arg,N)
                     num_present          == count()                    
             !*/
 
@@ -147,6 +148,9 @@ namespace dlib
 
             const std::basic_string<charT>& name (
             ) const { return name_; }
+
+            const std::basic_string<charT>& group_name (
+            ) const { return group_name_; }
 
             const std::basic_string<charT>& description (
             ) const { return description_; }
@@ -165,12 +169,13 @@ namespace dlib
                 // make sure requires clause is not broken
                 DLIB_CASSERT( N < count() && arg < number_of_arguments(),
                     "\tconst string_type& cmd_line_parser_option::argument(unsigned long,unsigned long)"
-                    << "\n\tsee the requires clause of argument()"
-                    << "\n\tthis:                      " << this
-                    << "\n\tN:                         " << N
-                    << "\n\targ:                       " << arg 
-                    << "\n\tcount():                   " << count()
-                    << "\n\tnumber_of_arguments():     " << number_of_arguments()
+                    << "\n\tInvalid arguments were given to this function."
+                    << "\n\tthis:                  " << this
+                    << "\n\tN:                     " << N
+                    << "\n\targ:                   " << arg 
+                    << "\n\tname():                " << narrow(name())
+                    << "\n\tcount():               " << count()
+                    << "\n\tnumber_of_arguments(): " << number_of_arguments()
                     );
 
                 return options[N][arg]; 
@@ -207,6 +212,7 @@ namespace dlib
 
             // data members
             std::basic_string<charT> name_;
+            std::basic_string<charT> group_name_;
             std::basic_string<charT> description_;
             sequence2 options;
             unsigned long number_of_arguments_;
@@ -258,6 +264,13 @@ namespace dlib
             unsigned long number_of_arguments = 0
         );
 
+        void set_group_name (
+            const string_type& group_name
+        );
+
+        string_type get_group_name (
+        ) const { return group_name; }
+
         const cmd_line_parser_option<charT>& option (
             const string_type& name
         ) const;
@@ -284,10 +297,10 @@ namespace dlib
         ) const { return options.current_element_valid(); }
 
         const cmd_line_parser_option<charT>& element (
-        ) const { return *reinterpret_cast<cmd_line_parser_option<charT>*>(options.element().value()); }
+        ) const { return *static_cast<cmd_line_parser_option<charT>*>(options.element().value()); }
 
         cmd_line_parser_option<charT>& element (
-        ) { return *reinterpret_cast<cmd_line_parser_option<charT>*>(options.element().value()); }
+        ) { return *static_cast<cmd_line_parser_option<charT>*>(options.element().value()); }
 
         bool move_next (
         ) const { return options.move_next(); }
@@ -301,6 +314,7 @@ namespace dlib
         map options;
         sequence argv;
         bool have_parsed_line;
+        string_type group_name;
 
         // restricted functions
         cmd_line_parser_kernel_1(cmd_line_parser_kernel_1&);        // copy constructor
@@ -356,7 +370,7 @@ namespace dlib
         options.reset();
         while (options.move_next())
         {
-            delete reinterpret_cast<option_t*>(options.element().value());
+            delete static_cast<option_t*>(options.element().value());
         }
     }
 
@@ -380,7 +394,7 @@ namespace dlib
         options.reset();
         while (options.move_next())
         {
-            delete reinterpret_cast<option_t*>(options.element().value());
+            delete static_cast<option_t*>(options.element().value());
         }
         options.clear();
         reset();
@@ -413,7 +427,7 @@ namespace dlib
             options.reset();
             while (options.move_next())
             {
-                reinterpret_cast<option_t*>(options.element().value())->clear();                
+                static_cast<option_t*>(options.element().value())->clear();                
             }
             options.reset();
         }
@@ -469,7 +483,7 @@ namespace dlib
                         }
                         
 
-                        option_t* o = reinterpret_cast<option_t*>(options[temp]);
+                        option_t* o = static_cast<option_t*>(options[temp]);
 
                         // check the number of arguments after this option and make sure
                         // it is correct
@@ -547,7 +561,10 @@ namespace dlib
                         for (unsigned long k = 0; k < num; ++k)
                         {
                             string_type name;
-                            name = temp[k];
+                            // Doing this instead of name = temp[k] seems to avoid a bug in g++ (Ubuntu/Linaro 4.5.2-8ubuntu4) 4.5.2
+                            // which results in name[0] having the wrong value.
+                            name.resize(1);
+                            name[0] = temp[k];
 
 
                             // make sure this name is defined
@@ -557,7 +574,7 @@ namespace dlib
                                 throw cmd_line_parse_error(EINVALID_OPTION,name);
                             }
 
-                            option_t* o = reinterpret_cast<option_t*>(options[name]);
+                            option_t* o = static_cast<option_t*>(options[name]);
 
                             // if there are chars immediately following this option
                             int delta = 0;
@@ -626,7 +643,7 @@ namespace dlib
             options.reset();
             while (options.move_next())
             {
-                reinterpret_cast<option_t*>(options.element().value())->clear();                
+                static_cast<option_t*>(options.element().value())->clear();                
             }
             options.reset();
 
@@ -674,6 +691,22 @@ namespace dlib
         typename sequence2
         >
     void cmd_line_parser_kernel_1<charT,map,sequence,sequence2>::
+    set_group_name (
+        const string_type& group_name_
+    )
+    {
+        group_name = group_name_;
+    }
+
+// ----------------------------------------------------------------------------------------
+
+    template <
+        typename charT,
+        typename map,
+        typename sequence,
+        typename sequence2
+        >
+    void cmd_line_parser_kernel_1<charT,map,sequence,sequence2>::
     add_option (
         const string_type& name,
         const string_type& description,
@@ -684,6 +717,7 @@ namespace dlib
         try
         { 
             temp->name_ = name;
+            temp->group_name_ = group_name;
             temp->description_ = description;
             temp->number_of_arguments_ = number_of_arguments;
             void* t = temp;
@@ -705,7 +739,7 @@ namespace dlib
         const string_type& name
     ) const
     {
-        return *reinterpret_cast<cmd_line_parser_option<charT>*>(options[name]);
+        return *static_cast<cmd_line_parser_option<charT>*>(options[name]);
     }
 
 // ----------------------------------------------------------------------------------------

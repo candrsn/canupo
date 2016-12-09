@@ -33,7 +33,7 @@ namespace dlib
                 - event_id == 1
 
             CONVENTION
-                - bg_color == backgroud_color()
+                - bg_color == background_color()
 
                 - widgets == this binary search tree contains every drawable that is in
                   this window.  It is a mapping of each drawable's z-order to a pointer
@@ -225,7 +225,7 @@ namespace dlib
 
                 - z_order_value == z_order()
 
-                - if (this drawable has been added to the partent window's sets and
+                - if (this drawable has been added to the parent window's sets and
                   binary search tree) then
                     - enabled_events == true
                 - else

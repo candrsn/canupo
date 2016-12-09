@@ -13,8 +13,55 @@
 #include "../queue.h"
 #include "../set.h"
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+extern "C"
+{
+// =========================>>> WHY YOU ARE GETTING AN ERROR HERE <<<=========================
+// The point of this block of code is to cause a link time error that will prevent a user
+// from compiling part of their application with DLIB_ASSERT enabled and part with it
+// disabled since doing that would be a violation of C++'s one definition rule.  So if you
+// are getting an error here then you are either not enabling DLIB_ASSERT consistently
+// (e.g. by compiling part of your program in a debug mode and part in a release mode) or
+// you have simply forgotten to compile dlib/all/source.cpp into your application.
+// =========================>>> WHY YOU ARE GETTING AN ERROR HERE <<<=========================
+#ifdef ENABLE_ASSERTS
+    extern int USER_ERROR__missing_dlib_all_source_cpp_file__OR__inconsistent_use_of_DEBUG_or_ENABLE_ASSERTS_preprocessor_directives;
+    inline int dlib_check_consistent_assert_usage() { USER_ERROR__missing_dlib_all_source_cpp_file__OR__inconsistent_use_of_DEBUG_or_ENABLE_ASSERTS_preprocessor_directives = 0; return 0; }
+#else
+    extern int USER_ERROR__missing_dlib_all_source_cpp_file__OR__inconsistent_use_of_DEBUG_or_ENABLE_ASSERTS_preprocessor_directives_;
+    inline int dlib_check_consistent_assert_usage() { USER_ERROR__missing_dlib_all_source_cpp_file__OR__inconsistent_use_of_DEBUG_or_ENABLE_ASSERTS_preprocessor_directives_ = 0; return 0; }
+#endif
+    const int DLIB_NO_WARN_UNUSED dlib_check_assert_helper_variable = dlib_check_consistent_assert_usage();
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 namespace dlib
 {
+
 
 // ----------------------------------------------------------------------------------------
 
@@ -35,6 +82,7 @@ namespace dlib
                     - destruct == false
                     - total_count == 0
                     - function_pointer == 0
+                    - do_not_ever_destruct == false
 
                 CONVENTION
                     - data_ready is associated with the mutex data_mutex 
@@ -73,7 +121,7 @@ namespace dlib
             );
             /*!
                 ensures
-                    - if (there are no threads currently running) then
+                    - if (there are no threads currently running and we haven't set do_not_ever_destruct) then
                         - calls delete this
                     - else
                         - does nothing
@@ -92,7 +140,7 @@ namespace dlib
                 void (T::*handler)()
             )
             {
-                member_function_pointer<>::kernel_1a mfp, junk_mfp;
+                member_function_pointer<> mfp, junk_mfp;
                 mfp.set(obj,handler);
 
                 thread_id_type junk_id;
@@ -119,7 +167,7 @@ namespace dlib
             )
             {
                 thread_id_type id = get_thread_id();
-                member_function_pointer<>::kernel_1a mfp;
+                member_function_pointer<> mfp;
                 mfp.set(obj,handler);
 
                 auto_mutex M(reg.m);
@@ -156,13 +204,14 @@ namespace dlib
             signaler data_empty;        // signaler to signal when the data is empty
             bool destruct;
             signaler destructed;        // signaler to signal when a thread has ended 
+            bool do_not_ever_destruct;
 
             struct registry_type
             {
                 mutex m;
                 binary_search_tree<
                     thread_id_type,
-                    member_function_pointer<>::kernel_1a,
+                    member_function_pointer<>,
                     memory_manager<char>::kernel_2a
                     >::kernel_2a_c reg;
             };

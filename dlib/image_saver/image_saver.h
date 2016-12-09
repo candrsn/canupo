@@ -5,6 +5,7 @@
 
 #include "image_saver_abstract.h"
 #include <iostream>
+#include <fstream>
 #include <sstream>
 #include "../algs.h"
 #include "../pixel.h"
@@ -13,6 +14,11 @@
 #include "../entropy_encoder_model.h"
 #include "dng_shared.h"
 #include "../uintn.h"
+#include "../dir_nav.h"
+#include "../float_details.h"
+#include "../vectorstream.h"
+#include "../matrix/matrix_exp.h"
+#include "../image_transforms/assign_image.h"
 
 namespace dlib
 {
@@ -27,7 +33,7 @@ namespace dlib
 
     template <
         typename image_type,
-        bool grayscale = pixel_traits<typename image_type::type>::grayscale
+        bool grayscale = pixel_traits<typename image_traits<image_type>::pixel_type>::grayscale
         >
     struct save_bmp_helper;
 
@@ -36,10 +42,11 @@ namespace dlib
     struct save_bmp_helper<image_type,false>
     {
         static void save_bmp (
-            const image_type& image,
+            const image_type& image_,
             std::ostream& out 
         )
         {
+            const_image_view<image_type> image(image_);
             // we are going to write out a 24bit color image.
             byte_orderer::kernel_1a bo;
 
@@ -127,10 +134,11 @@ namespace dlib
     struct save_bmp_helper<image_type,true>
     {
         static void save_bmp (
-            const image_type& image,
+            const image_type& image_,
             std::ostream& out
         )
         {
+            const_image_view<image_type> image(image_);
             // we are going to write out an 8bit color image.
             byte_orderer::kernel_1a bo;
 
@@ -225,7 +233,7 @@ namespace dlib
     template <
         typename image_type 
         >
-    inline void save_bmp (
+    inline typename disable_if<is_matrix<image_type> >::type save_bmp (
         const image_type& image,
         std::ostream& out
     )
@@ -233,36 +241,109 @@ namespace dlib
         save_bmp_helper<image_type>::save_bmp(image,out);
     }
 
+    template <
+        typename EXP 
+        >
+    inline void save_bmp (
+        const matrix_exp<EXP>& image,
+        std::ostream& out
+    )
+    {
+        array2d<typename EXP::type> temp;
+        assign_image(temp, image);
+        save_bmp_helper<array2d<typename EXP::type> >::save_bmp(temp,out);
+    }
+
 // ----------------------------------------------------------------------------------------
 
     namespace dng_helpers_namespace
     {
-
         template <
             typename image_type,
-            int pixel_type = static_switch <
-                pixel_traits<typename image_type::type>::grayscale && sizeof(typename image_type::type) == 1,
-                pixel_traits<typename image_type::type>::rgb,
-                pixel_traits<typename image_type::type>::hsi,
-                false,
-                pixel_traits<typename image_type::type>::rgb_alpha,
-                false,
-                pixel_traits<typename image_type::type>::grayscale && sizeof(typename image_type::type) != 1
-                >::value
+            typename enabled = void
             >
         struct save_dng_helper;
 
         typedef entropy_encoder::kernel_2a encoder_type;
         typedef entropy_encoder_model<256,encoder_type>::kernel_5a eem_type; 
 
+        typedef entropy_encoder_model<256,encoder_type>::kernel_4a eem_exp_type; 
+
         template <typename image_type >
-        struct save_dng_helper<image_type, grayscale_16bit>
+        struct save_dng_helper<image_type, typename enable_if<is_float_type<typename image_traits<image_type>::pixel_type> >::type >
         {
             static void save_dng (
-                const image_type& image,
+                const image_type& image_,
                 std::ostream& out 
             )
             {
+                const_image_view<image_type> image(image_);
+                out.write("DNG",3);
+                unsigned long version = 1;
+                serialize(version,out);
+                unsigned long type = grayscale_float;
+                serialize(type,out);
+                serialize(image.nc(),out);
+                serialize(image.nr(),out);
+
+
+                // Write the compressed exponent data into expbuf.  We will append it
+                // to the stream at the end of the loops.
+                std::vector<char> expbuf;
+                expbuf.reserve(image.size()*2);
+                vectorstream outexp(expbuf);
+                encoder_type encoder;
+                encoder.set_stream(outexp);
+
+                eem_exp_type eem_exp(encoder);
+                float_details prev;
+                for (long r = 0; r < image.nr(); ++r)
+                {
+                    for (long c = 0; c < image.nc(); ++c)
+                    {
+                        float_details cur = image[r][c];
+                        int16 exp = cur.exponent-prev.exponent;
+                        int64 man = cur.mantissa-prev.mantissa;
+                        prev = cur;
+
+                        unsigned char ebyte1 = exp&0xFF;
+                        unsigned char ebyte2 = exp>>8;
+                        eem_exp.encode(ebyte1);
+                        eem_exp.encode(ebyte2);
+
+                        serialize(man, out);
+                    }
+                }
+                // write out the magic byte to mark the end of the compressed data.
+                eem_exp.encode(dng_magic_byte);
+                eem_exp.encode(dng_magic_byte);
+                eem_exp.encode(dng_magic_byte);
+                eem_exp.encode(dng_magic_byte);
+
+                encoder.clear();
+                serialize(expbuf, out);
+            }
+        };
+
+
+        template <typename image_type>
+        struct is_non_float_non8bit_grayscale
+        {
+            typedef typename image_traits<image_type>::pixel_type pixel_type;
+            const static bool value = pixel_traits<pixel_type>::grayscale && 
+                                      sizeof(pixel_type) != 1 && 
+                                      !is_float_type<pixel_type>::value;
+        };
+
+        template <typename image_type >
+        struct save_dng_helper<image_type, typename enable_if<is_non_float_non8bit_grayscale<image_type> >::type>
+        {
+            static void save_dng (
+                const image_type& image_,
+                std::ostream& out 
+            )
+            {
+                const_image_view<image_type> image(image_);
                 out.write("DNG",3);
                 unsigned long version = 1;
                 serialize(version,out);
@@ -296,15 +377,22 @@ namespace dlib
             }
         };
 
+        template <typename image_type>
+        struct is_8bit_grayscale
+        {
+            typedef typename image_traits<image_type>::pixel_type pixel_type;
+            const static bool value = pixel_traits<pixel_type>::grayscale && sizeof(pixel_type) == 1;
+        };
 
         template <typename image_type>
-        struct save_dng_helper<image_type, grayscale>
+        struct save_dng_helper<image_type, typename enable_if<is_8bit_grayscale<image_type> >::type>
         {
             static void save_dng (
-                const image_type& image,
+                const image_type& image_,
                 std::ostream& out 
             )
             {
+                const_image_view<image_type> image(image_);
                 out.write("DNG",3);
                 unsigned long version = 1;
                 serialize(version,out);
@@ -323,7 +411,8 @@ namespace dlib
                     {
                         unsigned char cur;
                         assign_pixel(cur, image[r][c]);
-                        eem.encode(cur - predictor_grayscale(image,r,c));
+                        cur -= predictor_grayscale(image,r,c);
+                        eem.encode(cur);
                     }
                 }
                 // write out the magic byte to mark the end of the data
@@ -335,13 +424,21 @@ namespace dlib
         };
 
         template <typename image_type>
-        struct save_dng_helper<image_type,rgb>
+        struct is_rgb_image
+        {
+            typedef typename image_traits<image_type>::pixel_type pixel_type;
+            const static bool value = pixel_traits<pixel_type>::rgb;
+        };
+
+        template <typename image_type>
+        struct save_dng_helper<image_type,typename enable_if<is_rgb_image<image_type> >::type>
         {
             static void save_dng (
-                const image_type& image,
+                const image_type& image_,
                 std::ostream& out
             )
             {
+                const_image_view<image_type> image(image_);
                 out.write("DNG",3);
                 unsigned long version = 1;
                 serialize(version,out);
@@ -400,13 +497,21 @@ namespace dlib
         };
 
         template <typename image_type>
-        struct save_dng_helper<image_type,rgb_alpha>
+        struct is_rgb_alpha_image
+        {
+            typedef typename image_traits<image_type>::pixel_type pixel_type;
+            const static bool value = pixel_traits<pixel_type>::rgb_alpha;
+        };
+
+        template <typename image_type>
+        struct save_dng_helper<image_type,typename enable_if<is_rgb_alpha_image<image_type> >::type>
         {
             static void save_dng (
-                const image_type& image,
+                const image_type& image_,
                 std::ostream& out
             )
             {
+                const_image_view<image_type> image(image_);
                 out.write("DNG",3);
                 unsigned long version = 1;
                 serialize(version,out);
@@ -467,13 +572,21 @@ namespace dlib
         };
 
         template <typename image_type>
-        struct save_dng_helper<image_type,hsi>
+        struct is_hsi_image
+        {
+            typedef typename image_traits<image_type>::pixel_type pixel_type;
+            const static bool value = pixel_traits<pixel_type>::hsi;
+        };
+
+        template <typename image_type>
+        struct save_dng_helper<image_type,typename enable_if<is_hsi_image<image_type> >::type>
         {
             static void save_dng (
-                const image_type& image,
+                const image_type& image_,
                 std::ostream& out
             )
             {
+                const_image_view<image_type> image(image_);
                 out.write("DNG",3);
                 unsigned long version = 1;
                 serialize(version,out);
@@ -513,7 +626,7 @@ namespace dlib
     template <
         typename image_type 
         >
-    inline void save_dng (
+    inline typename disable_if<is_matrix<image_type> >::type save_dng (
         const image_type& image,
         std::ostream& out
     )
@@ -522,8 +635,49 @@ namespace dlib
         save_dng_helper<image_type>::save_dng(image,out);
     }
 
+    template <
+        typename EXP 
+        >
+    inline void save_dng (
+        const matrix_exp<EXP>& image,
+        std::ostream& out
+    )
+    {
+        array2d<typename EXP::type> temp;
+        assign_image(temp, image);
+        using namespace dng_helpers_namespace;
+        save_dng_helper<array2d<typename EXP::type> >::save_dng(temp,out);
+    }
+
 // ----------------------------------------------------------------------------------------
 
+    template <typename image_type>
+    void save_dng (
+        const image_type& image,
+        const std::string& file_name
+    )
+    {
+        std::ofstream fout(file_name.c_str(), std::ios::binary);
+        if (!fout)
+            throw image_save_error("Unable to open " + file_name + " for writing.");
+        save_dng(image, fout);
+    }
+
+// ----------------------------------------------------------------------------------------
+
+    template <typename image_type>
+    void save_bmp (
+        const image_type& image,
+        const std::string& file_name
+    )
+    {
+        std::ofstream fout(file_name.c_str(), std::ios::binary);
+        if (!fout)
+            throw image_save_error("Unable to open " + file_name + " for writing.");
+        save_bmp(image, fout);
+    }
+
+// ----------------------------------------------------------------------------------------
 
 }
 
