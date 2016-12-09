@@ -1,5 +1,5 @@
 SRCMAKE=$(lastword $(MAKEFILE_LIST))
-SRC=$(realpath $(dir $(SRCMAKE)))
+SRC=$(realpath $(dir $(SRCMAKE)))/
 DATA=$(realpath $(SRC)/../data)
 
 # this creates a makefile including the source dir makefile in the current directory
@@ -29,11 +29,11 @@ PACKDIR=canupo_linux_static_64bits
 
 ifdef static
     CXXFLAGS+=-static -lpthread
-    CAIRO=-lcairo -lpixman-1 -lpng -lz -lfontconfig -lfreetype -lexpat -lpthread
-    LAPACK=./liblapack.a ./libblas.a -lgfortran -lpthread
+    CAIRO=-lcairo -lpixman-1 -lpng -lz -lfontconfig -lfreetype -lexpat
+    #LAPACK=./liblapack.a ./libblas.a -lgfortran -lpthread
+    LAPACK=-llapack -lblas -lgfortran -lpthread -lquadmath
     PACKDIR=canupo_linux_static_64bits
-    CXX=g++-4.6
-    no_openmp=1
+    #no_openmp=1
 endif
 
 ifndef no_openmp
